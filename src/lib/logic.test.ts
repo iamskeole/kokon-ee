@@ -12,13 +12,8 @@ import {
   activeLoras, activeOverrides, buildRequest, composing, editing, reviewRequest, wantsPromptReview, toggleLora, MAX_LORAS, jobPercent, compareBase, composerFromRecord, diffPixels, emptyComposer, expansionPixels, expansionPreset, jobLabel, jobSecondsLeft, lutInfo, moveRef, needsPrompt, normalizeQuality, persistentAdvanced, pipelineSummary,
   planPipeline, remainingSeconds, sizeForWidth, timeAgo, upscaleRequest, upscaleTargets, versionLabels, type JobClock, type Ref,
   neighbourAfterRemoval, pageOutdated, previewIndex, starPromptDue, STAR_PROMPT_AFTER, formatBytes, formatDuration, installItemShort, installItemText, installProgress, installStep, installTimeLeft, timelineLinks, undoTarget, aspectLabel, parseRatio, sizeForRatio, sizeForLongSide, expandToRatio, expandToSize, arcLayout,
-<<<<<<< HEAD
   goneVersions, moreLikeThisRequest, MORE_LIKE_THIS, PREVIEW_SIDE, stageFitsPreview, viewerWantsFull,
-  modelRequest, entryForModel,
-=======
-  goneVersions, PREVIEW_SIDE, stageFitsPreview, viewerWantsFull,
   modelRequest, entryForModel, boxRows, appendBoxTable, splitBoxTable, modelSupportsBoxes, type BoxRow,
->>>>>>> cffeb3e (UI: the layout-box editor - draw, describe and place things (klein))
 } from "./logic";
 import type { GenerationRecord, InstallItem, JobView, LoraItem, Plan } from "./types";
 
@@ -857,9 +852,6 @@ describe("entryForModel", () => {
   });
   it("is null when there are no models", () => expect(entryForModel([], "m-turbo.gguf")).toBeNull());
 });
-<<<<<<< HEAD
->>>>>>> bd32548 (External engine: the picker lists models, not flavors (config `models`, schema 12; the old key still reads; route `/models/switch`))
-=======
 
 describe("layout boxes", () => {
   const rect = { x1: 0.1, y1: 0.2, x2: 0.3, y2: 0.4 };
@@ -954,4 +946,3 @@ describe("layout boxes", () => {
     expect(splitBoxTable("a lamp")).toBeNull();
   });
 });
->>>>>>> cffeb3e (UI: the layout-box editor - draw, describe and place things (klein))

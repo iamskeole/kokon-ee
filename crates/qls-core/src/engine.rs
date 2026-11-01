@@ -1679,7 +1679,14 @@ impl Engine {
         let req = if detail { enhancer::detailed(req, mode) } else { req };
         let mut text = String::new();
         let mut last_emit = Instant::now();
-        let on_delta = |d: &str| {
+        // When a retry replaces a degenerate answer, the stream restarts from empty. (An
+        // AtomicBool, not a Cell: the closure borrows this and the async fn must stay
+        // Send for the worker task.)
+        let reset = std::sync::atomic::AtomicBool::new(false);
+        let mut on_delta = |d: &str| {
+            if reset.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                text.clear();
+            }
             text.push_str(d);
             // The UI follows the text at ~10 updates a second.
             if last_emit.elapsed() >= Duration::from_millis(100) {
@@ -1688,7 +1695,41 @@ impl Engine {
                 self.update(id, |j| j.view.enhanced_prompt = Some(partial));
             }
         };
-        let r = client.text_gen(&req, Duration::from_secs(300), on_delta, || self.is_cancelled(id)).await;
+        let mut r = client
+            .text_gen(&req, Duration::from_secs(300), &mut on_delta, || {
+                self.is_cancelled(id)
+            })
+            .await;
+        // A degenerate answer (the table without a caption, or the user's own words
+        // echoed back) is what the first call on a cold upsampler does. Running it
+        // once more, warm, fixes it - do not fail the job over it.
+        let mut degenerate: Option<&'static str> = match &r {
+            Ok(done) => {
+                boxes.as_ref().and_then(|b| enhancer::degenerate_answer(&b.original, &done.text))
+            }
+            Err(_) => None,
+        };
+        if let Some(why) = degenerate {
+            tracing::info!("prompt enhancer: degenerate answer ({why}); retrying once");
+            // Greedy sampling with the same seed would just write the same answer - nudge
+            // the seed so the warm retry can differ.
+            let mut retry = req.clone();
+            retry.sampling.seed += 1;
+            // The UI has been following the first answer - restart the stream on the new one.
+            reset.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.update(id, |j| j.view.enhanced_prompt = Some(String::new()));
+            r = client
+                .text_gen(&retry, Duration::from_secs(300), &mut on_delta, || {
+                    self.is_cancelled(id)
+                })
+                .await;
+            degenerate = match &r {
+                Ok(done) => {
+                    boxes.as_ref().and_then(|b| enhancer::degenerate_answer(&b.original, &done.text))
+                }
+                Err(_) => None,
+            };
+        }
         let failure = match r {
             Ok(done) => {
                 let written: Option<String> = match &boxes {
@@ -1722,6 +1763,34 @@ impl Engine {
                         done.finish_reason,
                         done.seed
                     );
+                    let cut = done.finish_reason == "length";
+                    self.update(id, |j| {
+                        j.view.enhanced_prompt = Some(t.clone());
+                        j.enhanced = Some(t.clone());
+                        if cut {
+                            j.view.notes.push("The prompt enhancer reached its length limit; its prompt may end abruptly.".into());
+                        }
+                    });
+                    return Ok(Some(t));
+                    }
+                    None => degenerate
+                        .map(|w| format!("{w} - twice"))
+                        .unwrap_or_else(|| "it wrote nothing".to_string()),
+                }
+            },
+            Err(e) if e.code == ErrorCode::Cancelled => return Err(e),
+            Err(e) => {
+                if self.server.owned_alive() == Some(false) {
+                    let tail = self.server.log.tail(30).join("\n");
+                    self.server.mark_lost(AppError::new(
+                        ErrorCode::ServerCrashed,
+                        "The inference server stopped unexpectedly.",
+                    ));
+                    self.emit_server();
+                    return Err(AppError::new(ErrorCode::ServerCrashed, "The inference server stopped while writing the prompt.")
+                        .suggest("It will restart automatically on the next job. Turn the prompt enhancer off if it happens again.")
+                        .detail(tail));
+                }
                 tracing::warn!("prompt enhancer failed: {} {:?}", e.message, e.detail);
                 e.detail.clone().map(|d| format!("{} {d}", e.message)).unwrap_or(e.message)
             }
@@ -2539,6 +2608,75 @@ mod tests {
         let id = submit();
         assert_eq!(e.read_scene(&id, &SdcppClient::new(1), &Capabilities::default(), "Woman", &images, 5).await.unwrap(), None);
         assert!(e.job(&id).unwrap().notes.last().unwrap().contains("cannot read the scene"));
+    }
+
+    #[tokio::test]
+    async fn degenerate_first_answer_is_retried_once_and_the_second_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: test-only env override, single-threaded setup.
+        unsafe { std::env::set_var("QLS_CONFIG_DIR", dir.path().join("cfg")) };
+        let mut cfg = AppConfig::default();
+        cfg.sdcpp_dir = dir.path().join("sdcpp");
+        cfg.normalize();
+        std::fs::create_dir_all(cfg.engine_dir()).unwrap();
+        std::fs::write(cfg.server_exe(), b"").unwrap();
+        for (_, p, _) in cfg.profile().files() {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, b"").unwrap();
+        }
+        let e = Engine::new(cfg.clone(), dir.path()).unwrap();
+        let caps = Capabilities {
+            text_generation: true,
+            ..Default::default()
+        };
+        // The cold first call echoes the request back (the 11:29 T4 shape); the warm retry
+        // writes a real caption citing the removal.
+        const ECHO: &str = "remove the lamp from the shelf [{\"id\":\"lamp\",\"from\":\"ref_image_0\",\"src_bbox\":[10,20,30,40],\"tgt_bbox\":null,\"desc\":\"a brass lamp\"}]";
+        const GOOD: &str = "The shelf stays lit; remove the brass lamp <lamp>. The books keep their places. [{\"id\":\"lamp\",\"from\":\"ref_image_0\",\"src_bbox\":[10,20,30,40],\"tgt_bbox\":null,\"desc\":\"a brass lamp\"}]";
+        let (port, seen) = fake_text_server(vec![ECHO, GOOD]).await;
+        let id = e
+            .submit(
+                GenerationRequest {
+                    prompt: "x".into(),
+                    enhance: true,
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap()
+            .id;
+        let out = e
+            .enhance_prompt(
+                &id,
+                &SdcppClient::new(port),
+                &caps,
+                &cfg,
+                "kokon-klein",
+                ResolvedMode::Edit,
+                ECHO,
+                &["PNG1".to_string()],
+                None,
+                9,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        let (cap, rows) = bbox::split(out.as_deref().unwrap());
+        assert_eq!(
+            cap,
+            "The shelf stays lit; remove the brass lamp <lamp>. The books keep their places."
+        );
+        assert_eq!(rows.as_ref().unwrap()[0]["id"].as_str(), Some("lamp"));
+        // Two upsampler calls: the cold echo, then the warm retry (with a nudged seed -
+        // greedy sampling would repeat the echo otherwise).
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0]["system_prompt"], enhancer::BFL_I2I_BBOX_SYSTEM_PROMPT);
+        assert_eq!(
+            seen[1]["sampling"]["seed"].as_i64(),
+            seen[0]["sampling"]["seed"].as_i64().map(|s| s + 1)
+        );
     }
 
     #[test]
