@@ -11,6 +11,7 @@ use image::GrayImage;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, broadcast};
 
+use crate::bbox;
 use crate::config::{AppConfig, LoraEntry};
 use crate::diagnostics::{GpuInfo, query_gpus};
 use crate::enhancer;
@@ -1632,6 +1633,12 @@ impl Engine {
             self.update(id, |j| j.view.notes.push("This inference engine has no prompt enhancer (update it in Setup); your prompt was used as written.".into()));
             return Ok(None);
         }
+        // BFL layout boxes: a finished caption (every table id cited) is the upsampler's
+        // own output. BFL skips re-upsampling it, and the DiT gets the table as written.
+        let boxes = enhancer::bfl_bbox(model, mode, prompt, canvas);
+        if boxes.as_ref().is_some_and(|b| b.finished) {
+            return Ok(Some(prompt.to_string()));
+        }
         self.update(id, |j| {
             j.view.status = JobStatus::EnhancingPrompt;
             j.view.stage = None;
@@ -1683,31 +1690,26 @@ impl Engine {
         };
         let r = client.text_gen(&req, Duration::from_secs(300), on_delta, || self.is_cancelled(id)).await;
         let failure = match r {
-            Ok(done) => match enhancer::clean(&done.text) {
-                Some(t) => {
-                    tracing::info!("prompt enhancer: {} tokens in {:.1} s ({}, seed {})", done.usage.completion_tokens, started.elapsed().as_secs_f32(), done.finish_reason, done.seed);
-                    let cut = done.finish_reason == "length";
-                    self.update(id, |j| {
-                        j.view.enhanced_prompt = Some(t.clone());
-                        j.enhanced = Some(t.clone());
-                        if cut {
-                            j.view.notes.push("The prompt enhancer reached its length limit; its prompt may end abruptly.".into());
-                        }
-                    });
-                    return Ok(Some(t));
-                }
-                None => "it wrote nothing".to_string(),
-            },
-            Err(e) if e.code == ErrorCode::Cancelled => return Err(e),
-            Err(e) => {
-                if self.server.owned_alive() == Some(false) {
-                    let tail = self.server.log.tail(30).join("\n");
-                    self.server.mark_lost(AppError::new(ErrorCode::ServerCrashed, "The inference server stopped unexpectedly."));
-                    self.emit_server();
-                    return Err(AppError::new(ErrorCode::ServerCrashed, "The inference server stopped while writing the prompt.")
-                        .suggest("It will restart automatically on the next job. Turn the prompt enhancer off if it happens again.")
-                        .detail(tail));
-                }
+            Ok(done) => {
+                let written: Option<String> = match &boxes {
+                    // The upsampler answered: the user's boxes go back in. A row that
+                    // re-plans a locked box (IoU ≥ 0.9) takes the locked id, the locked
+                    // rows stay verbatim (adopting its descriptions), its own rows follow.
+                    Some(b) => {
+                        let (caption, _) = bbox::split(&done.text);
+                        (!caption.trim().is_empty()).then(|| bbox::reconcile(&done.text, &b.locked))
+                    }
+                    None => enhancer::clean(&done.text),
+                };
+                match written {
+                    Some(t) => {
+                    tracing::info!(
+                        "prompt enhancer: {} tokens in {:.1} s ({}, seed {})",
+                        done.usage.completion_tokens,
+                        started.elapsed().as_secs_f32(),
+                        done.finish_reason,
+                        done.seed
+                    );
                 tracing::warn!("prompt enhancer failed: {} {:?}", e.message, e.detail);
                 e.detail.clone().map(|d| format!("{} {d}", e.message)).unwrap_or(e.message)
             }
