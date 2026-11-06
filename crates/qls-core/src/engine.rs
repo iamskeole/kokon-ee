@@ -1322,8 +1322,13 @@ impl Engine {
         // Whether the running server can use the upscaler (an engine older than MoSR lists the
         // file but cannot run it; an external server may lack --hires-upscalers-dir):
         // enlargements fall back to Lanczos. Fresh, because the server rescans the folder.
-        let client = SdcppClient::new_url(cfg.engine_base_url());
-        let caps = client.capabilities(Duration::from_secs(5)).await.ok().or_else(|| self.server.capabilities()).unwrap_or_default();
+        let client = SdcppClient::new_url(cfg.engine_base_url()).with_api_key(cfg.engine_api_key());
+        let caps = client
+            .capabilities(Duration::from_secs(5))
+            .await
+            .ok()
+            .or_else(|| self.server.capabilities())
+            .unwrap_or_default();
         let esrgan = plan.upscaler.clone().filter(|n| caps.has_upscaler(n, true));
         let needs_esrgan = plan.upscale.is_some() || plan.output.area() as f64 > plan.content.area() as f64 * 1.21;
         if needs_esrgan && plan.upscaler.is_some() && esrgan.is_none() {
@@ -2809,6 +2814,7 @@ mod tests {
         // pipeline (the gateway in the cfg is unused by this call).
         cfg.external_engine = Some(crate::config::ExternalEngine {
             gateway: "http://127.0.0.1:9".into(),
+            api_key: String::new(),
             model: "kokon-klein".into(),
             model_name: "flux3-image-klein-Q8_0.gguf".into(),
             sample: serde_json::json!({}),
@@ -3207,6 +3213,7 @@ mod tests {
         let mut cfg = cfg;
         cfg.external_engine = Some(ExternalEngine {
             gateway: "http://127.0.0.1:8081/upstream".into(),
+            api_key: String::new(),
             model: "kokon-klein".into(),
             model_name: "flux3-image-klein-Q8_0.gguf".into(),
             sample: serde_json::json!({}),
