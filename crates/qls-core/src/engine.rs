@@ -99,6 +99,10 @@ pub struct JobView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scene: Option<crate::scene::SceneReading>,
     pub client: Option<String>,
+    /// The owner (multi-user): the `users` table's name; None = the operator's or a token's
+    /// job. A named account sees and touches only the jobs carrying its own name (D-MU6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
     pub plan: Option<Plan>,
     pub seed: Option<i64>,
     pub results: Vec<GenerationRecord>,
@@ -323,6 +327,15 @@ impl Engine {
     }
 
     /// Replaces the configuration. Returns true when the backend must restart.
+    /// The multi-user gate (D-MU3): set by the users endpoints only — every settings save
+    /// keeps the stored value (see [`Self::set_config`]).
+    pub fn set_multi_user(&self, on: bool) -> AppResult<()> {
+        let mut cfg = self.cfg.write().unwrap();
+        cfg.multi_user = on;
+        cfg.save()?;
+        Ok(())
+    }
+
     pub fn set_config(&self, mut new: AppConfig) -> AppResult<bool> {
         // LoRAs change only through `set_loras`, network access only through `set_remote`,
         // and the gateway/VLM keys never through the UI (a Settings save may carry older or
@@ -332,6 +345,9 @@ impl Engine {
             new.loras = cur.loras.clone();
             new.remote_access = cur.remote_access;
             new.remote_port = cur.remote_port;
+            // The multi-user gate is set only by the users endpoints (D-MU3); a settings save
+            // keeps the stored value.
+            new.multi_user = cur.multi_user;
             new.absorb_secrets(&cur);
         }
         // The official profile follows the folder and preset; see `AppConfig::normalize`.
@@ -574,7 +590,15 @@ impl Engine {
 
     /// Ends private mode: forgets every private record and deletes its files.
     pub fn clear_private(&self) -> AppResult<usize> {
-        let (items, _) = self.private_store.list_generations(&crate::store::ListQuery { limit: Some(500), ..Default::default() })?;
+        let (items, _) = self
+            .private_store
+            .list_generations(
+                &crate::store::ListQuery {
+                    limit: Some(500),
+                    ..Default::default()
+                },
+                &crate::store::OwnerFilter::All,
+            )?;
         self.private_store.clear()?;
         let mut removed = 0;
         for sub in ["inputs", "thumbs", "out"] {
@@ -794,7 +818,38 @@ impl Engine {
 
     /// Validates cheaply and enqueues. `workspace` is the caller's project folder (MCP),
     /// used to resolve relative paths and as an allowed output root.
-    pub fn submit(&self, mut request: GenerationRequest, workspace: Option<PathBuf>) -> AppResult<JobView> {
+    /// Multi-user (D-MU8): a named account's job references as `gen:` only rows that carry
+    /// its own name (another's is a 404, no existence leak); the operator's and a token's
+    /// jobs (no user) reference anything.
+    fn check_source_ownership(&self, request: &GenerationRequest) -> AppResult<()> {
+        if self.config().multi_user
+            && let Some(u) = request.user.as_deref()
+        {
+            let gens = request
+                .images
+                .iter()
+                .chain(request.mask.iter())
+                .chain(request.marks.iter())
+                .chain(request.parent_id.iter())
+                .filter_map(|s| s.strip_prefix("gen:"));
+            for id in gens {
+                let rec = self.gen_store(id).get_generation(id)?;
+                if rec.user.as_deref() != Some(u) {
+                    return Err(AppError::new(
+                        ErrorCode::NotFound,
+                        "That image is no longer in the gallery.",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn submit(
+        &self,
+        mut request: GenerationRequest,
+        workspace: Option<PathBuf>,
+    ) -> AppResult<JobView> {
         self.touch();
         let upscale = request.mode == Mode::Upscale;
         // Removing a painted area needs no description (the planner writes the prompt), nor does
@@ -823,6 +878,10 @@ impl Engine {
         {
             request.seed = None;
         }
+        // Multi-user (D-MU8): a named account's job. Its results go to its own folder, and it
+        // may reference as `gen:` only rows that carry its own name (another's is a 404, no
+        // existence leak). Operator and token jobs (no user) reference anything.
+        self.check_source_ownership(&request)?;
         let id = format!("job_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
         let view = JobView {
             id: id.clone(),
@@ -844,6 +903,7 @@ impl Engine {
             suggested_ratio: None,
             scene: None,
             client: request.client.clone(),
+            user: request.user.clone(),
             plan: None,
             seed: request.seed,
             results: vec![],
@@ -1037,8 +1097,14 @@ impl Engine {
     /// Applies a library LUT to a "gen:"/"input:" source at `intensity` (0-1) and saves the
     /// result as a new version made from it (mode "lut"; the source stays as it is). Private
     /// when asked or when the source itself is private. Same file format as a source result.
-    /// `project`: the title of the app's project it joins (its folder with `project_folders`).
-    pub fn apply_lut(&self, src: &str, name: &str, intensity: f32, private: bool, project: Option<&str>) -> AppResult<GenerationRecord> {
+    pub fn apply_lut(
+        &self,
+        src: &str,
+        name: &str,
+        intensity: f32,
+        private: bool,
+        user: Option<&str>,
+    ) -> AppResult<GenerationRecord> {
         let started = Instant::now();
         let library = self.luts();
         let lut = library.load(name)?;
@@ -1047,6 +1113,16 @@ impl Engine {
             None if src.starts_with("input:") => None,
             None => return Err(AppError::new(ErrorCode::InvalidInput, "LUTs apply to results and imported images.")),
         };
+        // Multi-user (D-MU8): a named account applies its LUT to its own results only.
+        if let Some(u) = user
+            && let Some(p) = &parent
+            && p.user.as_deref() != Some(u)
+        {
+            return Err(AppError::new(
+                ErrorCode::NotFound,
+                "That image is no longer in the gallery.",
+            ));
+        }
         let source_private = match (&parent, src.strip_prefix("input:")) {
             (Some(p), _) => Arc::ptr_eq(self.gen_store(&p.id), &self.private_store),
             (None, Some(id)) => Arc::ptr_eq(self.input_store(id), &self.private_store),
@@ -1061,10 +1137,27 @@ impl Engine {
         let cfg = self.config();
         let id = new_id();
         let now = chrono::Local::now();
-        let store = if private { &self.private_store } else { &self.store };
-        let (dir, time) = if private { (self.private_dir.join("out"), now.format("%H%M%S").to_string()) } else { output_place(&cfg, project, &now) };
-        std::fs::create_dir_all(&dir).map_err(|e| AppError::io("create the output folder", &dir, e))?;
-        let format = match parent.as_ref().and_then(|p| Path::new(&p.file_path).extension()).map(|e| e.to_string_lossy().to_ascii_lowercase()).as_deref() {
+        let store = if private {
+            &self.private_store
+        } else {
+            &self.store
+        };
+        let dir = if private {
+            self.private_dir.join("out")
+        } else {
+            let base = user
+                .map(|u| cfg.output_dir.join(u))
+                .unwrap_or_else(|| cfg.output_dir.clone());
+            base.join(now.format("%Y-%m-%d").to_string())
+        };
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| AppError::io("create the output folder", &dir, e))?;
+        let format = match parent
+            .as_ref()
+            .and_then(|p| Path::new(&p.file_path).extension())
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .as_deref()
+        {
             Some("jpg" | "jpeg") => OutputFormat::Jpeg,
             Some("webp") => OutputFormat::Webp,
             _ => OutputFormat::Png,
@@ -1106,6 +1199,7 @@ impl Engine {
             app_version: APP_VERSION.into(),
             backend_version: None,
             client: None,
+            user: user.map(str::to_owned),
             request: serde_json::json!({
                 "mode": "lut",
                 "images": [src],
@@ -1134,13 +1228,22 @@ impl Engine {
     /// Saves the layers lab's flattened image (`image`, an "input:" upload) as a gallery result
     /// made from `from` (the image that was split): mode "layers", PNG. Private when asked or
     /// when `from` is private.
-    /// `project` as in [`Self::apply_lut`].
-    pub fn save_layers(&self, image: &str, from: Option<&str>, private: bool, project: Option<&str>) -> AppResult<GenerationRecord> {
+    pub fn save_layers(&self, image: &str, from: Option<&str>, private: bool, user: Option<&str>) -> AppResult<GenerationRecord> {
         let parent = match from.and_then(|f| f.strip_prefix("gen:")) {
             Some(id) => self.gen_store(id).get_generation(id).ok(),
             None => None,
         };
         let private = private || parent.as_ref().is_some_and(|p| Arc::ptr_eq(self.gen_store(&p.id), &self.private_store));
+        // Multi-user (D-MU8): the image the lab was opened on must be the user's own.
+        if let Some(u) = user
+            && let Some(p) = &parent
+            && p.user.as_deref() != Some(u)
+        {
+            return Err(AppError::new(
+                ErrorCode::NotFound,
+                "That image is no longer in the gallery.",
+            ));
+        }
         let (img, flat) = self.resolve_source(image, None, private)?;
         // Compare's "before" is the photo the lab was opened on, not the saved image itself.
         let input = from.and_then(|f| self.resolve_source(f, None, private).ok()).map(|(_, r)| r).unwrap_or(flat);
@@ -1148,7 +1251,14 @@ impl Engine {
         let id = new_id();
         let now = chrono::Local::now();
         let store = if private { &self.private_store } else { &self.store };
-        let (dir, time) = if private { (self.private_dir.join("out"), now.format("%H%M%S").to_string()) } else { output_place(&cfg, project, &now) };
+        let dir = if private {
+            self.private_dir.join("out")
+        } else {
+            let base = user
+                .map(|u| cfg.output_dir.join(u))
+                .unwrap_or_else(|| cfg.output_dir.clone());
+            base.join(now.format("%Y-%m-%d").to_string())
+        };
         std::fs::create_dir_all(&dir).map_err(|e| AppError::io("create the output folder", &dir, e))?;
         let file = paths::unique_path(dir.join(format!("{time}-layers.png")), &[]);
         let out = img.pixels;
@@ -1187,6 +1297,7 @@ impl Engine {
             app_version: APP_VERSION.into(),
             backend_version: None,
             client: None,
+            user: user.map(str::to_owned),
             // `images`: what it was made from, as for other versions (the project's lineage).
             request: serde_json::json!({ "mode": "layers", "images": [from.unwrap_or(image)], "layers_image": image, "parent_id": parent.as_ref().map(|p| p.id.clone()), "private": private }),
             pipeline: None,
@@ -1220,7 +1331,14 @@ impl Engine {
     }
 
     /// Dry run: the plan a request would get (used by the UI to show working sizes).
-    pub fn preview_plan(&self, req: &GenerationRequest, sizes: Vec<Size>, mask: Option<(Size, Option<crate::geometry::Rect>, f64)>) -> AppResult<Plan> {
+    pub fn preview_plan(
+        &self,
+        req: &GenerationRequest,
+        sizes: Vec<Size>,
+        mask: Option<(Size, Option<crate::geometry::Rect>, f64)>,
+    ) -> AppResult<Plan> {
+        // Multi-user (D-MU8): the dry run obeys the same ownership rule as the submit.
+        self.check_source_ownership(req)?;
         let cfg = self.config();
         let vram = self.planning_vram(&cfg);
         let mut inputs = plan_inputs(&cfg, sizes, mask, vram);
@@ -2272,9 +2390,25 @@ impl Engine {
         let cfg = self.config();
         let id = new_id();
         let now = chrono::Local::now();
-        let store = if req.private { &self.private_store } else { &self.store };
-        let (dir, time) = if req.private { (self.private_dir.join("out"), now.format("%H%M%S").to_string()) } else { output_place(&cfg, req.project.as_deref(), &now) };
-        std::fs::create_dir_all(&dir).map_err(|e| AppError::io("create the output folder", &dir, e))?;
+        let store = if req.private {
+            &self.private_store
+        } else {
+            &self.store
+        };
+        let dir = if req.private {
+            self.private_dir.join("out")
+        } else {
+            // Multi-user (D-MU5): the user's own folder in the gallery — "their Pictures"; the
+            // database is the source of ownership, this is where their files live.
+            let base = req
+                .user
+                .as_ref()
+                .map(|u| cfg.output_dir.join(u))
+                .unwrap_or_else(|| cfg.output_dir.clone());
+            base.join(now.format("%Y-%m-%d").to_string())
+        };
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| AppError::io("create the output folder", &dir, e))?;
         let words: Vec<&str> = req.prompt.split_whitespace().take(6).collect();
         let stem = format!("{time}-{}-{seed}", paths::sanitize_file_stem(&words.join(" ")));
         // HDR from a HEIC source forces an Ultra HDR JPEG; otherwise the requested format.
@@ -2362,6 +2496,7 @@ impl Engine {
             app_version: APP_VERSION.into(),
             backend_version: self.backend_version.get(),
             client: req.client.clone(),
+            user: req.user.clone(),
             request: serde_json::to_value(req).unwrap_or_default(),
             pipeline,
             hidden: req.hidden,
@@ -3137,12 +3272,27 @@ mod tests {
         assert!(e.store.get_generation(&rec.id).is_ok());
 
         // A result of a result keeps its format and parent; private sources stay private.
-        let again = e.apply_lut(&format!("gen:{}", rec.id), &lut.name, 1.0, false, None).unwrap();
+        let again = e
+            .apply_lut(&format!("gen:{}", rec.id), &lut.name, 1.0, false, None)
+            .unwrap();
         assert_eq!(again.parent_id.as_deref(), Some(rec.id.as_str()));
-        let other = imaging::encode_png(&image::RgbaImage::from_pixel(4, 4, image::Rgba([1, 2, 3, 255])), &[], None, false).unwrap();
-        let secret = e.private_store.put_input(&other, Some("secret.png"), None).unwrap();
-        let p = e.apply_lut(&format!("input:{}", secret.id), &lut.name, 1.0, false, None).unwrap();
-        assert!(e.store.get_generation(&p.id).is_err() && e.private_store.get_generation(&p.id).is_ok());
+        let other = imaging::encode_png(
+            &image::RgbaImage::from_pixel(4, 4, image::Rgba([1, 2, 3, 255])),
+            &[],
+            None,
+            false,
+        )
+        .unwrap();
+        let secret = e
+            .private_store
+            .put_input(&other, Some("secret.png"), None)
+            .unwrap();
+        let p = e
+            .apply_lut(&format!("input:{}", secret.id), &lut.name, 1.0, false, None)
+            .unwrap();
+        assert!(
+            e.store.get_generation(&p.id).is_err() && e.private_store.get_generation(&p.id).is_ok()
+        );
         assert!(Path::new(&p.file_path).starts_with(dir.path().join("private")));
         assert!(e.apply_lut("C:/x.png", &lut.name, 1.0, false, None).is_err());
         assert!(e.apply_lut(&src, "missing", 1.0, false, None).is_err());
