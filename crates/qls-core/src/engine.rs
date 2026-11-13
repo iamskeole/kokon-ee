@@ -125,11 +125,27 @@ struct Job {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    Job { job: Box<JobView> },
-    Server { state: ServerState, owned: bool, error: Option<AppError>, model: Option<String> },
-    Gallery { id: String, change: &'static str },
-    /// A project changed (`rev`) or was removed: the other devices reload it.
-    Projects { id: String, rev: u64, deleted: bool },
+    Job {
+        job: Box<JobView>,
+    },
+    Server {
+        state: ServerState,
+        owned: bool,
+        error: Option<AppError>,
+        model: Option<String>,
+    },
+    Gallery {
+        id: String,
+        change: &'static str,
+    },
+    /// A project changed (`rev`) or was removed: the other devices reload it. `user` is
+    /// the owner name (multi-user, D-MU13): a named account hears only its own projects.
+    Projects {
+        id: String,
+        rev: u64,
+        deleted: bool,
+        user: Option<String>,
+    },
     /// Settings → Performance → Benchmark this Mac.
     MacBench { bench: crate::mac_bench::BenchState },
 }
@@ -563,15 +579,20 @@ impl Engine {
     }
 
     /// The records of project `id`'s versions (see [`crate::projects::Records`]), from either
-    /// store; `None` for an unknown project.
-    pub fn project_records(&self, id: &str) -> Option<crate::projects::Records> {
-        let p = self.projects.get(id)?;
+    /// store; `None` for an unknown project, or one this caller may not see (a named
+    /// account sees only its own, D-MU13). A named caller also gets only the rows it owns —
+    /// a project's items are a client-controlled list of references, and a stuffed `gen:` id
+    /// must not surface another's record. The inputs stay shared (the machine's file area).
+    pub fn project_records(&self, id: &str, user: Option<&str>) -> Option<crate::projects::Records> {
+        let p = self.projects.get_for(id, user)?;
         let mut out = crate::projects::Records::default();
         for i in &p.items {
             if let Some(g) = &i.gen_id
                 && let Ok(r) = self.gen_store(g).get_generation(g)
             {
-                out.generations.insert(g.clone(), r);
+                if user.is_none() || r.user.as_deref() == user {
+                    out.generations.insert(g.clone(), r);
+                }
             }
             if let Some(r) = &i.input_id
                 && let Ok(rec) = self.input_store(r).get_input(r)
@@ -762,7 +783,12 @@ impl Engine {
 
     pub fn emit_projects(&self, changes: Vec<crate::projects::Change>) {
         for c in changes {
-            let _ = self.events.send(Event::Projects { id: c.id, rev: c.rev, deleted: c.deleted });
+            let _ = self.events.send(Event::Projects {
+                id: c.id,
+                rev: c.rev,
+                deleted: c.deleted,
+                user: c.user,
+            });
         }
     }
 
@@ -3383,17 +3409,62 @@ mod tests {
             item("gone", "gen", Some("deleted"), None),
             item("j", "job", None, None),
         ];
-        let meta = crate::projects::Meta { id: "p".into(), title: "t".into(), named: None, updated_at: 1.0, cover: None, count: 0 };
-        let project = crate::projects::Project { meta, items, selected: None, loras: None, rev: 0, extra: Default::default() };
-        e.projects.put("p", project, &Default::default()).unwrap();
-        let r = e.project_records("p").unwrap();
+        let meta = crate::projects::Meta {
+            id: "p".into(),
+            title: "t".into(),
+            named: None,
+            updated_at: 1.0,
+            cover: None,
+            count: 0,
+        };
+        let project = crate::projects::Project {
+            meta,
+            items,
+            selected: None,
+            loras: None,
+            rev: 0,
+            extra: Default::default(),
+        };
+        e.projects.put("p", project, &Default::default(), None).unwrap();
+        let r = e.project_records("p", None).unwrap();
         let mut gens: Vec<_> = r.generations.keys().cloned().collect();
         gens.sort();
         assert_eq!(gens, ["g1", "p1"], "a deleted version is left out");
         assert_eq!(r.generations["p1"].seed, 2);
         assert_eq!(r.inputs.len(), 1);
         assert_eq!(r.inputs[&input.id].original_name.as_deref(), Some("a.png"));
-        assert!(e.project_records("nope").is_none());
+        assert!(e.project_records("nope", None).is_none());
+        // Multi-user (D-MU13): a named caller sees only its own project and only the rows
+        // it owns — a reference to another's generation in its items surfaces nothing.
+        let mut rec = test_record("g2", 3, "g2.png");
+        rec.user = Some("alice".into());
+        e.store.insert_generation(&rec).unwrap();
+        let items = vec![item("a", "gen", Some("g1"), None), item("b", "gen", Some("g2"), None)];
+        let alice = crate::projects::Project {
+            meta: crate::projects::Meta {
+                id: "ap".into(),
+                title: "t".into(),
+                named: None,
+                updated_at: 1.0,
+                cover: None,
+                count: 0,
+            },
+            items,
+            selected: None,
+            loras: None,
+            rev: 0,
+            extra: Default::default(),
+        };
+        e.projects.put("ap", alice, &Default::default(), Some("alice")).unwrap();
+        let r = e.project_records("ap", Some("alice")).unwrap();
+        let gens: Vec<_> = r.generations.keys().cloned().collect();
+        assert_eq!(gens, ["g2"], "the shared reference is not its row");
+        assert!(e.project_records("ap", Some("bob")).is_none(), "not bob's project");
+        assert!(
+            e.project_records("p", Some("alice")).is_none(),
+            "the shared list is not its list"
+        );
+        assert_eq!(e.project_records("p", None).unwrap().generations.len(), 2);
     }
 
     #[test]
