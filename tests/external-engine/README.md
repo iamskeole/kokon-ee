@@ -39,14 +39,15 @@ killed on exit. Everything happens on loopback in a throwaway folder
 
 `run_multiuser_test.sh` is the multi-user proof (D-MU12): the same stack, with
 two named accounts signing in through curl cookie jars like browsers would.
-Fifty assertions, no GPU: both logins and the operator's shared-password login
+Seventy-one assertions, no GPU: both logins and the operator's shared-password login
 (the session says who), one job each through the gateway, the per-user job
 list/get/wait/cancel (another's job is a 404), the SSE stream dropping the
 other person's job events, gallery rows and files scoped to the owner's
-folder, cross-user 404s with no existence leak, the operator's `?user=`
-down-filters, user management refused to a named account, deleting an account
-taking its rows, files and session, and the gate off ending named sessions
-while the shared password keeps working.
+folder (a project's folder nests inside it — D-030-3, with the operator's
+keeping the stock layout), cross-user 404s with no existence leak, the
+operator's `?user=` down-filters, user management refused to a named account,
+deleting an account taking its rows, files and session, and the gate off
+ending named sessions while the shared password keeps working.
 
 ```sh
 QLS_BIN=$PWD/target/debug/kokon-service ./tests/external-engine/run_multiuser_test.sh

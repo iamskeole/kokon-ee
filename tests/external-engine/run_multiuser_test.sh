@@ -30,6 +30,7 @@ cat > "$D/config/config.json" <<EOF
   "serverPort": 39914,
   "setupComplete": true,
   "outputDir": "$D/gallery",
+  "projectFolders": true,
   "externalEngine": {
     "gateway": "http://127.0.0.1:$GW/upstream",
     "model": "kokon-qwen-image-2.1-turbo",
@@ -173,13 +174,24 @@ wait $SSEP2 2>/dev/null; sleep 0.3
 grep -q '"type":"projects","id":"p-alice"' "$D/sse-projects.log" && { echo "PASS: alice's stream carries her project"; pass=$((pass+1)); } || { echo "FAIL: alice's stream lacks her project"; fail=$((fail+1)); }
 grep -q '"id":"p-bob"' "$D/sse-projects.log" && { echo "FAIL: alice's stream carries bob's project"; fail=$((fail+1)); } || { echo "PASS: alice's stream drops bob's project"; pass=$((pass+1)); }
 
+echo "=== 7b. a project's folder nests under its owner (D-030-3) ==="
+# projectFolders is on for this run. A named account's job with a project title lands under
+# its own folder; a token job (no user) keeps the stock layout exactly — one folder per
+# project at the gallery root, byte-identical to upstream 0.12.1.
+JPA=$(curl -s -b "$JAR_A" -X POST -H "$CS" -H 'Content-Type: application/json' $S/jobs -d '{"prompt":"alice holiday","mode":"generate","quality":"fast","width":64,"height":64,"project":"Holiday: Rome"}' | jget "['id']")
+wait_job "$JAR_A" "$JPA"; check "alice's project job done" 0 $?
+JPO=$(curl -s -X POST -H "$H" -H 'Content-Type: application/json' $S/jobs -d '{"prompt":"operator op project","mode":"generate","quality":"fast","width":64,"height":64,"project":"Op Project"}' | jget "['id']")
+wait_job "$JAR_O" "$JPO"; check "operator's project job done" 0 $?
+check "alice's project file is in her project folder" "yes" "$(curl -s -b "$JAR_A" "$S/gallery?limit=1" | python3 -c "import json,sys,os;p=json.load(sys.stdin)['items'][0]['file_path'];print('yes' if '/alice/Holiday Rome/' in p and os.path.isfile(p) else 'no')")"
+check "the token project file is in the stock layout (no user folder)" "yes" "$(curl -s -b "$JAR_O" "$S/gallery?limit=1" | python3 -c "import json,sys,os;p=json.load(sys.stdin)['items'][0]['file_path'];print('yes' if '/Op Project/' in p and '/alice/' not in p and '/bob/' not in p and os.path.isfile(p) else 'no')")"
+
 echo "=== 8. deleting bob takes his rows, his files, his project and his session ==="
 R=$(curl -s -H "$H" -X DELETE $S/users/$BOBID)
 check "bob deleted, his two rows and his project removed" "bob 2 1" "$(echo "$R" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['deleted'], d['rows_removed'], d['projects_removed'], sep=' ')")"
 check "bob's project is gone from the list" 3 "$(curl -s -H "$H" $S/projects | python3 -c "import json,sys;print(len(json.load(sys.stdin)['projects']))")"
 check "bob is signed out" false "$(curl -s -b "$JAR_B" $S/auth/session | jb "['signed_in']")"
-check "alice still sees her two rows" 2 "$(curl -s -b "$JAR_A" $S/gallery | python3 -c "import json,sys;print(len(json.load(sys.stdin)['items']))")"
-check "bob's rows are gone for the operator" 2 "$(curl -s -b "$JAR_O" $S/gallery | python3 -c "import json,sys;print(len(json.load(sys.stdin)['items']))")"
+check "alice still sees her three rows" 3 "$(curl -s -b "$JAR_A" $S/gallery | python3 -c "import json,sys;print(len(json.load(sys.stdin)['items']))")"
+check "bob's rows are gone for the operator" 4 "$(curl -s -b "$JAR_O" $S/gallery | python3 -c "import json,sys;print(len(json.load(sys.stdin)['items']))")"
 N=$(find "$D/gallery/bob" -type f 2>/dev/null | wc -l)
 check "bob's files are gone from disk" 0 "$N"
 

@@ -1960,6 +1960,26 @@ mod tests {
     }
 
     #[test]
+    fn schema_migration_composition_box_config() {
+        // The live box config (task-030): schema 15, multiUser on, the fork-era idle default
+        // (15), external engine. 0.12.1's <11 idle step (15 -> 10) must not misfire on it —
+        // a value in a config this new is not the old default — and nothing else moves.
+        // (In external mode the value is inert anyway: the gateway's TTL is the authority, D-030-2.)
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.json");
+        std::fs::write(&p, r#"{"schemaVersion":15,"multiUser":true,"idleUnloadMinutes":15,"externalEngine":{"gateway":"http://gw","model":"a","modelName":"a.gguf"}}"#).unwrap();
+        let c = AppConfig::load_from(&p);
+        assert_eq!(c.schema_version, SCHEMA_VERSION);
+        assert_eq!(c.idle_unload_minutes, 15, "the <11 step cannot misfire on a schema-15 config");
+        assert!(c.multi_user);
+        assert!(c.external_engine.is_some());
+        assert!(!c.project_folders, "the new 0.12.1 field defaults to off");
+        // A pre-0.12.1 config (schema 10) still gets the upstream 15 -> 10 migration.
+        std::fs::write(&p, r#"{"schemaVersion":10,"idleUnloadMinutes":15}"#).unwrap();
+        assert_eq!(AppConfig::load_from(&p).idle_unload_minutes, 10);
+    }
+
+    #[test]
     fn schema_12_renames_flavors_to_models() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("config.json");

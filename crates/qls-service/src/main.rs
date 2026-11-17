@@ -459,6 +459,8 @@ async fn lifecycle(state: Arc<AppState>) {
         }
         // Idle unload: free VRAM after N minutes without work, also with a window or browser tab
         // open (a shared GPU stays usable for other programs). The next job loads the model again.
+        // `st.owned`: the service never unloads a model it does not own — in external-engine
+        // mode the gateway's TTL is the sole authority on the engine's lifetime (D-030-2).
         let cfg = state.engine.config();
         let st = state.engine.server.status();
         if !busy

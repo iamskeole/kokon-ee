@@ -1244,7 +1244,7 @@ fn default_intensity() -> f32 {
 async fn luts_apply(State(s): St, Extension(caller): Extension<Caller>, AxPath(name): AxPath<String>, Json(b): Json<LutApplyBody>) -> ApiResult<Json<Value>> {
     let user = caller.user().map(str::to_owned);
     let engine = s.engine.clone();
-    let rec = tokio::task::spawn_blocking(move || engine.apply_lut(&b.source, &name, b.intensity, b.private, user.as_deref())).await.map_err(AppError::internal)??;
+    let rec = tokio::task::spawn_blocking(move || engine.apply_lut(&b.source, &name, b.intensity, b.private, b.project.as_deref(), user.as_deref())).await.map_err(AppError::internal)??;
     Ok(Json(serde_json::to_value(rec).unwrap()))
 }
 
@@ -1341,7 +1341,7 @@ struct LayersBody {
 async fn gallery_save_layers(State(s): St, Extension(caller): Extension<Caller>, Json(b): Json<LayersBody>) -> ApiResult<Json<GenerationRecord>> {
     let user = caller.user().map(str::to_owned);
     let engine = s.engine.clone();
-    let rec = tokio::task::spawn_blocking(move || engine.save_layers(&b.image, b.from.as_deref(), b.private, user.as_deref())).await.map_err(AppError::internal)??;
+    let rec = tokio::task::spawn_blocking(move || engine.save_layers(&b.image, b.from.as_deref(), b.private, b.project.as_deref(), user.as_deref())).await.map_err(AppError::internal)??;
     Ok(Json(rec))
 }
 
