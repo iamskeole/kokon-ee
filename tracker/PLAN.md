@@ -241,20 +241,22 @@ is *where the PUP tokens come from*.**
 
 - `tracker/STATUS.md` = one-line items, `[ ]` open / `[x]` done; updated at
   the end of every task.
-- A task is `tracker/tasks/todo/task-NNN.md` → moved to `tracker/tasks/doing/` when
-  picked up → `tracker/tasks/done/` when complete. Task shape: `# goal` /
-  `## acceptance criteria` / `## blockers` / `## decisions`. The **oldest
-  file in todo/ is always the current task** — that is how fresh sessions
-  stay focused.
-- A fresh session: pi auto-injects `AGENTS.md` (its fork preamble points
-  here) → read `STATUS.md` → the oldest todo task → work it.
-- `tracker/` is fork-owned and is never included in an upstream PR.
+- A task is `tracker/tasks/parked/task-NNN.md` (waiting on its trigger —
+  never a current candidate) → `tracker/tasks/todo/` when the trigger fires
+  → `tracker/tasks/doing/` when picked up → `tracker/tasks/done/` when
+  complete. Task shape: `# goal` / `## acceptance criteria` / `## blockers` /
+  `## decisions`. The **oldest file in todo/ is always the current task** —
+  that is how fresh sessions stay focused.
+- A fresh session: pi auto-injects `AGENTS.md` (its preamble points here) →
+  read `STATUS.md` → the oldest todo task → work it.
+- `tracker/` is project-owned and is never included in an upstream PR.
 
 ## 8. Independence phase (2026-11-17 — supersedes the plan's "the fork may
 disappear if merged upstream" premise, which died with the #52 decline)
 
-D-RB ("the fork is the product") is being executed, in four tasks in
-`tracker/tasks/todo/`: **029** the standalone repo `kokon-ee` (new
+D-RB ("the fork is the product") is being executed in four tasks
+(**029 done 2026-11-17** — record in `tasks/done/task-029.md`; 030–032 in
+`tracker/tasks/todo/`): **029** the standalone repo `kokon-ee` (new
 non-fork repo, full history, attribution pass first, old fork archived,
 author notified in #52); **030** the rebase onto upstream 0.12.1 as the
 in-vivo test that independence still lets us pull upstream features

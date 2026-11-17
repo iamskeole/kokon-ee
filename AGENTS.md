@@ -18,8 +18,11 @@ supersedes `docs/STATUS.md` here. **The current task is always the oldest
 file in [`tracker/tasks/todo/`](tracker/tasks/todo/)** — when asked to "pick
 the next task": move that file to `tasks/doing/`, work it to its
 acceptance criteria, move it to `tasks/done/`, and update `STATUS.md`.
-Each task carries `## blockers` and `## decisions` — surface blockers
-before guessing, and record new decisions in the task file. `tracker/`
+Tasks waiting on a trigger live in
+[`tracker/tasks/parked/`](tracker/tasks/parked/) — they enter `todo/` only
+when their trigger fires, so they never become the current task. Each task
+carries `## blockers` and `## decisions` — surface blockers before
+guessing, and record new decisions in the task file. `tracker/`
 is project-owned and is never contributed upstream.
 
 **Rebase and release rules (owner-noted 2026-11-06 — do not litigate).**
