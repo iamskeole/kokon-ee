@@ -1,75 +1,69 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo/kokon-logo-white.svg">
-    <img src="assets/brand/logo/kokon-logo.svg" alt="Kokon" width="300">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/wordmark/kokon-ee-wordmark-white.svg">
+    <img src="assets/brand/wordmark/kokon-ee-wordmark.svg" alt="Kokon EE" width="300">
   </picture>
 </p>
 
-<h3 align="center">Edit photos by describing the change, on your own computer.</h3>
+<h3 align="center">Edit photos by describing the change — on your box, through your gateway, on stock engines.</h3>
 
 <p align="center">
-  A free, open-source alternative to Nano Banana and Generative Fill that runs on your own GPU.
-  One installer for Windows, Mac and Linux sets up the best open model for your hardware.
-  Brush an area, type what you want, get the edit. Your photos stay with you, and you can edit as often as you like.
+  Kokon EE is the Kokon service unbundled from its bundled engine: a Docker image with the
+  browser UI and the MCP server, pointed at your box's gateway, which schedules the stock
+  inference engines — stable-diffusion.cpp for the image models, llama.cpp for the
+  prompt-enhancer sidecars. The service holds the entrypoints, the API keys and the prompts;
+  the engines stay stock upstream. Your photos stay with you, and you can edit as often as
+  you like.
 </p>
 
 <p align="center">
-  <a href="https://github.com/GabrieleLozupone/kokon/releases/latest"><img src="https://img.shields.io/github/v/release/GabrieleLozupone/kokon?style=flat-square&labelColor=333&color=6b6b6b&label=release&cacheSeconds=3600&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjQzI5N0ZGIiBzdHJva2Utd2lkdGg9IjIuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTIuNiAyLjZBMiAyIDAgMCAwIDExLjIgMkg0YTIgMiAwIDAgMC0yIDJ2Ny4yYTIgMiAwIDAgMCAuNiAxLjRsOC43IDguN2EyLjQgMi40IDAgMCAwIDMuNCAwbDYuNi02LjZhMi40IDIuNCAwIDAgMCAwLTMuNHoiLz48Y2lyY2xlIGN4PSI3LjUiIGN5PSI3LjUiIHI9IjEuMiIgZmlsbD0iI0MyOTdGRiIvPjwvc3ZnPg%3D%3D" alt="Latest release"></a>
-  <a href="https://github.com/GabrieleLozupone/kokon/releases"><img src="https://img.shields.io/github/downloads/GabrieleLozupone/kokon/total?style=flat-square&labelColor=333&color=6b6b6b&cacheSeconds=3600&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM0ZCOTUwIiBzdHJva2Utd2lkdGg9IjIuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTIgM3YxMiIvPjxwYXRoIGQ9Im03IDEwIDUgNSA1LTUiLz48cGF0aCBkPSJNNCAyMWgxNiIvPjwvc3ZnPg%3D%3D" alt="Downloads"></a>
-  <img src="assets/readme/badges/windows.svg" alt="Windows 10 and 11">
-  <img src="assets/readme/badges/macos.svg" alt="macOS 15 or newer">
-  <img src="assets/readme/badges/linux.svg" alt="Linux, .deb and .rpm">
-  <br>
-  <img src="assets/readme/badges/nvidia.svg" alt="NVIDIA, 8 GB of VRAM or more (8 GB in beta)">
-  <img src="assets/readme/badges/amd.svg" alt="AMD, 8 GB of VRAM or more, beta">
-  <img src="assets/readme/badges/intel.svg" alt="Intel Arc, 12 GB of VRAM or more, beta">
-  <img src="assets/readme/badges/apple.svg" alt="Apple Silicon, 16 GB of unified memory or more, beta">
-  <br>
+  <a href="docs/fresh-box.md"><img src="assets/readme/badges/docker.svg" alt="Docker image for NVIDIA (CUDA)"></a>
   <a href="#use-it-from-your-ai-agent"><img src="assets/readme/badges/mcp.svg" alt="MCP server included"></a>
-  <a href="docs/docker.md"><img src="assets/readme/badges/docker.svg" alt="Docker image for NVIDIA (CUDA)"></a>
   <a href="LICENSE"><img src="assets/readme/badges/license.svg" alt="License: AGPL-3.0"></a>
-  <a href="https://github.com/GabrieleLozupone/kokon/stargazers"><img src="https://img.shields.io/github/stars/GabrieleLozupone/kokon?style=flat-square&labelColor=333&color=6b6b6b&cacheSeconds=3600&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRjVDNTE4IiBzdHJva2Utd2lkdGg9IjIuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBmaWxsPSIjRjVDNTE4IiBkPSJNMTIgMi41bDIuOSA2IDYuNi45LTQuOCA0LjYgMS4yIDYuNUwxMiAxNy40bC01LjkgMy4xIDEuMi02LjVMMi41IDkuNGw2LjYtLjl6Ii8%2BPC9zdmc%2B" alt="Stars"></a>
-  <a href="https://mcpservers.org/servers/gabrielelozupone/kokon"><img src="https://mcpservers.org/badge.svg" alt="Listed on mcpservers.org"></a>
 </p>
 
 <p align="center">
-  <a href="https://ko-fi.com/gabrielelozupone"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi" height="36"></a>
-</p>
-
-<p align="center">
-  <a href="https://kokon.app/">Website</a> ·
-  <a href="#install">Install</a> ·
-  <a href="#new-in-012-split-any-image-into-layers">New in 0.12</a> ·
-  <a href="#since-011-use-it-from-your-phone-or-run-it-as-a-server">Phone & server</a> ·
+  <a href="docs/fresh-box.md">Run it on a box</a> ·
+  <a href="#derived-from-kokon">Derived from Kokon</a> ·
   <a href="#what-you-can-do">Features</a> ·
-  <a href="#examples">Examples</a> ·
+  <a href="#how-it-works">How it works</a> ·
   <a href="#use-it-from-your-ai-agent">AI agents</a> ·
-  <a href="#faq">FAQ</a> ·
-  <a href="https://kokon.app/prompt-guide/">Prompt guide</a> ·
-  <a href="docs/engineering-notes.md">How it works</a>
+  <a href="#faq">FAQ</a>
 </p>
 
-https://github.com/user-attachments/assets/8851c580-99b9-432a-82be-b6d42fa9a749
+---
 
-<p align="center"><a href="https://youtu.be/y2NAJkZ4vH0">Watch in 4K on YouTube</a> · <a href="https://youtu.be/WDbHxkbpU4s">What you can do with Kokon (85 s)</a> · <a href="https://youtu.be/eGr9yYe7NVc">What's new in 0.12</a></p>
+## Derived from Kokon
 
-<p align="center">
-  <a href="https://github.com/GabrieleLozupone/kokon/releases/latest"><picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/readme/download-windows-dark.svg">
-    <img src="assets/readme/download-windows-light.svg" alt="Download for Windows" height="52">
-  </picture></a>
-  <a href="https://github.com/GabrieleLozupone/kokon/releases/latest"><picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/readme/download-macos-beta-dark.svg">
-    <img src="assets/readme/download-macos-beta-light.svg" alt="Download for macOS (Apple Silicon, beta)" height="52">
-  </picture></a>
-  <a href="https://github.com/GabrieleLozupone/kokon/releases/latest"><picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/readme/download-linux-beta-dark.svg">
-    <img src="assets/readme/download-linux-beta-light.svg" alt="Download for Linux (x86-64, beta)" height="52">
-  </picture></a>
-  <br>
-  <sub>Free and open source · about 12 GB of models downloaded on first run · nothing leaves your computer</sub>
-</p>
+Kokon EE is a derivative of [Kokon](https://github.com/GabrieleLozupone/kokon) by
+[Gabriele Lozupone](https://github.com/GabrieleLozupone), AGPL-3.0-only. This repository's
+history is Kokon's history, un-rewritten: every derived commit keeps its original author and
+date, and [NOTICE](NOTICE) carries his copyright for the derived parts alongside ours for the
+parts this project adds.
+
+The external-engine mode was proposed to the author in
+[Discussion #52](https://github.com/GabrieleLozupone/kokon/discussions/52) (2026-11-06). He
+keeps Kokon's one-model vision, and this line of work carries on here as a standalone
+project. What this project changes:
+
+- **The engines are external and stock.** The service ships no engine build: it points at
+  entrypoints, API keys and prompts, and the box's gateway (llama-swap) schedules the stock
+  engines — stable-diffusion.cpp for the image models, llama.cpp for the sidecars.
+- **The prompt enhancer is a sidecar.** Prompt+ runs as a named model on the gateway, not as
+  a text-generation fork of the engine.
+- **Multi-user mode.** Named accounts with per-user galleries and projects on the same
+  service (a config gate, off by default).
+- **The product is the box service.** Docker image + browser UI + MCP, one compose file, no
+  installer and no desktop app. The desktop-app parts are being retired in this repository.
+
+**How you get it.** There are no tagged releases and no installer: the service image is the
+product. Clone this repository, `docker build -f docker/Dockerfile`, `docker compose up -d`.
+The whole stack on a new machine — the gateway and its model list, the engines, the service —
+is [docs/fresh-box.md](docs/fresh-box.md).
+
+> The sections below document the inherited Kokon product — its features, engine and FAQ —
+> which is what the service underneath still is.
 
 ---
 
@@ -405,58 +399,41 @@ the measured backend settings and the reasons behind each default.
 
 ## Use it from your AI agent
 
-Kokon ships `kokon-mcp`, an [MCP](https://modelcontextprotocol.io) server. Register it once
-with Claude Code:
-
-```powershell
-# Windows
-claude mcp add --scope user kokon -- "$env:LOCALAPPDATA\Kokon\kokon-mcp.exe"
-```
+Kokon EE ships `kokon-ee-mcp`, an [MCP](https://modelcontextprotocol.io) server. It talks to
+the running service through the service's own `service.json` (port + token), so on the box it
+needs nothing but the service's data folder (the compose's `data/` bind):
 
 ```bash
-# Mac
-claude mcp add --scope user kokon -- /Applications/Kokon.app/Contents/MacOS/kokon-mcp
+# Claude Code, on the box (the data folder beside the compose file)
+claude mcp add --scope user kokon-ee \
+  --env QLS_DATA_DIR=/home/<you>/ml/frontends/kokon-ee/data \
+  -- npx -y kokon-ee-mcp
 ```
 
-Or, on either system with Node.js 22+, through [npm](https://www.npmjs.com/package/kokon-mcp)
-(still needs the app installed):
-
-```bash
-claude mcp add --scope user kokon -- npx -y kokon-mcp
-```
-
-Then ask: *“Generate a hero image for this README and save it in docs/”* or *“Remove the
-background clutter from screenshot.png”*. The app doesn't need to be open, because the MCP server
-starts the engine on demand. The first call takes about a minute while the model loads.
-
-**Tools:** `generate_image` · `edit_image` · `edit_images` · `inpaint_image` · `outpaint_image` · `upscale_image` · `get_image_info` · `get_generator_status`
-
-<details>
-<summary><b>Other MCP hosts (JSON config)</b></summary>
-<br>
-
-Project-scoped `.mcp.json`, or any host that takes the standard format (on a Mac the command is
-`/Applications/Kokon.app/Contents/MacOS/kokon-mcp`):
+Any client that takes the standard JSON config (`.mcp.json`, Claude Desktop, Cursor...):
 
 ```json
 {
   "mcpServers": {
-    "kokon": {
+    "kokon-ee": {
       "type": "stdio",
-      "command": "C:\\Users\\<you>\\AppData\\Local\\Kokon\\kokon-mcp.exe",
-      "args": []
+      "command": "npx",
+      "args": ["-y", "kokon-ee-mcp"],
+      "env": { "QLS_DATA_DIR": "/home/<you>/ml/frontends/kokon-ee/data" }
     }
   }
 }
 ```
 
-Same thing from the command line:
+Against a desktop install of [Kokon](https://github.com/GabrieleLozupone/kokon) the same
+server works as before (it finds the app's data folder, or starts the app's service if none
+is running; the app ships it as `kokon-mcp.exe` / `kokon-mcp` next to the service).
 
-```powershell
-claude mcp add-json --scope user kokon '{"type":"stdio","command":"C:\\Users\\<you>\\AppData\\Local\\Kokon\\kokon-mcp.exe","args":[]}'
-```
+Then ask: *“Generate a hero image for this README and save it in docs/”* or *“Remove the
+background clutter from screenshot.png”*. On the box the engines load through the gateway on
+the first call; the first call of a session takes as long as the engine boot.
 
-</details>
+**Tools:** `generate_image` · `edit_image` · `edit_images` · `inpaint_image` · `outpaint_image` · `upscale_image` · `get_image_info` · `get_generator_status`
 
 <details>
 <summary><b>MCP behavior and safety</b></summary>
@@ -464,15 +441,18 @@ claude mcp add-json --scope user kokon '{"type":"stdio","command":"C:\\Users\\<y
 
 - Every result returns the absolute path of the saved file, its size, seed and generation metadata.
 - Paths may be absolute or relative to the project (`CLAUDE_PROJECT_DIR`). Reads and writes are
-  limited to the project folder, Kokon's output folder and folders listed in
+  limited to the project folder, the service's output folder and folders listed in
   `QLS_MCP_ALLOWED_DIRS` (separated by semicolons). Existing files are never overwritten.
 - Images are **not** sent back to the model by default; they stay on disk. Pass
   `include_preview: true` to include a small JPEG preview.
 - `upscale_image` takes `scale` (default 2) or `width`/`height` (up to 8192 px).
 - Progress is reported through MCP progress notifications. Claude Code's default tool timeout is
   30 minutes (`MCP_TOOL_TIMEOUT`).
-- After 10 minutes without work the model is unloaded, so the graphics card is free for other programs, also
-  with the desktop window open; the next call loads it again (Settings → General, 0 keeps it loaded).
+- In the desktop app the model is unloaded after 10 minutes without work, so the graphics card is
+  free for other programs, also with the desktop window open; the next call loads it again
+  (Settings → General, 0 keeps it loaded). On the box the gateway's TTL is the authority on the
+  engine's lifetime; Kokon never unloads an engine it does not own.
+
 
 </details>
 
@@ -481,21 +461,16 @@ claude mcp add-json --scope user kokon '{"type":"stdio","command":"C:\\Users\\<y
 <br>
 
 Base URL `http://127.0.0.1:39151/api/v1`. Every call except `/ping` needs
-`Authorization: Bearer <token>`, with the token from `%LOCALAPPDATA%\KokonData\service.json`
-(Mac: `~/Library/Application Support/KokonData/service.json`, Linux: `~/.local/share/KokonData/service.json`).
+`Authorization: Bearer <token>`, with the token from the service's `service.json` (on the
+box: the compose's `data/` bind; in the desktop app: `%LOCALAPPDATA%\KokonData\service.json`
+on Windows, `~/Library/Application Support/KokonData/service.json` on Mac,
+`~/.local/share/KokonData/service.json` on Linux).
 Requests from web pages (a browser `Origin` header other than the app's own) are refused.
 
-```powershell
-$i = Get-Content "$env:LOCALAPPDATA\KokonData\service.json" | ConvertFrom-Json
-$h = @{ Authorization = "Bearer $($i.token)" }
-Invoke-RestMethod -Method Post "http://127.0.0.1:$($i.port)/api/v1/generate" -Headers $h `
-  -ContentType 'application/json' -Body '{"prompt":"a lighthouse at dusk, 16:9","quality":"fast"}'
-```
-
-On macOS or Linux (`curl`; on Linux the file is in `~/.local/share/KokonData/`):
+On the box (the data folder beside the compose file):
 
 ```bash
-INFO="$HOME/Library/Application Support/KokonData/service.json"
+INFO=/home/<you>/ml/frontends/kokon-ee/data/service.json
 TOKEN=$(sed -n 's/.*"token" *: *"\([^"]*\)".*/\1/p' "$INFO")
 PORT=$(sed -n 's/.*"port" *: *\([0-9]*\).*/\1/p' "$INFO")
 curl -s -X POST "http://127.0.0.1:$PORT/api/v1/generate" \
@@ -507,6 +482,7 @@ The full route list (status, jobs, gallery, inputs, models, LoRAs, LUTs and the 
 gallery query parameters and the request fields are in [docs/http-api.md](docs/http-api.md).
 
 </details>
+
 
 ## Privacy
 
@@ -853,17 +829,18 @@ for a module map and the backend facts each default is based on.
 
 </details>
 
-## Support Kokon
+## Upstream
 
-Kokon is free and open source, and everything that runs on your computer stays free: no account, no credits,
-no limits. It's built by one person. If it's useful to you, a tip on [Ko-fi](https://ko-fi.com/gabrielelozupone)
-helps keep it that way; a star on GitHub helps other people find it. Tips are gifts and don't unlock anything.
+Kokon is a one-person project by Gabriele Lozupone; this repository carries the
+external-engine line of it, with the attribution in [NOTICE](NOTICE) and in the git history.
+The upstream project, its site and its commercial licensing remain his — see
+[github.com/GabrieleLozupone/kokon](https://github.com/GabrieleLozupone/kokon).
 
 ## Contributing
 
-Bug reports, translations, example prompts and pull requests are all welcome. Issues tagged
-[good first issue](https://github.com/GabrieleLozupone/kokon/labels/good%20first%20issue) are a good
-place to start. Please run the tests above before opening a pull request.
+Bug reports, example prompts and pull requests are welcome. Run the tests (`cargo test
+-p qls-core`, `npm test`, `cd mcp && npm test`) before opening a pull request;
+[CONTRIBUTING.md](CONTRIBUTING.md) has the build and the code conventions.
 
 ## Responsible use
 
@@ -879,28 +856,24 @@ or changed with AI. Settings → General → **Check an image** reads the marks 
 
 ## License
 
-Kokon's source code is released under the [GNU Affero General Public License v3.0](LICENSE)
-(AGPL-3.0-only). You can use, study, change and share it freely. If you distribute a modified
-version, or offer one as a network service, you must publish its source under the same
-license. The license covers the code, not the images you make with it.
-
-Want to ship Kokon inside a closed-source product or service? A commercial license is
-available: open a [discussion](https://github.com/GabrieleLozupone/kokon/discussions) or
-write to [hello@kokon.app](mailto:hello@kokon.app).
+Kokon EE's source code is released under the [GNU Affero General Public License
+v3.0](LICENSE) (AGPL-3.0-only). The code is a derivative of
+[Kokon](https://github.com/GabrieleLozupone/kokon): the license obligations of the original
+apply to the derived parts and to this project as a whole — AGPL is copyleft, so a
+derivative stays AGPL. Copyrights are recorded in [NOTICE](NOTICE): Gabriele Lozupone for
+the parts derived from Kokon, iamskeole for the parts this project adds. The license covers
+the code, not the images you make with it.
 
 Model weights and the upscaler are downloaded from their authors and keep their own licenses
 (see the [FAQ](#faq)).
 
-Kokon builds on [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) by
-leejet (since 0.10 through [our fork](https://github.com/GabrieleLozupone/stable-diffusion.cpp/tree/kokon),
-kept close to upstream), [Qwen-Image 2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) and its Turbo model by the
-Qwen team, Unsloth's Turbo GGUF files, [Tauri](https://tauri.app) and
-the upscalers by Nmkd (Superscale-SP), Philip Hofmann (4xNomos2 MoSR) and Kim2091 (UltraSharp).
-Thank you.
+Kokon EE builds on [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) by
+leejet, [Qwen-Image 2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) and its Turbo model by
+the Qwen team, Unsloth's Turbo GGUF files, [Tauri](https://tauri.app) and
+the upscalers by Nmkd (Superscale-SP), Philip Hofmann (4xNomos2 MoSR) and Kim2091
+(UltraSharp). Thank you.
 
 <p align="center">
-  <br>
-  <img src="assets/brand/icon/kokon-icon-256.png" alt="" width="48">
   <br>
   <sub>Made for people who would rather type a sentence than wire up a pipeline.</sub>
 </p>
