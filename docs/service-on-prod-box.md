@@ -35,15 +35,15 @@ Do, in order:
 1. Preflight: docker + compose plugin present; ports 39151 and 39152
    free; ~5 GB of disk; NO nvidia runtime needed (and none must be
    reserved — this service uses no GPU in this mode).
-2. git clone https://github.com/iamskeole/kokon.git <parent>/kokon —
+2. git clone https://github.com/iamskeole/kokon-ee.git <parent>/kokon-ee —
    branch main, into a single parent dir <parent> that will also hold
    the compose and the data dirs (see the doc's Layout). The build is
    self-contained (its own Rust/npm toolchain in the image); allow it
    up to 30 minutes cold.
-3. Build the image, from inside <parent>/kokon/ (current one: a907258;
-   if the fork's main has moved on since, use its short commit instead):
+3. Build the image, from inside <parent>/kokon-ee/ (current one: a907258;
+   if the repo's main has moved on since, use its short commit instead):
    docker build -f docker/Dockerfile -t
-   ghcr.io/iamskeole/kokon:external-engine-0.12.0-a907258 .
+   ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-a907258 .
    (or pull that tag from ghcr instead, if the owner says it is pushed
    and hands you a registry token).
 4. Write <parent>/compose.yaml per the doc, and create
@@ -60,7 +60,7 @@ Do, in order:
    current config when migrating (or the doc's template when fresh).
 6. docker compose up -d with the compose from the doc. If this is a
    fresh start, set the browser password:
-   docker exec -it kokon kokon-service --set-password
+   docker exec -it kokon-ee kokon-service --set-password
    (a migrating setup keeps the existing password in its data).
 7. Install the nginx server block from the doc (the exact values are
    load-bearing: SSE buffering off, timeouts, body size, the two
@@ -89,8 +89,8 @@ One parent dir holds everything — the pull, the build, the yaml, and
 the real data dirs beside it:
 
 ```
-/home/<user>/kokon/      ← one parent dir (or /srv/kokon, your call)
-  kokon/                 ← git clone of the fork (pull and build happen here)
+/home/<user>/kokon-ee/    ← one parent dir (or /srv/kokon-ee, your call)
+  kokon-ee/                ← git clone of the project (pull and build happen here)
   compose.yaml           ← the service container
   data/                  # → /data    gallery DB, service token, lab models, logs
   config/                # → /config  config.json (gateway address + key)
@@ -105,9 +105,9 @@ a dir docker creates on your behalf comes out root-owned and the
 service cannot write it).
 
 Dev-box variant (how the accelerator is shaped): the clone stays at
-its canonical dev home (this box: `/home/p/code/iamskeole/kokon`,
+its canonical dev home (this box: `/home/p/code/iamskeole/kokon-ee`,
 where the repo and its tracker live) and the deploy dir
-(`/home/p/ml/frontends/kokon/`) holds the compose + the three data
+(`/home/p/ml/frontends/kokon-ee/`) holds the compose + the three data
 dirs. Same shape; the clone just isn't nested.
 
 ### compose.yaml
@@ -117,15 +117,15 @@ dirs. Same shape; the clone just isn't nested.
 # accelerator through its gateway (:8081, keyed) — nothing in this
 # container touches a GPU, so there is no nvidia reservation.
 #
-#   docker compose up -d          # start / recreate
-#   docker compose logs -f kokon  # service log
+#   docker compose up -d            # start / recreate
+#   docker compose logs -f kokon-ee # service log
 #
 # Ports: 39152 = web UI (password; all interfaces — put nginx in
 # front), 39151 = token API (127.0.0.1 only: the MCP on this box).
 services:
-  kokon:
-    image: ghcr.io/iamskeole/kokon:external-engine-0.12.0-a907258
-    container_name: kokon
+  kokon-ee:
+    image: ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-a907258
+    container_name: kokon-ee
     restart: unless-stopped
     network_mode: host
     volumes:
@@ -185,7 +185,7 @@ accelerator's config, which is the source of truth.)
 ### nginx (the load-bearing values)
 
 ```nginx
-# /etc/nginx/conf.d/kokon.conf  (or a location inside an existing vhost)
+# /etc/nginx/conf.d/kokon-ee.conf  (or a location inside an existing vhost)
 #
 # Three things make or break this proxy:
 #  1. /api/v1/events is a long-lived SSE stream — buffering must be OFF.
@@ -278,7 +278,7 @@ is loopback-only by design) — the MCP lives where the service lives.
   model load (same as any 10-minute idle unload).
 - **Updating the service**: clone main, rebuild, change the tag in
   the compose, `docker compose up -d`. The data dirs are untouched.
-- **Password change**: `docker exec -it kokon kokon-service
+- **Password change**: `docker exec -it kokon-ee kokon-service
   --set-password` — no restart; every browser signs in again.
 - **Two users today share one password and one gallery.** Per-user
   accounts and galleries is tracker task-026 — it slots into exactly
@@ -287,11 +287,11 @@ is loopback-only by design) — the MCP lives where the service lives.
 ### Dev on the accelerator, prod on this box — the workflow
 
 - **Code flows one way only:** dev box (the accelerator, where the
-  repo lives) → the fork on GitHub → this box (`git pull` + rebuild +
-  recreate). This box is a **consumer** of the fork, never a source:
+  repo lives) → the project on GitHub → this box (`git pull` + rebuild +
+  recreate). This box is a **consumer** of the project, never a source:
   nobody edits code here, and you never pull code from here. If a
   change is needed, it is committed from the dev box (or any machine
-  that pushes to the fork) and lands here on the next update.
+  that pushes to the project) and lands here on the next update.
 - **Data lives here, and stays here.** The gallery, config and token
   in the data dirs beside the compose file are the family's actual
   state; they are written by this service in normal use. They do not

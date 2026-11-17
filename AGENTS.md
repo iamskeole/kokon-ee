@@ -1,33 +1,33 @@
 # AGENTS.md
 
-**Fork mission (iamskeole fork — read before anything else).** This fork
+**Project mission (kokon-ee — read before anything else).** This project
 unbundles Kokon from shipping built-in engines: the service in this repo is
 the only custom layer; every inference engine is **stock upstream**
 (stable-diffusion.cpp, llama.cpp — the host's `backends/` named slots)
 scheduled by the host's gateway (llama-swap); the service points only at
 **entrypoints, API keys, and prompts**. Where this file (upstream text below)
-and the fork direction disagree, **the fork direction wins** — notably,
+and the project direction disagree, **the project direction wins** — notably,
 "Kokon's own build of sd-server" in the architecture below is the upstream
 bundled design; here engines are external and stock. The rest of this file
 (build/test, UI conventions, contracts, the model-change quality policy)
 stays in force for our work.
 
-**Working state.** The fork's plan is [tracker/PLAN.md](tracker/PLAN.md); what
-is in progress on this fork is [tracker/STATUS.md](tracker/STATUS.md), which
+**Working state.** The project's plan is [tracker/PLAN.md](tracker/PLAN.md); what
+is in progress here is [tracker/STATUS.md](tracker/STATUS.md), which
 supersedes `docs/STATUS.md` here. **The current task is always the oldest
 file in [`tracker/tasks/todo/`](tracker/tasks/todo/)** — when asked to "pick
 the next task": move that file to `tasks/doing/`, work it to its
 acceptance criteria, move it to `tasks/done/`, and update `STATUS.md`.
 Each task carries `## blockers` and `## decisions` — surface blockers
 before guessing, and record new decisions in the task file. `tracker/`
-is fork-owned and is never contributed upstream.
+is project-owned and is never contributed upstream.
 
 **Rebase and release rules (owner-noted 2026-11-06 — do not litigate).**
 Rebases always target **upstream master**, never a release commit
 (upstream doesn't tag its releases; master is by definition the latest
-release plus harmless post-release work). **The fork does no releases** —
+release plus harmless post-release work). **This project does no releases** —
 releases are the origin's/author's view (their installers, their tags);
-if the upstream PR doesn't land, our release mechanism is: clone the fork
+if the upstream PR doesn't land, our release mechanism is: clone the project
 → `docker build` → `docker compose up -d` (the service image is the
 product; `docs/fresh-box.md`).
 

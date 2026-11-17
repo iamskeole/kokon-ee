@@ -487,7 +487,7 @@ docker build -f docker/Dockerfile \
   -t ghcr.io/<org>/kokon:external-engine-0.12.0-<short-commit> .
 ```
 
-Deploy it with a compose file (the live one is `frontends/kokon/compose.yaml`
+Deploy it with a compose file (the live one is `frontends/kokon-ee/compose.yaml`
 on the reference host):
 
 ```yaml
