@@ -1188,7 +1188,15 @@ impl Engine {
             Some("webp") => OutputFormat::Webp,
             _ => OutputFormat::Png,
         };
-        let file = paths::unique_path(dir.join(format!("{time}-lut-{}.{}", paths::sanitize_file_stem(name), format.ext())), &[]);
+        let file = paths::unique_path(
+            dir.join(format!(
+                "{}-lut-{}.{}",
+                now.format("%H%M%S"),
+                paths::sanitize_file_stem(name),
+                format.ext()
+            )),
+            &[],
+        );
         let pct = (intensity * 100.0).round();
         let mut rec = GenerationRecord {
             id: id.clone(),
@@ -1286,7 +1294,7 @@ impl Engine {
             base.join(now.format("%Y-%m-%d").to_string())
         };
         std::fs::create_dir_all(&dir).map_err(|e| AppError::io("create the output folder", &dir, e))?;
-        let file = paths::unique_path(dir.join(format!("{time}-layers.png")), &[]);
+        let file = paths::unique_path(dir.join(format!("{}-layers.png", now.format("%H%M%S"))), &[]);
         let out = img.pixels;
         let mut rec = GenerationRecord {
             id: id.clone(),
@@ -2436,7 +2444,11 @@ impl Engine {
         std::fs::create_dir_all(&dir)
             .map_err(|e| AppError::io("create the output folder", &dir, e))?;
         let words: Vec<&str> = req.prompt.split_whitespace().take(6).collect();
-        let stem = format!("{time}-{}-{seed}", paths::sanitize_file_stem(&words.join(" ")));
+        let stem = format!(
+            "{}-{}-{seed}",
+            now.format("%H%M%S"),
+            paths::sanitize_file_stem(&words.join(" "))
+        );
         // HDR from a HEIC source forces an Ultra HDR JPEG; otherwise the requested format.
         let (hdr, hdr_note) = hdr_for(img, req, plan, inputs);
         let format = if hdr.is_some() { OutputFormat::Jpeg } else { plan.output_format };
