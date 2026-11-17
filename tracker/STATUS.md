@@ -36,16 +36,25 @@ Keep this file current at the end of every task.
 [x] WP6 stock-cleanup — task-020 done 11-04, reopened 11-05, **re-land COMPLETE and closed this span** — the 11-04 record (stock-016 live, deferral proven in both directions, chat-priority the product fact) stands as the provenance of the invariants; the 11-05 re-land: layout surgery (pure stock trees; `_scripts`/`_configs`/`_jobs` homes; 10 pure-boot scripts; **no `cmdStop` anywhere**; `.last-good` + reload semantics; `logToStdout: both`), the owner's handover to the daemon-owned vllm, the pre-window daemon restart (journal mirror engaged; the P3 bind-handover race found + gated), and the **w020r window PASSED 223 s** (vllm 4-s group stop with `EngineCore` in the journal, llama.cpp 2-s, every set eviction per the stock-017 sets, vllm restored last, DONE marker last). Record: `done/task-020.md`.
 
 ## Current
-**task-030 — rebase onto 0.12.1 — IN PROGRESS (the rebase and the three
-post-rebase design decisions are done and committed; image
-`ghcr.io/iamskeole/kokon-ee:multiuser-80bf7bf` built and already swapped
-in on the box — the config passed through the 0.12.1 migration chain
-byte-identical; remaining: the two proof jobs — one t2i and one
-more-like-this — on the production qwen wiring, vllm revived, tracker
-close-out, push).** **Known box issue found in that window's work
-(owner decision pending): the klein engine cannot boot — its in-engine
-VLM pair (`Qwen3-VL-4B-Instruct` Q4_K_M + mmproj, `/home/p/ml/models/
-gguf/Qwen/`) was removed from the box ~11-14, so the box's active model
+**task-030 — rebase onto 0.12.1 — IN PROGRESS (the rebase, the three
+post-rebase design decisions, and the image are done; the image
+`ghcr.io/iamskeole/kokon-ee:multiuser-80bf7bf` is already running on the
+box with the config passing the 0.12.1 migration chain byte-identical;
+remaining: the two proof jobs — one t2i and one more-like-this — on the
+production qwen wiring, then tracker close-out and push. Window w030
+ran seven times; run 7's 404 gate was the window's own typo (it polled
+the model path without the `/upstream` prefix — the box was fine), and
+its fail path left vllm out of the registry after the window — the
+owner's correction, now the window protocol: **a window never writes
+the registry at all** (the matrix owns the eviction, the daemon's
+on-demand start the revival; the window stops the vllm process instead)
+and **every exit path restores the runtime — service config
+byte-identical, vllm ready — before the marker**, so the blocked agent
+session resumes with inference working. Run 8 implements that and is
+next.** **Known box issue found in that window's work (owner decision
+pending): the klein engine cannot boot — its in-engine VLM pair
+(`Qwen3-VL-4B-Instruct` Q4_K_M + mmproj, `/home/p/ml/models/`
+`gguf/Qwen/`) was removed from the box ~11-14, so the box's active model
 has been down since then (qwen flavors unaffected); record + fix options
 in the task file.**
 Queue: **030** (the 0.12.1 rebase, on the new repo — in progress) →
