@@ -1,11 +1,10 @@
-Kokon
-Copyright 2026 Gabriele Lozupone
+Kokon EE
+Copyright 2026 Gabriele Lozupone (the parts derived from Kokon) and 2026 iamskeole (the parts this project adds)
 
 This product is licensed under the GNU Affero General Public License, version 3 only
-(AGPL-3.0-only, see LICENSE). Commercial licenses for uses the AGPL does not allow are
-available from the copyright holder (see the README).
+(AGPL-3.0-only, see LICENSE).
 
-Model weights that Kokon downloads at setup are not part of this product; they come from
+Model weights that Kokon EE downloads at setup are not part of this product; they come from
 their authors under their own licenses (see the README). The upscaler model included in the
 installer keeps its own license too (CC BY 4.0, see below).
 
