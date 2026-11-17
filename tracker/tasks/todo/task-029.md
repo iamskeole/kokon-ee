@@ -13,7 +13,10 @@ pointing at a gateway of stock engines.
    free (parked). The name is cheap to change later (repo rename + compose);
    the only sticky artifact is the ghcr image history, so we lock it now.
 2. **The new repo is born with the full history, un-rewritten.**
-   `iamskeole/kokon-ee` created as a **non-fork**; `main` pushed as-is from
+   `iamskeole/kokon-ee` created as a **non-fork, public** (same
+   visibility as the fork; nothing in it is more sensitive than what is
+   already public on the fork — the BFL bundle has been public there
+   since 11-06); `main` pushed as-is from
    the current tip (no rebase/recommit before the move — author dates and
    SHAs preserved; the squares start from here); the `pr-external-engine-012`
    branch (the #52 proposal record) and the `parked/*` tags come along.
@@ -64,9 +67,8 @@ pointing at a gateway of stock engines.
 
 ## blockers
 
-- **Owner: confirm the name** — `kokon-ee` or the parked alternative
-  (`kokon-box`) or something else (the repo is created with the final name;
-  the identity pass stamps it into MCP/NOTICE/docs, so we don't guess).
+- ~~Owner: confirm the name~~ — **resolved 2026-11-17: `kokon-ee`
+  confirmed** (the parked `kokon-box` alternative is retired).
 - **Owner: sends the #52 message** (draft in decisions; one short paragraph,
   their words ideally).
 - ghcr push (only if we want the image publicly pullable): the owner's
@@ -78,7 +80,7 @@ pointing at a gateway of stock engines.
 
 ## decisions
 
-- **D-IND1 — Name = `kokon-ee`** (owner's pick, 2026-11-17). Readable as
+- **D-IND1 — Name = `kokon-ee` — CONFIRMED 2026-11-17** (final). Readable as
   "Kokon, external-engine": it signals exactly the difference to the
   audience that matters (people with a box + gateway), keeps the lineage in
   the name (which is also the attribution), and is free in every namespace
@@ -128,3 +130,8 @@ pointing at a gateway of stock engines.
   after it are tracker-only); the weekend cleanup deleted `target/` (the
   toolchain and node_modules survived) — full cargo rebuild + all suites
   re-run in session 11-17, results recorded here as they land.
+- 2026-11-17 (later): **owner confirmed the name (`kokon-ee`) and the Tauri
+  shell cut (D-031-1, recorded in task-031).** All owner inputs for this
+  task are now in except sending the #52 reply (D-IND7 — do it any time
+  around the move, before or right after; the author has no automatic
+  notification of a rename). Ready for the next session: move to `doing/`

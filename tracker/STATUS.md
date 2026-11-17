@@ -37,7 +37,7 @@ Keep this file current at the end of every task.
 
 ## Current
 **task-029 — independence: the standalone repo + identity — CURRENT (created 2026-11-17, the owner's decision; full file in `todo/`).**
-Queue: **029** (the repo move + identity pass — current) → **030** (the 0.12.1 rebase, on the new repo) → **031** (the chaff cut, on the merged tree) → **032** (projects → DB, once the byte-identity constraint is actually gone). 023/025/027 stay parked on the owner's trigger. Owner inputs due before 029 runs: the name confirmation (`kokon-ee` or the parked `kokon-box` or another) and sending the drafted #52 reply; the Tauri-shell call (031's lean: cut) can wait for 031.
+Queue: **029** (the repo move + identity pass — current) → **030** (the 0.12.1 rebase, on the new repo) → **031** (the chaff cut, on the merged tree) → **032** (projects → DB, once the byte-identity constraint is actually gone). 023/025/027 stay parked on the owner's trigger. **Owner inputs resolved 2026-11-17: name = `kokon-ee` (D-IND1 final) and the Tauri shell = cut (D-031-1 final — 031's scope is settled).** The only owner action left in the queue is sending the drafted #52 reply (D-IND7) any time around the move. **029 is ready: the next session moves it to `doing/` and executes.**
 
 **task-026 multi-user — DONE 2026-11-13, second time (the projects leak, closed the same day as D-MU13); the 2026-11-12 DONE record below stands as shipped then — this paragraph is the re-close.**
 The owner's live report from the running image: a logged-in (named) user sees

@@ -34,15 +34,12 @@ the MCP**, all pointing at a gateway of stock engines.
      the fork, no deploy secrets here), the README badges that point at
      his releases/ko-fi/stars (D-031-3).
    - **The Tauri shell** — only if D-031-1 says cut (see blockers).
-2. **The Tauri shell decision (D-031-1)** is recorded with its
-   consequences. If cut: `src-tauri/` gone, the tauri branches in
-   `src/` (`platform.ts`, `native.ts`, the FFI calls in `api.ts`/
-   `store.ts`) gone or collapsed to the web path, the tauri dev script
-   gone; the product's local mode = run the service binary directly
-   (`--remote`) — no per-OS installer, no window. If kept: it stays a
-   thin local window over the service (the bundled engine still absent —
-   a kept shell that cannot bundle an engine is a browser with a
-   chrome, which is the point to make in the decision record).
+2. **The Tauri shell is cut** (D-031-1, confirmed 2026-11-17): `src-tauri/`
+   gone, the tauri branches in `src/` (`platform.ts`, `native.ts`, the FFI
+   calls in `api.ts`/`store.ts`) gone or collapsed to the web path, the
+   tauri dev script and the updater plugin gone; the product's local mode
+   = run the service binary directly (`--remote`) — no per-OS installer,
+   no window, no per-OS build/test logistics.
 3. **The stock path is gone and the config says so**: the service is
    EE-first; the config schema advances (15 → 16) with a migration that
    maps a pre-cut config (any stock settings) to the EE equivalent or a
@@ -78,14 +75,11 @@ the MCP**, all pointing at a gateway of stock engines.
 
 ## blockers
 
-- **Owner: the Tauri shell (D-031-1).** Lean: **cut** — it exists to
-  distribute the bundled engine (the installer is the product's body
-  upstream); our product is docker + browser + MCP, and keeping the
-  shell keeps the per-OS build/test logistics (the very thing the
-  unbundling was meant to shed) without a user segment we serve.
-  Counter: it is also the "no docker" local mode (a window next to the
-  service on a machine that runs both). If the owner has ever wanted
-  that mode, keep; otherwise cut.
+- ~~Owner: the Tauri shell (D-031-1)~~ — **resolved 2026-11-17: cut.**
+  (The rationale stands as recorded in D-031-1: the shell exists to
+  distribute the bundled-engine installer; our product is docker +
+  browser + MCP, and keeping it keeps the per-OS logistics we are
+  shedding.)
 - **task-030 first** — cut the merged tree (we delete 0.12.1's final
   shape of each file, so we never have to re-delete a variant).
 - The config-schema migration touches the live box config (schema 15,
@@ -100,7 +94,13 @@ the MCP**, all pointing at a gateway of stock engines.
 
 ## decisions
 
-- **D-031-1 — (owner, at start) the Tauri shell: cut (lean) or keep.**
+- **D-031-1 — The Tauri shell: CUT (owner-confirmed 2026-11-17).** The
+  decision record: it exists to distribute the bundled engine (the
+  installer is the product's body upstream); our product is docker +
+  browser + MCP, and keeping it keeps the per-OS build/test logistics
+  the unbundling was meant to shed. The "no docker, window next to the
+  service" mode is covered by running the service binary directly
+  (`--remote`) — no window needed.
 - **D-031-2 — (fill in in-session) the final cut list** (the working
   list in the acceptance criteria is the starting point; every file
   named, every keep argued).
