@@ -125,11 +125,15 @@ the MCP**, all pointing at a gateway of stock engines.
   longer need in this new decision/direction, so maybe clean it up now").
   Ordered after the rebase (D-030-1) and before task-032 (the
   byte-identity constraint has to actually be gone first).
-- 2026-11-17 (from task-030's post-close note): the deployed box showed
-  a scary "inference server did not report its capabilities (HTTP 500)"
-  banner with no inference running — it was a *failed job from 5 hours
-  earlier* (pre-engine-restore) re-rendered by the project view. Small
-  scope item: the job error banner should carry the failure timestamp
-  (and maybe a "this job failed before the engine was fixed" style
-  hint is overkill — the time is enough), so stale failures read as
-  history, not as a live alarm.
+- 2026-11-17 (from task-030's post-close note, sharpened 17:30): the
+  deployed box kept toasting "inference server did not report its
+  capabilities (HTTP 500)" with no inference running — two *failed
+  jobs from hours earlier* (pre-engine-restore). Mechanism: `store.ts`
+  toasts on every *observation* of a failed job (the job-update
+  handler ~line 746 and `onReviewJob` ~line 760), so stale failures
+  re-toast on every reconnect/refresh. Small scope item: toast only
+  when the UI *witnesses the transition* to failed (dedupe per job id
+  in client state; a job already failed when the session starts is
+  history, not an alarm), and put the failure time in the detail.
+  (Operational stopgap until it lands: a service restart clears the
+  in-memory job store — jobs never hit disk.)
