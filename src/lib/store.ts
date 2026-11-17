@@ -684,6 +684,21 @@ export function startEvents() {
   );
 }
 
+/** Is this failure news for this client? The toast is for news: the job went from a live
+ * status to failed (or failed within the last minute and this is its first sighting — it
+ * may have run while this tab was closed). A job that was *already failed* when first seen
+ * is history: it stays visible in the project view but must not re-alarm, because the
+ * reconnect catch-up re-lists every job and would otherwise re-toast old failures forever.
+ */
+export function freshFailure(prev: JobView | undefined, job: JobView): boolean {
+  return (
+    job.status === "failed" &&
+    prev?.status !== "failed" &&
+    job.finished_at !== null &&
+    Date.now() - Date.parse(job.finished_at) < 60_000
+  );
+}
+
 function onJob(job: JobView) {
   // A model file went missing between submitting and starting: Setup shows what and how to fix
   // it (only for a job that just failed, not old ones listed again after reconnecting).
@@ -743,12 +758,13 @@ function onJob(job: JobView) {
     return { jobs };
   });
   if (made && job.results.length) countImageMade();
-  if (job.status === "failed" && job.error) toastError(new ApiError(job.error, 500));
+  if (job.error && freshFailure(prev, job)) toastError(new ApiError(job.error, 500));
 }
 
 /** A Prompt+ review job changed: the text streams into the box; when done the box keeps it
  * (with the user's words, for Undo); a failure or a cancel leaves the user's prompt. */
 function onReviewJob(job: JobView) {
+  const prev = getState().jobs[job.id];
   setState((s) => {
     const jobs = { ...s.jobs, [job.id]: job };
     if (!["done", "failed", "cancelled"].includes(job.status)) return { jobs };
@@ -757,7 +773,7 @@ function onReviewJob(job: JobView) {
     const composer = text ? { ...s.composer, prompt: text, enhancedFrom: words } : { ...s.composer, prompt: words };
     return { jobs, review: null, composer };
   });
-  if (job.status === "failed" && job.error) toastError(new ApiError(job.error, 500));
+  if (job.error && freshFailure(prev, job)) toastError(new ApiError(job.error, 500));
   if (job.status === "done") focusPrompt(true);
 }
 
