@@ -52,11 +52,14 @@ and **every exit path restores the runtime — service config
 byte-identical, vllm ready — before the marker**, so the blocked agent
 session resumes with inference working. Run 8 implements that and is
 next.** **Known box issue found in that window's work (owner decision
-pending): the klein engine cannot boot — its in-engine VLM pair
-(`Qwen3-VL-4B-Instruct` Q4_K_M + mmproj, `/home/p/ml/models/`
-`gguf/Qwen/`) was removed from the box ~11-14, so the box's active model
-has been down since then (qwen flavors unaffected); record + fix options
-in the task file.**
+pending): BOTH of the box's image engines are unbootable — the
+`Qwen3-VL` GGUFs under `/home/p/ml/models/gguf/Qwen/` (4B for klein,
+8B for turbo/full) were removed 2026-11-14, so no image job can run on
+the box at all (vllm is text-only); the PE door files (the production
+PUP) and every DiT are intact. The 8B half was found this afternoon in
+the daemon journal; record + fix options in the task file. The two
+proof jobs are the only thing left in 030, and they are blocked on that
+restore.**
 Queue: **030** (the 0.12.1 rebase, on the new repo — in progress) →
 **031** (the chaff cut, on the merged tree) → **032** (projects → DB,
 once the byte-identity constraint is actually gone). 023/025/027/033
