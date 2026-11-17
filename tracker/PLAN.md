@@ -249,3 +249,20 @@ is *where the PUP tokens come from*.**
 - A fresh session: pi auto-injects `AGENTS.md` (its fork preamble points
   here) → read `STATUS.md` → the oldest todo task → work it.
 - `tracker/` is fork-owned and is never included in an upstream PR.
+
+## 8. Independence phase (2026-11-17 — supersedes the plan's "the fork may
+disappear if merged upstream" premise, which died with the #52 decline)
+
+D-RB ("the fork is the product") is being executed, in four tasks in
+`tracker/tasks/todo/`: **029** the standalone repo `kokon-ee` (new
+non-fork repo, full history, attribution pass first, old fork archived,
+author notified in #52); **030** the rebase onto upstream 0.12.1 as the
+in-vivo test that independence still lets us pull upstream features
+(idle-unload, per-project folders, More like this, and their interaction
+with the EE mode and multi-user); **031** the chaff cut (the product is
+the box service: docker image + browser UI + MCP against a gateway of
+stock engines — the bundled-engine path, installer, updater, Mac engine
+and release logistics go, with the Tauri shell as the open decision);
+**032** the projects store to the database — the recorded D-MU13 trigger
+(the 2026-11-13 task-026 record names D-RB as its revisit condition). All
+of §0–§7 stands as the completed v2 separation that this phase builds on.
