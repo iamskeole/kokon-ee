@@ -482,7 +482,7 @@ Build the image (the two-stage `docker/Dockerfile` builds the UI, then
 
 ```sh
 # verified: reference host. Tag convention: external-engine-<version>-<commit>.
-git clone <this repo> kokon && cd kokon   # or work in the existing clone
+git clone <this repo> kokon-ee && cd kokon-ee   # or work in the existing clone
 docker build -f docker/Dockerfile \
   -t ghcr.io/<org>/kokon:external-engine-0.12.0-<short-commit> .
 ```
