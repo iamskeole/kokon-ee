@@ -1,4 +1,4 @@
-// kokon-mcp — MCP server (stdio) for Kokon. Uses the same local service and
+// kokon-ee-mcp — MCP server (stdio) for Kokon EE. Uses the same local service and
 // generation engine as the desktop app. Works when the app is closed: the service and
 // the inference server are started on demand. Everything stays on 127.0.0.1.
 
@@ -99,7 +99,7 @@ for (const name of Object.keys(schemas) as (keyof typeof schemas)[]) {
 
 async function main() {
   if (process.argv.includes("--version")) {
-    process.stdout.write(`kokon-mcp ${VERSION}\n`);
+    process.stdout.write(`kokon-ee-mcp ${VERSION}\n`);
     return;
   }
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
@@ -118,6 +118,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  process.stderr.write(`kokon-mcp failed: ${e instanceof Error ? e.stack : String(e)}\n`);
+  process.stderr.write(`kokon-ee-mcp failed: ${e instanceof Error ? e.stack : String(e)}\n`);
   process.exit(1);
 });

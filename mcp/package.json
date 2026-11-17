@@ -1,9 +1,9 @@
 {
-  "name": "kokon-mcp",
+  "name": "kokon-ee-mcp",
   "version": "0.12.1",
-  "mcpName": "io.github.GabrieleLozupone/kokon",
+  "mcpName": "io.github.iamskeole/kokon-ee",
   "license": "AGPL-3.0-only",
-  "description": "MCP server for Kokon: generate and edit images offline with Qwen-Image 2.1 on your own GPU. Requires the Kokon desktop app (Windows/macOS).",
+  "description": "MCP server for Kokon EE: generate and edit images offline with Qwen-Image 2.1 on your GPU, against the Kokon EE service (the box: docker image + browser UI). No API key, no cloud.",
   "keywords": [
     "mcp",
     "mcp-server",
@@ -13,22 +13,22 @@
     "qwen-image",
     "local",
     "offline",
-    "kokon"
+    "kokon",
+    "kokon-ee"
   ],
-  "author": "Gabriele Lozupone",
-  "homepage": "https://kokon.app",
-  "bugs": "https://github.com/GabrieleLozupone/kokon/issues",
+  "author": "iamskeole",
+  "bugs": "https://github.com/iamskeole/kokon-ee/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/GabrieleLozupone/kokon.git",
+    "url": "git+https://github.com/iamskeole/kokon-ee.git",
     "directory": "mcp"
   },
   "type": "module",
   "bin": {
-    "kokon-mcp": "build/kokon-mcp.cjs"
+    "kokon-ee-mcp": "build/kokon-ee-mcp.cjs"
   },
   "files": [
-    "build/kokon-mcp.cjs",
+    "build/kokon-ee-mcp.cjs",
     "README.md",
     "LICENSE"
   ],
@@ -36,7 +36,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --banner:js=\"#!/usr/bin/env node\" --outfile=build/kokon-mcp.cjs",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --banner:js=\"#!/usr/bin/env node\" --outfile=build/kokon-ee-mcp.cjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build:exe": "node scripts/build-exe.mjs",

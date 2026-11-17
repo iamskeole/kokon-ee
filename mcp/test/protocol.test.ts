@@ -36,7 +36,7 @@ let client: Client;
 beforeAll(async () => {
   client = new Client({ name: "qls-test", version: "1.0.0" });
   const exe = process.env.QLS_MCP_EXE;
-  await client.connect(new StdioClientTransport({ command: exe ?? process.execPath, args: exe ? [] : [path.join(root, "mcp", "build", "kokon-mcp.cjs")], env, cwd: proj, stderr: "pipe" }));
+  await client.connect(new StdioClientTransport({ command: exe ?? process.execPath, args: exe ? [] : [path.join(root, "mcp", "build", "kokon-ee-mcp.cjs")], env, cwd: proj, stderr: "pipe" }));
 }, 30_000);
 
 afterAll(async () => {

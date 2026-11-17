@@ -1,27 +1,19 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.GabrieleLozupone/kokon",
-  "title": "Kokon",
-  "description": "Generate and edit images offline with Qwen-Image 2.1 on your GPU. Needs the Kokon desktop app.",
+  "name": "io.github.iamskeole/kokon-ee",
+  "title": "Kokon EE",
+  "description": "Generate and edit images offline with Qwen-Image 2.1 on your GPU, against the Kokon EE service (the box: docker image + browser UI). No API key, no cloud.",
   "version": "0.12.1",
-  "websiteUrl": "https://kokon.app",
   "repository": {
-    "url": "https://github.com/GabrieleLozupone/kokon",
+    "url": "https://github.com/iamskeole/kokon-ee",
     "source": "github",
     "subfolder": "mcp"
   },
-  "icons": [
-    {
-      "src": "https://raw.githubusercontent.com/GabrieleLozupone/kokon/master/assets/brand/icon/kokon-icon-256.png",
-      "mimeType": "image/png",
-      "sizes": ["256x256"]
-    }
-  ],
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
-      "identifier": "kokon-mcp",
+      "identifier": "kokon-ee-mcp",
       "version": "0.12.1",
       "runtimeHint": "npx",
       "transport": { "type": "stdio" },

@@ -1,4 +1,4 @@
-// Builds build/kokon-mcp(.exe): the bundled server injected into a copy of the Node binary
+// Builds build/kokon-ee-mcp(.exe): the bundled server injected into a copy of the Node binary
 // (Node "single executable application"). No separate Node install is needed to run it.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -10,15 +10,15 @@ const root = path.resolve(here, "..");
 const build = path.join(root, "build");
 const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: "inherit", shell: process.platform === "win32" && cmd === "npx" });
 
-run("npx", ["esbuild", "src/index.ts", "--bundle", "--platform=node", "--target=node22", "--format=cjs", "--outfile=build/kokon-mcp.cjs", "--minify"]);
+run("npx", ["esbuild", "src/index.ts", "--bundle", "--platform=node", "--target=node22", "--format=cjs", "--outfile=build/kokon-ee-mcp.cjs", "--minify"]);
 fs.writeFileSync(
   path.join(build, "sea-config.json"),
-  JSON.stringify({ main: "build/kokon-mcp.cjs", output: "build/sea-prep.blob", disableExperimentalSEAWarning: true, useSnapshot: false, useCodeCache: true }),
+  JSON.stringify({ main: "build/kokon-ee-mcp.cjs", output: "build/sea-prep.blob", disableExperimentalSEAWarning: true, useSnapshot: false, useCodeCache: true }),
 );
 run(process.execPath, ["--experimental-sea-config", "build/sea-config.json"]);
 const mac = process.platform === "darwin";
 const win = process.platform === "win32";
-const exe = path.join(build, win ? "kokon-mcp.exe" : "kokon-mcp");
+const exe = path.join(build, win ? "kokon-ee-mcp.exe" : "kokon-ee-mcp");
 fs.copyFileSync(process.execPath, exe);
 fs.chmodSync(exe, 0o755);
 const fuse = ["--sentinel-fuse", "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2"];
@@ -32,6 +32,8 @@ if (mac) {
 }
 
 const triple = mac ? "aarch64-apple-darwin" : win ? "x86_64-pc-windows-msvc" : "x86_64-unknown-linux-gnu";
+// The sidecar keeps the app's name: src-tauri's resource contract (tauri.conf.json)
+// references binaries/kokon-mcp; the desktop shell is being retired, and it goes with it.
 const sidecar = path.resolve(root, "..", "src-tauri", "binaries", `kokon-mcp-${triple}${win ? ".exe" : ""}`);
 fs.copyFileSync(exe, sidecar);
 console.log(`built ${exe} (${(fs.statSync(exe).size / 1e6).toFixed(1)} MB) -> ${sidecar}`);

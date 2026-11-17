@@ -4,15 +4,15 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { helpText } from "../src/help.js";
 
-const bundle = path.resolve(__dirname, "..", "build", "kokon-mcp.cjs");
+const bundle = path.resolve(__dirname, "..", "build", "kokon-ee-mcp.cjs");
 
 describe("helpText", () => {
   const text = helpText("1.2.3");
 
   it("says what the program is and how to register it", () => {
-    expect(text).toContain("kokon-mcp 1.2.3");
+    expect(text).toContain("kokon-ee-mcp 1.2.3");
     expect(text).toContain("stdio");
-    expect(text).toContain("claude mcp add --scope user kokon -- npx -y kokon-mcp");
+    expect(text).toContain("npx -y kokon-ee-mcp");
   });
 
   it("lists every environment variable the server reads", () => {

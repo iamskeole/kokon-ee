@@ -1,20 +1,24 @@
-# kokon-mcp
+# kokon-ee-mcp
 
-MCP server for [Kokon](https://kokon.app). It lets Claude Code, Cursor, Claude Desktop and other
-MCP clients generate and edit images with Qwen-Image 2.1, running offline on your own GPU.
-No API key, no cloud. Everything stays on `127.0.0.1`.
+MCP server for [Kokon EE](https://github.com/iamskeole/kokon-ee). It lets Claude Code, Cursor,
+Claude Desktop and other MCP clients generate and edit images with Qwen-Image 2.1, running
+offline on your own GPU. No API key, no cloud. Everything stays on your box.
 
-> **Requires the Kokon desktop app** (Windows with a 12 GB+ GPU: NVIDIA, or AMD/Intel in beta;
-> or an Apple Silicon Mac, beta, 16 GB+). Download it from [kokon.app](https://kokon.app), open it once and
-> finish the setup so the model is downloaded. This package is only the bridge between your AI
-> agent and the app. The app doesn't need to be open: the server starts the engine on demand.
+> **Against the Kokon EE service** — the box deployment: a Docker image with the browser UI,
+> pointed at the box's gateway of stock engines
+> ([docs/fresh-box.md](https://github.com/iamskeole/kokon-ee/blob/main/docs/fresh-box.md)).
+> The server connects through the service's own `service.json` (port + token): point
+> `QLS_DATA_DIR` at the service's data folder (on the box, the compose's `data/` bind) and it
+> picks the running service up. No separate configuration, nothing leaves `127.0.0.1`.
 
 ## Setup
 
-Claude Code:
+Claude Code, on the box (the data folder beside the compose file):
 
 ```bash
-claude mcp add --scope user kokon -- npx -y kokon-mcp
+claude mcp add --scope user kokon-ee \
+  --env QLS_DATA_DIR=/home/<you>/ml/frontends/kokon-ee/data \
+  -- npx -y kokon-ee-mcp
 ```
 
 Any client that takes the standard JSON config (`.mcp.json`, Claude Desktop, Cursor...):
@@ -22,26 +26,30 @@ Any client that takes the standard JSON config (`.mcp.json`, Claude Desktop, Cur
 ```json
 {
   "mcpServers": {
-    "kokon": {
+    "kokon-ee": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "kokon-mcp"]
+      "args": ["-y", "kokon-ee-mcp"],
+      "env": { "QLS_DATA_DIR": "/home/<you>/ml/frontends/kokon-ee/data" }
     }
   }
 }
 ```
 
-Needs Node.js 22 or newer. The Kokon installer also ships the same server as a standalone
-executable (`kokon-mcp.exe` / `kokon-mcp` inside the app), if you prefer not to use Node. See the
-[main README](https://github.com/GabrieleLozupone/kokon#use-it-from-your-ai-agent).
+Needs Node.js 22 or newer. Against a desktop install of
+[Kokon](https://github.com/GabrieleLozupone/kokon) the same server works as before (it finds
+the app's data folder, or starts the app's service if none is running; the installer also ships
+it as a standalone executable, `kokon-mcp.exe` / `kokon-mcp`, next to the service).
 
-Then ask: *"Generate a hero image for this README and save it in docs/"* or *"Remove the background
-clutter from screenshot.png"*. The first call takes about a minute while the model loads.
+Then ask: *"Generate a hero image for this README and save it in docs/"* or *"Remove the
+background clutter from screenshot.png"*. On the box the engines load through the gateway on
+the first call; the first call of a session takes as long as the engine boot.
 
 ## Tools
 
-Prompts are used exactly as your assistant writes them: Kokon's own prompt writer (Prompt+) does not
-run for MCP, so the assistant writes the full description. The tool descriptions tell it how.
+Prompts are used exactly as your assistant writes them: the service's own prompt writer
+(Prompt+) runs only in the UI's modes, so the assistant writes the full description. The tool
+descriptions tell it how.
 
 | Tool | What it does |
 | --- | --- |
@@ -58,12 +66,14 @@ run for MCP, so the assistant writes the full description. The tool descriptions
 
 - Every result returns the absolute path of the saved file, its size, seed and metadata.
 - Reads and writes are limited to the project folder (`CLAUDE_PROJECT_DIR` or the working
-  directory), Kokon's output folder and folders listed in `QLS_MCP_ALLOWED_DIRS` (separated by
-  semicolons). Existing files are never overwritten.
+  directory), the service's output folder and folders listed in `QLS_MCP_ALLOWED_DIRS`
+  (separated by semicolons). Existing files are never overwritten.
 - Images are not sent back to the model by default. Pass `include_preview: true` for a small JPEG.
 - Progress is reported through MCP progress notifications.
 
 ## License
 
-AGPL-3.0-only. The Qwen-Image 2.1 model weights the app downloads are under the Qwen Research
-License (non-commercial). Source: [github.com/GabrieleLozupone/kokon](https://github.com/GabrieleLozupone/kokon/tree/master/mcp).
+AGPL-3.0-only (a derivative of Kokon's `kokon-mcp`; copyright in the
+[NOTICE](https://github.com/iamskeole/kokon-ee/blob/main/NOTICE)). The Qwen-Image 2.1 model
+weights are under the Qwen Research License (non-commercial). Source:
+[github.com/iamskeole/kokon-ee](https://github.com/iamskeole/kokon-ee/tree/main/mcp).

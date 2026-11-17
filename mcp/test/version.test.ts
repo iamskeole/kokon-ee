@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const json = (p: string) => JSON.parse(readFileSync(new URL(p, import.meta.url), "utf8"));
 
-// kokon-mcp ships with the app (sidecar), on npm and in the MCP Registry under one version.
+// kokon-ee-mcp ships with the app (sidecar), on npm and in the MCP Registry under one version.
 describe("version", () => {
   it("matches the app and the registry entry", () => {
     const mcp = json("../package.json").version;
