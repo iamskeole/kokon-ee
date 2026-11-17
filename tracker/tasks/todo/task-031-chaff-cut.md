@@ -125,3 +125,11 @@ the MCP**, all pointing at a gateway of stock engines.
   longer need in this new decision/direction, so maybe clean it up now").
   Ordered after the rebase (D-030-1) and before task-032 (the
   byte-identity constraint has to actually be gone first).
+- 2026-11-17 (from task-030's post-close note): the deployed box showed
+  a scary "inference server did not report its capabilities (HTTP 500)"
+  banner with no inference running — it was a *failed job from 5 hours
+  earlier* (pre-engine-restore) re-rendered by the project view. Small
+  scope item: the job error banner should carry the failure timestamp
+  (and maybe a "this job failed before the engine was fixed" style
+  hint is overkill — the time is enough), so stale failures read as
+  history, not as a live alarm.
