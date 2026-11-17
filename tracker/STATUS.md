@@ -51,15 +51,19 @@ on-demand start the revival; the window stops the vllm process instead)
 and **every exit path restores the runtime — service config
 byte-identical, vllm ready — before the marker**, so the blocked agent
 session resumes with inference working. Run 8 implements that and is
-next.** **Known box issue found in that window's work (owner decision
-pending): BOTH of the box's image engines are unbootable — the
-`Qwen3-VL` GGUFs under `/home/p/ml/models/gguf/Qwen/` (4B for klein,
-8B for turbo/full) were removed 2026-11-14, so no image job can run on
-the box at all (vllm is text-only); the PE door files (the production
-PUP) and every DiT are intact. The 8B half was found this afternoon in
-the daemon journal; record + fix options in the task file. The two
-proof jobs are the only thing left in 030, and they are blocked on that
-restore.**
+next.** **Box engine breakage found in that window's work and FIXED the
+same afternoon:** the `Qwen3-VL` sidecar VLMs under
+`/home/p/ml/models/gguf/Qwen/` (4B for klein, 8B for turbo/full — each
+engine's own text encoder, *not* the PUP doors) had been removed by the
+owner's 2026-11-14 data-recovery session (the shell history carries the
+glob: `rm -rf Qwen3-VL-*`), so no image job could run on the box at all
+from 11-14 until 14:50 today; both pairs are now restored byte-exact from
+the same HF revisions the originals came from (the HF cache's `refs/main`
+still held them), renamed to the boot scripts' convention, with
+`provenance.md` per dir and all 10 preflight checks re-proven. The PE
+door files (the production PUP) and every DiT were never missing. The
+two proof jobs are the only thing left in 030 — w030 run 9, ready at the
+owner's GO.**
 Queue: **030** (the 0.12.1 rebase, on the new repo — in progress) →
 **031** (the chaff cut, on the merged tree) → **032** (projects → DB,
 once the byte-identity constraint is actually gone). 023/025/027/033
