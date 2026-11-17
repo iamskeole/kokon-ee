@@ -1078,12 +1078,6 @@ export function Stage() {
   // A phone: swipe between versions, a row of actions and a filmstrip (PhoneStage.tsx).
   const phone = useNarrow();
   const job = useStore((s) => (item?.jobId ? s.jobs[item.jobId] : undefined));
-  // External engine mode: the configured model name of the model that made the shown image
-  // (each record carries the tenant it was sent to, else the engine's reported name).
-  const modelLabel = useStore((s) => {
-    const g = item?.gen;
-    return s.external && g ? (entryForGeneration(s.models, g)?.label ?? null) : null;
-  });
   const showBoxes = useStore((s) => s.showBoxes);
   const labels = useMemo(() => sessionLabels(session), [session]);
   const lab = useLab();
