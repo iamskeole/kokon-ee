@@ -172,9 +172,7 @@ pointing at a gateway of stock engines.
     host-built service needs `LD_LIBRARY_PATH=/home/linuxbrew/.linuxbrew/opt/openssl/lib`
     (the host has no libssl-dev and sudo is owner-only; the 11-06 binary
     worked because it linked the pre-upgrade 3.x whose SONAME matches the
-    system `libssl3t64`). Permanent fix = `apt install libssl-dev` —
-    remaining owner action, not a blocker; the Docker image build is
-    unaffected (it apt-installs its own).
+    system `libssl3t64`). Permanent fix = `apt install libssl-dev` — **owner ran it 2026-11-17, verified**: a clean-env `cargo check -p qls-service` (no `OPENSSL_DIR`/`PKG_CONFIG_PATH`/`LD_LIBRARY_PATH`) now resolves the system openssl 3.5.5, so no env-var dance on this box anymore. The Docker image build was never affected (it apt-installs its own).
   - **AC6** the D-IND7 draft went to the owner in the session report;
     sending it is the only remaining owner action.
   - Housekeeping: the session's pi cwd was pinned to the old clone path —
