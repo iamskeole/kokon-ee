@@ -125,15 +125,8 @@ the MCP**, all pointing at a gateway of stock engines.
   longer need in this new decision/direction, so maybe clean it up now").
   Ordered after the rebase (D-030-1) and before task-032 (the
   byte-identity constraint has to actually be gone first).
-- 2026-11-17 (from task-030's post-close note, sharpened 17:30): the
-  deployed box kept toasting "inference server did not report its
-  capabilities (HTTP 500)" with no inference running — two *failed
-  jobs from hours earlier* (pre-engine-restore). Mechanism: `store.ts`
-  toasts on every *observation* of a failed job (the job-update
-  handler ~line 746 and `onReviewJob` ~line 760), so stale failures
-  re-toast on every reconnect/refresh. Small scope item: toast only
-  when the UI *witnesses the transition* to failed (dedupe per job id
-  in client state; a job already failed when the session starts is
-  history, not an alarm), and put the failure time in the detail.
-  (Operational stopgap until it lands: a service restart clears the
-  in-memory job store — jobs never hit disk.)
+- 2026-11-17: the 'stale failed job keeps toasting' bug found during the
+  task-030 window work is **not** part of this cut — it is a few-line UI fix
+  (toast only on a witnessed live-to-failed transition, plus a 60 s freshness
+  window for first sightings) and shipped the same afternoon as **task-034**
+  (image `multiuser-508182b`) so this task stays focused on the chaff itself.
