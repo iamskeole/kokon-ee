@@ -600,22 +600,38 @@ journal slice, staged `svc-adopt.json`) and the off-arm's in
 `/tmp/w028r3b/` (merged into the set).
 
 
-Final step (same-day evening) — verdict and adoption. The owner's visual
-  review (a vision session): t2i **b > boff > a**, edit **a ≈ b**, compose
-  **b > a**; overall **ADOPT-NATIVE-ON** (D-PE18). Cutover applied: live
-  service config flipped to the staged schema-14 native wiring (md5
-  `4baa5379…` — turbo/full → PE-T2I `9105` + PE-I2I `9104` +
-  `pup-qwen-native`; klein unchanged on the BFL door), the pre-adoption
-  bytes preserved as `config.json.pre028` (md5 `8b8936ff…`, the one-step
-  rollback, D-PE8), `docker restart kokon`, service at rest (no GPU work —
-  the window's arm B had already proven exactly this wiring).
-  Side item on the host, closed per D-PE19: the vision vllm door's encoder
-  OOM (17:23/17:25 fatals) — the 1 MP image cap in
-  `serve-qwen3.8-27b-vision.sh`, KV budget untouched, proven with the
-  39k-token + 3-image request. The A/B evidence set (7 images, views,
-  jobs index, digest) is archived at `/home/p/ml/backends/_evidence/w028r3/`
-  (the `/tmp/w028r3` original is ephemeral). Task done; the record moves
-  to `done/`.
+## Adoption — done same evening (2026-11-12): the production state since
+
+The owner's visual review (a vision session): t2i **b > boff > a**, edit
+**a ≈ b**, compose **b > a**; overall **ADOPT-NATIVE-ON** (D-PE18) —
+thinking **on** stays the default (D-PE5 resolved by the verdict).
+Cutover applied: live service config flipped to the staged schema-14
+native wiring (md5 `4baa5379…` — turbo/full → PE-T2I `9105` + PE-I2I
+`9104` + `pup-qwen-native`; klein unchanged on the BFL door), the
+pre-adoption bytes preserved as `config.json.pre028` (md5
+`8b8936ff…`, the one-step rollback, D-PE8), `docker restart kokon`,
+service at rest (no GPU work — the window's arm B had already proven
+exactly this wiring). Side item on the host, closed per D-PE19: the
+vision vllm door's encoder OOM (17:23/17:25 fatals) — the 1 MP image cap
+in `serve-qwen3.8-27b-vision.sh`, KV budget untouched, proven with the
+39k-token + 3-image request. The A/B evidence set (7 images, views,
+jobs index, digest) is archived at
+`/home/p/ml/backends/_evidence/w028r3/` (the `/tmp/w028r3` original is
+ephemeral).
+
+**Production state (owner-confirmed 2026-11-17; windows treat it as
+ground truth — run jobs through it, restore configs byte-identical,
+never "simplify" it):** the gateway registry carries the two native PE
+doors (`kokon-pup-qwen-image-2.1-t2i` — text-only, no mmproj — and
+`kokon-pup-qwen-image-2.1-i2i` — with mmproj-bf16) in the qwen sets as
+the mode-exclusive group `qt & (p | pt | pi)` / `qf & (p | pt | pi)`,
+and the service's qwen pipelines point at them (`vlm` = the T2I door,
+`vlmVision` = the I2I door, bundle `pup-qwen-native`; the BFL door `p`
+stays in the group as the escape hatch), klein on its BFL door. The
+post-adoption 270-image battery (2026-11-13,
+`/home/p/ml/backends/_evidence/battery-0113/`) ran on exactly this
+wiring and is its standing quality reference. Task done; the record
+moves to `done/`.
 
 ## Decisions (pre-logged)
 

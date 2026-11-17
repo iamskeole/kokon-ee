@@ -36,8 +36,28 @@ Keep this file current at the end of every task.
 [x] WP6 stock-cleanup — task-020 done 11-04, reopened 11-05, **re-land COMPLETE and closed this span** — the 11-04 record (stock-016 live, deferral proven in both directions, chat-priority the product fact) stands as the provenance of the invariants; the 11-05 re-land: layout surgery (pure stock trees; `_scripts`/`_configs`/`_jobs` homes; 10 pure-boot scripts; **no `cmdStop` anywhere**; `.last-good` + reload semantics; `logToStdout: both`), the owner's handover to the daemon-owned vllm, the pre-window daemon restart (journal mirror engaged; the P3 bind-handover race found + gated), and the **w020r window PASSED 223 s** (vllm 4-s group stop with `EngineCore` in the journal, llama.cpp 2-s, every set eviction per the stock-017 sets, vllm restored last, DONE marker last). Record: `done/task-020.md`.
 
 ## Current
-**task-030 — rebase onto 0.12.1 — CURRENT (the oldest file left in `todo/`; full file there).**
-Queue: **030** (the 0.12.1 rebase, on the new repo — current) → **031** (the chaff cut, on the merged tree) → **032** (projects → DB, once the byte-identity constraint is actually gone). 023/025/027/033 stay parked on the owner's trigger (`tasks/parked/` — 033 = the ghcr distribution after the current phase, D-033-1). **Owner inputs resolved 2026-11-17: name = `kokon-ee` (D-IND1 final) and the Tauri shell = cut (D-031-1 final — 031's scope is settled).** **task-029 is DONE (11-17, the move session — record in the task file and the Updated line above); the #52 reply (D-IND7) was sent the same day — no owner actions outstanding.**
+**task-030 — rebase onto 0.12.1 — IN PROGRESS (the rebase and the three
+post-rebase design decisions are done and committed; image
+`ghcr.io/iamskeole/kokon-ee:multiuser-80bf7bf` built and already swapped
+in on the box — the config passed through the 0.12.1 migration chain
+byte-identical; remaining: the two proof jobs — one t2i and one
+more-like-this — on the production qwen wiring, vllm revived, tracker
+close-out, push).** **Known box issue found in that window's work
+(owner decision pending): the klein engine cannot boot — its in-engine
+VLM pair (`Qwen3-VL-4B-Instruct` Q4_K_M + mmproj, `/home/p/ml/models/
+gguf/Qwen/`) was removed from the box ~11-14, so the box's active model
+has been down since then (qwen flavors unaffected); record + fix options
+in the task file.**
+Queue: **030** (the 0.12.1 rebase, on the new repo — in progress) →
+**031** (the chaff cut, on the merged tree) → **032** (projects → DB,
+once the byte-identity constraint is actually gone). 023/025/027/033
+stay parked on the owner's trigger (`tasks/parked/` — 033 = the ghcr
+distribution after the current phase, D-033-1). **Owner inputs resolved
+2026-11-17: name = `kokon-ee` (D-IND1 final) and the Tauri shell = cut
+(D-031-1 final — 031's scope is settled).** **task-029 is DONE (11-17,
+the move session — record in the task file and the Updated line above);
+the #52 reply (D-IND7) was sent the same day — no owner actions
+outstanding.**
 
 **task-026 multi-user — DONE 2026-11-13, second time (the projects leak, closed the same day as D-MU13); the 2026-11-12 DONE record below stands as shipped then — this paragraph is the re-close.**
 The owner's live report from the running image: a logged-in (named) user sees
@@ -252,7 +272,11 @@ day) contains everything, and the branch list was tidied to just `main`
   same evening: ADOPT-NATIVE-ON (t2i b > boff > a, edit a ≈ b, compose b >
   a) — the cutover is live (schema 14 native wiring; `config.json.pre028`
   is the one-step rollback), the vision-door 1 MP host fix proven
-  (D-PE18/D-PE19).**
+  (D-PE18/D-PE19).** **Owner-confirmed 2026-11-17: the adopted wiring
+  (native PE doors per job mode + `pup-qwen-native`; klein on its BFL
+  door — record: the task file's adoption section) is the box's
+  production door/PUP matrix; windows run jobs through it and restore it
+  byte-identical.**
 - (done this span: **task-018** — the matrix-router question parked since the task-013 era is the same work as done task-015: resolved as a duplicate, with the AC's written comparison written as `tracker/audits/matrix-vs-groups-018.md` (per-requested-model groups-vs-matrix table; the three delta classes; the one deliberately dropped asymmetry; the 4,608-case replay and the live 255 s window as evidence; `config.yaml.stock-015` is the realized candidate, one-copy rollback to stock-014). The queue now holds task-019 (parked) and task-022 (the owner's one-door single-key topology, parked on the owner's two decisions), with task-020 the current work.)
 - (done this span: **task-016** — the fresh-box reproduction doc is `docs/fresh-box.md`: the whole stack from a new machine (host layout; verified prerequisites; final-state model list + provenance convention; the stock engine recipes at their pins; the v269 gateway with the full matrix routing block and its three-rule semantics; the service image + host-network compose + schema-13; the verification checklist incl. the `matrix:` journal line; the ops rules incl. reload-kills-models and marker-last windows). No BFL prompt bytes, no fork references. AGENTS.md's doc table points at it.)
 - **task-025** (the lab's models on the box — BiRefNet → CUDA EP, MobileSAM → box-run endpoint, so weak clients use the lab as a thin client) — **PARKED on the owner's trigger** (created 2026-11-11 from the owner's question after the incident night: the VRAM fits on the heaviest pairs (20–21 GB of 24 GB; both lab models cost well under ~1 GB with a capped ORT arena). The 12-inch Intel MacBook cannot run the in-browser models natively (no WebGPU, one-thread WASM, and the BiRefNet WASM OOM'd in the spike) — a box-run lab is the long-term fix for that client. The file splits the work: BiRefNet→GPU is the small half, MobileSAM→box is the architectural half; in-browser stays the stock-mode default.)
