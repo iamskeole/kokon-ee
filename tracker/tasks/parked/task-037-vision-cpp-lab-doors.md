@@ -94,8 +94,12 @@ parity — the F16 quantization makes 100% impossible and uninteresting.
 **P1 — scratch proof on apollo. No matrix change, no vllm impact, ~a day.**
 1. Pin vision.cpp to the 2026-04 main commit (or v0.3.0 if it proves
    equivalent); build `VISP_VULKAN=ON` (Vulkan SDK headers only at build
-   time; the prebuilt lib works as the fallback).
-2. Download the two GGUFs into the ml-repo model tree, SHA-256 pinned.
+   time; the prebuilt lib works as the fallback). **Home: `backends/
+   kokon-vision/`** (source + built door), per the box's engine layout.
+2. Download the two GGUFs into **`models/gguf/Acly/{MobileSAM,BiRefNet-
+   lite}/`** with a `provenance.md` in each (HF repo + pinned revision +
+   SHA-256 + size) — the box's model convention; SETUP.md's model step is
+   what re-creates them on a fresh box.
 3. **The door**: `backends/kokon-vision/vision_server.cpp` (~300–500 lines
    over the C API, linked against the built lib): `GET /health`,
    `POST /sam/encode` (image bytes), `POST /sam/predict` (points/box → 4
@@ -130,7 +134,13 @@ resort). The browser contract is untouched either way.
 **P4 — docs & handover.** fresh-box (the lab's models live on the
 accelerator as a stock GGUF door; a single box stays in-process; the
 45→26 MB + 224→85 MB shrink), prod-box handover, this file closed with the
-numbers.
+numbers. **Durability (the owner's box-down question, answered 11-22):**
+the ml repo tracks only text — the door source, the boot script
+(`_scripts/serve-kokon-vision.sh`), the matrix entry, and the pin records;
+SETUP.md's step 1 gains the 8th pinned checkout (vision.cpp) and its model
+step the two `provenance.md` recipes, so a bare machine rebuilt from the
+apollo-ml repo gets the door in the same pass as the gateway and every
+other door. Nothing exists only on this box.
 
 ## decisions
 
