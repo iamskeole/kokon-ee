@@ -567,7 +567,12 @@ model, which the service **runs** for the browser
 (`POST /api/v1/segment/encode|predict`; the UI uses it whenever the service
 has the files, so even a browser that cannot run ONNX gets the lab — the
 in-browser onnxruntime-web copy stays the stock-mode default and the
-fallback when the service has none).
+fallback when the service has none). On a **split box** the segment half
+never lands here at all: the accelerator runs the same two files as the
+gateway's `kokon-sam` door and the service relays to it (see
+[service-on-prod-box.md](service-on-prod-box.md) — no extra config, it
+reuses the gateway base and key the image doors already use); the matte
+model stays in-process on whatever box runs the service.
 Both download on first use, on demand; nothing about them touches the
 engines — the lab's DiT-touching operations (Quality cut-out, Blend,
 Expand, painted-area edits) ride the same sdcpp job API as everything else.
