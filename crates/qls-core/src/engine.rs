@@ -1128,8 +1128,7 @@ impl Engine {
         hex::encode(Sha256::digest(bytes))
     }
 
-    /// The image bytes a selection runs on ("input:"/"gen:"), before any decode: the
-    /// in-process path decodes here, the relay (D-036-1) ships the bytes as-is.
+    /// The image bytes a selection runs on ("input:"/"gen:"), before any decode.
     fn sam_source(&self, src: &str) -> AppResult<Vec<u8>> {
         if !src.starts_with("input:") && !src.starts_with("gen:") {
             return Err(AppError::invalid("Selection works on images already in Kokon."));
@@ -1137,53 +1136,20 @@ impl Engine {
         Ok(self.read_source(src, None)?.0)
     }
 
-    /// The split-box relay (D-036-1): only when an external engine is configured, the door
-    /// being the gateway's `kokon-sam` (a sibling of the sdcpp door, same gateway, same key).
-    fn segment_relay(&self) -> Option<crate::segment::Relay> {
-        let cfg = self.config();
-        let ee = cfg.external_engine()?;
-        if ee.gateway.trim().is_empty() {
-            return None;
-        }
-        crate::segment::Relay::new(ee.gateway.trim(), &ee.api_key).ok()
-    }
-
-    /// Whether the split-box relay door (the gateway's `kokon-sam`) can run the lab: an
-    /// external engine is configured and the door answers — the request boots the door
-    /// on demand, so a first call pays the cold boot (~10-20 s); a dead door answers
-    /// fast, which is what a "not installed" report is for.
-    pub async fn segment_relay_available(&self) -> bool {
-        let Some(relay) = self.segment_relay() else {
-            return false;
-        };
-        tokio::task::spawn_blocking(move || relay.capabilities().is_ok())
-            .await
-            .unwrap_or(false)
-    }
-
     /// The encoder for `src` at the size a `w`×`h` mask needs (the lab calls it once per photo
-    /// before its clicks; the embeddings stay cached where the model runs). In-process when
-    /// this box has the two pinned files (the single-box case); over the wire to the gateway's
-    /// `kokon-sam` door when it doesn't (the split-box case, D-036-1).
+    /// before its clicks; the embeddings stay cached in the process). The model runs here —
+    /// this box has the two pinned files; a box without them reports "not downloaded".
     pub fn segment_encode(&self, src: &str, w: u32, h: u32) -> AppResult<()> {
         let bytes = self.sam_source(src)?;
-        if crate::segment::installed(&self.config().sdcpp_dir) {
-            let img = imaging::decode_image(&bytes)?;
-            return crate::segment::Sam::new(self.config().sdcpp_dir.clone())
-                .encode(&Self::sam_key(&bytes), &img.pixels, w, h);
-        }
-        if let Some(relay) = self.segment_relay() {
-            return relay.encode(&bytes, w, h);
-        }
-        Err(AppError::new(
-            ErrorCode::MissingModel,
-            "The selection model is not downloaded yet.",
-        ))
+        let img = imaging::decode_image(&bytes)?;
+        crate::segment::Sam::new(self.config().sdcpp_dir.clone())
+            .encode(&Self::sam_key(&bytes), &img.pixels, w, h)
     }
 
     /// SAM's 4 masks at `w`×`h` (0/255 PNGs) plus the predicted IoUs: `points` are clicks in
     /// mask pixels (label 0 = not, 1 = object), `box_` confines the object (mask pixels).
-    /// Same two-way split as `segment_encode` (D-036-1).
+    /// The model runs here — the box has the two pinned files; a box without them reports
+    /// "not downloaded" (the browser then uses its in-browser copy, the stock path).
     pub fn segment_predict(
         &self,
         src: &str,
@@ -1193,23 +1159,14 @@ impl Engine {
         box_: Option<(f32, f32, f32, f32)>,
     ) -> AppResult<(Vec<Vec<u8>>, Vec<f32>)> {
         let bytes = self.sam_source(src)?;
-        if crate::segment::installed(&self.config().sdcpp_dir) {
-            let img = imaging::decode_image(&bytes)?;
-            let (masks, iou) = crate::segment::Sam::new(self.config().sdcpp_dir.clone())
-                .predict(&Self::sam_key(&bytes), &img.pixels, w, h, &points, box_)?;
-            let pngs = masks
-                .iter()
-                .map(|m| imaging::encode_png(&image::DynamicImage::ImageLuma8(m.clone()).to_rgba8(), &[], None, true))
-                .collect::<AppResult<_>>()?;
-            return Ok((pngs, iou));
-        }
-        if let Some(relay) = self.segment_relay() {
-            return relay.predict(&bytes, w, h, &points, box_);
-        }
-        Err(AppError::new(
-            ErrorCode::MissingModel,
-            "The selection model is not downloaded yet.",
-        ))
+        let img = imaging::decode_image(&bytes)?;
+        let (masks, iou) = crate::segment::Sam::new(self.config().sdcpp_dir.clone())
+            .predict(&Self::sam_key(&bytes), &img.pixels, w, h, &points, box_)?;
+        let pngs = masks
+            .iter()
+            .map(|m| imaging::encode_png(&image::DynamicImage::ImageLuma8(m.clone()).to_rgba8(), &[], None, true))
+            .collect::<AppResult<_>>()?;
+        Ok((pngs, iou))
     }
 
     /// Applies a library LUT to a "gen:"/"input:" source at `intensity` (0-1) and saves the
