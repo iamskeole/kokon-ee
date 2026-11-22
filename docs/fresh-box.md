@@ -561,8 +561,13 @@ VLM entrypoint and the prompt bundle the VLM applies:
 0.12 adds two CPU-only ONNX models to the service (zero VRAM, zero engine
 interaction — identical in both modes): the **BiRefNet-lite** quick cut-out
 (224 MB, in-service CPU, `POST /api/v1/matte/download` on first use, lands
-in the data volume's `sdcpp/models/matting/`) and **MobileSAM** (~30 MB,
-downloaded and served by the service for the browser's Layers lab).
+in the data volume's `sdcpp/models/matting/`) and **MobileSAM** (~45 MB,
+the same download, `sdcpp/models/segment/`) — the lab's click-to-select
+model, which the service **runs** for the browser
+(`POST /api/v1/segment/encode|predict`; the UI uses it whenever the service
+has the files, so even a browser that cannot run ONNX gets the lab — the
+in-browser onnxruntime-web copy stays the stock-mode default and the
+fallback when the service has none).
 Both download on first use, on demand; nothing about them touches the
 engines — the lab's DiT-touching operations (Quality cut-out, Blend,
 Expand, painted-area edits) ride the same sdcpp job API as everything else.

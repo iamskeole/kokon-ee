@@ -40,10 +40,10 @@ Do, in order:
    the compose and the data dirs (see the doc's Layout). The build is
    self-contained (its own Rust/npm toolchain in the image); allow it
    up to 30 minutes cold.
-3. Build the image, from inside <parent>/kokon-ee/ (current one: a907258;
+3. Build the image, from inside <parent>/kokon-ee/ (current one: 95450c1;
    if the repo's main has moved on since, use its short commit instead):
    docker build -f docker/Dockerfile -t
-   ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-a907258 .
+   ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-95450c1 .
    (or pull that tag from ghcr instead, if the owner says it is pushed
    and hands you a registry token).
 4. Write <parent>/compose.yaml per the doc, and create
@@ -124,7 +124,7 @@ dirs. Same shape; the clone just isn't nested.
 # front), 39151 = token API (127.0.0.1 only: the MCP on this box).
 services:
   kokon-ee:
-    image: ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-a907258
+    image: ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-95450c1
     container_name: kokon-ee
     restart: unless-stopped
     network_mode: host
@@ -233,6 +233,9 @@ token door stays 127.0.0.1-only, for the MCP).
 4. The lab models: the service's `/api/v1/segment` and `/api/v1/matte`
    report `installed: true` (they arrive with a migrated data dir;
    fresh starts download them on first lab use — ~45 MB and ~224 MB).
+   The lab's click-to-select runs on **this** box (the service's CPU, the
+   same two MobileSAM files; the browser only sends clicks and reads back
+   masks), so a weak or ONNX-less browser gets the lab as a thin client.
 5. The UI: open `https://<ui-name>` from **another device** on the
    LAN → sign in with the password → the gallery loads.
 6. One real generated image (accelerator up): a short text-to-image
