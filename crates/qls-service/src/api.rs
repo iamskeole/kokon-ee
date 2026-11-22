@@ -18,6 +18,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use futures_util::stream::Stream;
+use base64::Engine as _;
 use qls_core::{
     catalog,
     config::{AppConfig, ExternalEngine, GpuBackend, OFFICIAL_PROFILE_ID, USER_PROFILE_ID},
@@ -87,6 +88,8 @@ pub fn router(state: Arc<AppState>, lan: bool) -> Router {
         .route("/segment", get(segment_status))
         .route("/segment/download", post(segment_download))
         .route("/segment/models/{file}", get(segment_model))
+        .route("/segment/encode", post(segment_encode))
+        .route("/segment/predict", post(segment_predict))
         .route("/config", get(get_config).put(put_config))
         .route("/enhancer/defaults", get(enhancer_defaults))
         .route("/mac-engine/bench", get(mac_bench_status).post(mac_bench_start).delete(mac_bench_clear))
@@ -531,6 +534,102 @@ async fn segment_model(State(s): St, AxPath(file): AxPath<String>) -> ApiResult<
         .filter(|p| p.is_file())
         .ok_or_else(|| AppError::new(ErrorCode::NotFound, "The selection model is not downloaded."))?;
     serve_file(&path, Some("application/octet-stream")).await
+}
+
+/// A selection size the service runs (the UI asks for at most 2048 on the long side; be generous,
+/// the memory is the model's, not the image's).
+const SEGMENT_MAX_SIDE: u32 = 4096;
+
+fn segment_size_ok(w: u32, h: u32) -> bool {
+    (1..=SEGMENT_MAX_SIDE).contains(&w) && (1..=SEGMENT_MAX_SIDE).contains(&h)
+}
+
+#[derive(Deserialize)]
+struct SegmentEncodeBody {
+    /// "input:<id>" / "gen:<id>".
+    image: String,
+    width: u32,
+    height: u32,
+}
+
+/// The lab's selection encoder, run on the box (the browser stays thin, D-035-1): once per
+/// (image, size) — the embeddings are cached here, so a click later is just the decoder.
+async fn segment_encode(State(s): St, Json(b): Json<SegmentEncodeBody>) -> ApiResult<Json<Value>> {
+    if !segment_size_ok(b.width, b.height) {
+        return Err(AppError::invalid("That selection size is not supported.").into());
+    }
+    let engine = s.engine.clone();
+    let image = b.image.clone();
+    let arg = image.clone();
+    let started = Instant::now();
+    let res =
+        tokio::task::spawn_blocking(move || engine.segment_encode(&arg, b.width, b.height))
+            .await
+            .map_err(AppError::internal)?;
+    // The first call loads the model (a couple of seconds): logged, because a lab that "freezes"
+    // on its first click is otherwise invisible on the box.
+    match &res {
+        Ok(()) => tracing::info!("selection encoder for {} at {}x{} in {} ms", image, b.width, b.height, started.elapsed().as_millis()),
+        Err(e) if e.code == ErrorCode::MissingModel => {
+            tracing::info!("selection encoder for {} refused: {}", image, e.message)
+        }
+        Err(e) => tracing::warn!("selection encoder for {} failed: {} {:?}", image, e.message, e.detail),
+    }
+    res?;
+    Ok(Json(json!({ "ready": true })))
+}
+
+#[derive(Deserialize)]
+struct SegmentPoint {
+    x: f32,
+    y: f32,
+    label: i32,
+}
+
+#[derive(Deserialize)]
+struct SegmentBox {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+}
+
+#[derive(Deserialize)]
+struct SegmentPredictBody {
+    /// "input:<id>" / "gen:<id>".
+    image: String,
+    width: u32,
+    height: u32,
+    points: Vec<SegmentPoint>,
+    #[serde(rename = "box")]
+    box_: Option<SegmentBox>,
+}
+
+/// A click through the lab's selection model run on the box: the 4 masks as 0/255 PNGs (base64)
+/// at the size asked, plus the predicted IoUs — the same contract as the webview's ONNX path
+/// (src/lib/sam.ts), which this replaces whenever the box has the files.
+async fn segment_predict(State(s): St, Json(b): Json<SegmentPredictBody>) -> ApiResult<Json<Value>> {
+    if !segment_size_ok(b.width, b.height) {
+        return Err(AppError::invalid("That selection size is not supported.").into());
+    }
+    let points: Vec<(f32, f32, i32)> = b.points.iter().map(|p| (p.x, p.y, p.label)).collect();
+    let box_ = b.box_.map(|x| (x.x0, x.y0, x.x1, x.y1));
+    let engine = s.engine.clone();
+    let image = b.image.clone();
+    let arg = image.clone();
+    let started = Instant::now();
+    let res = tokio::task::spawn_blocking(move || {
+        engine.segment_predict(&arg, b.width, b.height, points, box_)
+    })
+    .await
+    .map_err(AppError::internal)?;
+    let (pngs, iou) = res?;
+    tracing::info!("selection predict for {} at {}x{}: 4 masks in {} ms", image, b.width, b.height, started.elapsed().as_millis());
+    let data = pngs
+        .iter()
+        .map(|p| base64::engine::general_purpose::STANDARD.encode(p))
+        .collect::<Vec<_>>();
+    Ok(Json(json!({ "masks": data, "iou": iou })))
 }
 
 #[derive(Deserialize)]

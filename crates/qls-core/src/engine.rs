@@ -1120,6 +1120,50 @@ impl Engine {
         imaging::encode_png(&rgba, &[], None, true)
     }
 
+    /// The layers lab's click-to-select model run **here** (the browser's thin path, D-035-1):
+    /// the service owns MobileSAM — the same two pinned files the browser version downloads —
+    /// and the window only sends clicks and reads back 0/255 PNGs.
+    fn sam_key(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(bytes))
+    }
+
+    fn sam(&self, src: &str) -> AppResult<(String, imaging::LoadedImage)> {
+        if !src.starts_with("input:") && !src.starts_with("gen:") {
+            return Err(AppError::invalid("Selection works on images already in Kokon."));
+        }
+        let (bytes, _, _) = self.read_source(src, None)?;
+        let img = imaging::decode_image(&bytes)?;
+        Ok((Self::sam_key(&bytes), img))
+    }
+
+    /// The encoder for `src` at the size a `w`×`h` mask needs (the lab calls it once per photo
+    /// before its clicks; the embeddings stay cached here, keyed on the file's bytes).
+    pub fn segment_encode(&self, src: &str, w: u32, h: u32) -> AppResult<()> {
+        let (key, img) = self.sam(src)?;
+        crate::segment::Sam::new(self.config().sdcpp_dir.clone()).encode(&key, &img.pixels, w, h)
+    }
+
+    /// SAM's 4 masks at `w`×`h` (0/255 PNGs) plus the predicted IoUs: `points` are clicks in
+    /// mask pixels (label 0 = not, 1 = object), `box_` confines the object (mask pixels).
+    pub fn segment_predict(
+        &self,
+        src: &str,
+        w: u32,
+        h: u32,
+        points: Vec<(f32, f32, i32)>,
+        box_: Option<(f32, f32, f32, f32)>,
+    ) -> AppResult<(Vec<Vec<u8>>, Vec<f32>)> {
+        let (key, img) = self.sam(src)?;
+        let (masks, iou) =
+            crate::segment::Sam::new(self.config().sdcpp_dir.clone()).predict(&key, &img.pixels, w, h, &points, box_)?;
+        let pngs = masks
+            .iter()
+            .map(|m| imaging::encode_png(&image::DynamicImage::ImageLuma8(m.clone()).to_rgba8(), &[], None, true))
+            .collect::<AppResult<_>>()?;
+        Ok((pngs, iou))
+    }
+
     /// Applies a library LUT to a "gen:"/"input:" source at `intensity` (0-1) and saves the
     /// result as a new version made from it (mode "lut"; the source stays as it is). Private
     /// when asked or when the source itself is private. Same file format as a source result.

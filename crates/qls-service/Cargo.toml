@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum = "0.8.9"
+base64 = "0.23.1"
 futures-util = "0.3.34"
 qls-core = { version = "0.12.1", path = "../qls-core" }
 rpassword = "7.5.4"

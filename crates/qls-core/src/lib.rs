@@ -30,6 +30,7 @@ pub mod projects;
 pub mod provenance;
 pub mod remote;
 pub mod scene;
+pub mod segment;
 pub mod sdcpp;
 pub mod speed;
 pub mod vlm;
