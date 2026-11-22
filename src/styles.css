@@ -1416,11 +1416,13 @@ kbd { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 6px; display
 }
 .box-sel__coords { color: var(--text-2); font-family: var(--mono); font-size: 11px; }
 .box-desc {
-  flex: 1; min-width: 120px; height: 34px; padding: 0 12px; border-radius: 11px;
-  background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 13px;
+  /* Bounded, like the app's other text fields: `flex: 1` here used to stretch it across the
+   * whole tools row (~1135 px on a 1600 px window), which read as a broken full-width bar. */
+  flex: 0 1 340px; min-width: 140px; height: 32px; padding: 0 10px; border-radius: 10px;
+  background: var(--bg); border: 1px solid var(--border-2); color: var(--text); font-size: 13px;
 }
 .box-desc:disabled { color: var(--text-2); }
-.box-desc:focus { outline: none; border-color: var(--border-2); }
+.box-desc:focus { outline: none; border-color: var(--text-3); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 8%, transparent); }
 .btn.box-kind { padding: 0 10px; height: 32px; border-radius: 10px; color: var(--text-2); font-size: 12.5px; }
 .btn.box-kind.on { background: var(--invert-bg); color: var(--invert-text); }
 
