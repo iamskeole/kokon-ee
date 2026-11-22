@@ -241,13 +241,12 @@ token door stays 127.0.0.1-only, for the MCP).
    Where each one runs: **both** stay in-process on **this** box (the
    service's CPU, on first use) — MobileSAM is a 45 MB CPU model, not a GPU
    model, so it belongs with the service, not on the accelerator (the split
-   exists for the generation engines). A dormant fallback for the rare box
-   that refuses the files: with no local copy, the service relays
-   `/segment/encode|predict` to a gateway `kokon-sam` door through the same
-   `externalEngine` gateway base + key the image doors already use — the
-   owner retired that door on 2026-11-22 (a second engine on the wire for a
-   45 MB CPU model beat the point of the one-service-plus-stock-engines
-   design), so no standard box requests it. The browser only sends clicks
+   exists for the generation engines). The split-box relay that briefly
+   lived in this tree is gone in total (owner, 2026-11-22: a second engine
+   on the wire for a 45 MB CPU model beat the point of the
+   one-service-plus-stock-engines design) — there is no relay left in the
+   service, and a box without the files falls back to the in-browser copy.
+   The browser only sends clicks
    and reads back masks, the same either way — a weak or ONNX-less browser
    gets the lab as a thin client, and the in-browser onnxruntime-web copy
    stays the last-resort

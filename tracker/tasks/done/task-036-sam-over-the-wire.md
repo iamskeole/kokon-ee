@@ -205,10 +205,39 @@ Agreed — the split overreached, and the record says why:
 The **atlas deployment itself** awaits owner-supplied details (atlas
 address, nginx/TLS, the migrated data dir) — the handover in
 `docs/service-on-prod-box.md` is written for it; nothing on apollo is
-outstanding. With the owner's decision above, the serving box runs the lab
-in-process (the files land with the data dir), so the next image build's
-relay rides along dormant and the `kokon-sam` door is optional scenery.
+outstanding. The serving box runs the lab in-process (the files land
+with the data dir), the stock in-browser copy is the fallback, and no
+image build needs anything special.
+
+## purge (2026-11-22, the owner's follow-up: "no half-states")
+
+The owner read the relay as a live second Python model ("why is it
+killed if it's killed?… it's back") and ordered it removed: *nothing
+that looks like a live Python/relay path may remain*. Everything
+task-036 built left both repos in one pass — recoverable from git
+history only:
+
+- **apollo (ml repo, `d5b2d2e`)**: `backends/kokon-sam/` (server, venv,
+  weights) and `_scripts/serve-kokon-sam.sh` deleted; the `_jobs` window
+  journals stay untracked as the window record.
+- **kokon-ee source**: the `Relay` client and its three tests out of
+  `segment.rs` (609 → 353 lines), the `segment_relay*` methods and the
+  two-way branch out of `engine.rs`, the door probe out of the service's
+  `/segment` status, the `reqwest blocking` feature out of the core's
+  manifest. The in-process `Sam`, the 45 MB pinned download, the
+  in-browser onnxruntime-web fallback, and the whole browser contract
+  are untouched.
+
+**The final shape, no half-states: two layers** — the lab runs
+**in-process on whatever box runs the service** (45 MB, CPU, ~0.5 s
+first encode / ~0.1-0.2 s a click), and a box without the files falls
+back to the **in-browser onnxruntime-web copy** (the stock path).
+Nothing bespoke remains; if a box ever genuinely needs the model on
+the accelerator, the proof above is the record of exactly how it was
+done and proven (parity, window protocol, the 100-continue lesson).
+
+Suites after the purge: qls-core 417 (the 420 minus the 3 relay tests) / service 20 / UI 248 / mcp 35+3sk.
 
 ## blockers
 
-None — D-036-3 (CPU on the gateway) removed the vllm-eviction window.
+None — the task is closed in its final form.

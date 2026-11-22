@@ -571,11 +571,11 @@ fallback when the service has none). The segment model runs **in-process on
 whatever box runs the service** — it is a 45 MB CPU model, not a GPU model,
 so it belongs with the service, not on the accelerator (the split exists
 for the generation engines; the matte model is the same shape: in-process
-on the serving box). A dormant fallback for the rare box that refuses the
-45 MB files: if the service has no local copy and its `externalEngine`
-points at a gateway with a `kokon-sam` door, it relays to that door instead
-(see [service-on-prod-box.md](service-on-prod-box.md)); neither this box
-nor the standard split requests it.
+on the serving box). There is no other path: the split-box relay that
+task-036 built and proved (a `kokon-sam` gateway door) was removed in
+total on the owner's call of 2026-11-22 — a 45 MB CPU model does not
+justify a second engine — and a box that cannot host the files falls back
+to the in-browser copy; there is no relay.
 Both download on first use, on demand; nothing about them touches the
 engines — the lab's DiT-touching operations (Quality cut-out, Blend,
 Expand, painted-area edits) ride the same sdcpp job API as everything else.
