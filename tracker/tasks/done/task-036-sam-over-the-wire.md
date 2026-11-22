@@ -155,14 +155,52 @@ Consequences, recorded so nobody re-litigates it:
   → proof → door left resident → **vllm revived (1-token probe) before
   the marker**. One window, no vllm-eviction risk (CPU co-tenant).
 
+## owner decision (2026-11-22, after the split-box proof): the second engine
+## is retired — the lab's model runs in-process on the serving box
+
+The owner's question: "isn't sdcpp enough? why do we need another server? it
+kinda beats the purpose of UI + external engine if we have engines, plural."
+Agreed — the split overreached, and the record says why:
+
+- **sdcpp cannot do it** — the sdcpp doors are generation engines (t2i/i2i/
+  inpaint); MobileSAM is a segmentation model (point prompts → masks) and
+  sd-cpp has no decoder or point input for it. Stock Kokon ran it in the
+  browser (onnxruntime-web) — the thing that broke in a weak browser.
+- **The split-box argument was made for the GPU generation models** (klein/
+  qwen — they need the accelerator and already ride the sdcpp doors).
+  MobileSAM is a different class: 45 MB, CPU, ~50 ms/click, ~1 GB RSS — it
+  fits on any serving box and does not justify a bespoke third engine type
+  (a Python server that is neither sdcpp nor llama.cpp) in the gateway
+  matrix, nor putting a 50 ms click on the wire.
+- **Decision: in-process on the serving box is the design** (what task-035
+  built and what the deployed box already runs; both lab models — matte and
+  segment — sit with the service). The relay stays in the service as a
+  **dormant fallback**: it engages only for a box with no local files whose
+  `externalEngine` points at a matrix that has the door — no standard box
+  does. The `kokon-sam` door was **unloaded via the API that evening** (no
+  window, vllm untouched); its matrix entry stays dormant in the config (it
+  only revives on a request, and nothing on this box requests it) and its
+  files stay in `/home/p/ml/backends/kokon-sam/`. Removing the config line
+  would cost a ~3-min window — deferred until the owner asks.
+- **The "seconds per click" was a measurement artifact, not the design.**
+  The door's own server-side time: 50 ms warm / 0.57 s cold (journal). The
+  1.07 s wall clock was curl's `Expect: 100-continue`: Python's
+  `http.server` only answers 100-continue for HTTP/1.1+, the door was 1.0,
+  so curl (which sends Expect for every POST > 1 KB) waited its full 1 s
+  `--expect-100-timeout` before uploading a body that takes 4 ms. The Go
+  gateway (the product path) answers 100 correctly (86 ms through it) and
+  reqwest (the relay) never sends Expect — the product path was never slow.
+  `sam_server.py` now runs HTTP/1.1 and answers 100-continue explicitly, so
+  a direct curl is fast again (4–50 ms) if the door is ever revived.
+
 ## remaining (not apollo work)
 
 The **atlas deployment itself** awaits owner-supplied details (atlas
 address, nginx/TLS, the migrated data dir) — the handover in
 `docs/service-on-prod-box.md` is written for it; nothing on apollo is
-outstanding. The next service image build carries the relay to the
-serving box (the apollo demo box runs in-process at `fe302e7` and needs
-no new image for demo day).
+outstanding. With the owner's decision above, the serving box runs the lab
+in-process (the files land with the data dir), so the next image build's
+relay rides along dormant and the `kokon-sam` door is optional scenery.
 
 ## blockers
 

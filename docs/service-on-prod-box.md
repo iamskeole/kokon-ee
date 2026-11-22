@@ -238,16 +238,19 @@ token door stays 127.0.0.1-only, for the MCP).
    the segment routes were missing from it, and the lab read
    "could not be downloaded" on every real box). They arrive with a
    migrated data dir; fresh starts download them on first lab use.
-   Where each one runs on a split box: **matte** (BiRefNet-lite, ~224 MB)
-   stays in-process on **this** box (the service's CPU, on first use);
-   **segment** (MobileSAM, ~45 MB) runs on the **accelerator** — there it
-   is a gateway door, `kokon-sam` (its own venv + ONNX runtime, CPU, in
-   the gateway matrix beside the other doors) — and this box's service
-   relays `/segment/encode|predict` to it through the same `externalEngine`
-   gateway base + key the image doors already use, so the ~45 MB never
-   lands here. The browser only sends clicks and reads back masks, the
-   same either way — a weak or ONNX-less browser gets the lab as a thin
-   client, and the in-browser onnxruntime-web copy stays the last-resort
+   Where each one runs: **both** stay in-process on **this** box (the
+   service's CPU, on first use) — MobileSAM is a 45 MB CPU model, not a GPU
+   model, so it belongs with the service, not on the accelerator (the split
+   exists for the generation engines). A dormant fallback for the rare box
+   that refuses the files: with no local copy, the service relays
+   `/segment/encode|predict` to a gateway `kokon-sam` door through the same
+   `externalEngine` gateway base + key the image doors already use — the
+   owner retired that door on 2026-11-22 (a second engine on the wire for a
+   45 MB CPU model beat the point of the one-service-plus-stock-engines
+   design), so no standard box requests it. The browser only sends clicks
+   and reads back masks, the same either way — a weak or ONNX-less browser
+   gets the lab as a thin client, and the in-browser onnxruntime-web copy
+   stays the last-resort
    fallback when neither is present.
 5. The UI: open `https://<ui-name>` from **another device** on the
    LAN → sign in with the password → the gallery loads.
