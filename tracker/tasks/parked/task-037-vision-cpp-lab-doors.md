@@ -31,8 +31,16 @@ fallback; the in-browser onnxruntime-web copy stays the last resort.
   driver 620.70.06).
 - **Not a llama.cpp fork**: a self-contained ggml-based library (ggml +
   stb-image vendored; Acly's llama.cpp as a submodule only for the ggml
-  build). C++20, CMake; backends **CPU and Vulkan — no CUDA** (CMake has
-  `VISP_VULKAN` and nothing else GPU).
+  build). C++20, CMake; backends **CPU and Vulkan — no CUDA**, and that is
+  the project's deliberate design, not a gap: one build for NVIDIA/AMD/
+  Intel. (Owner's "why not CUDA?", answered 11-22 — D-037-6: the build
+  system has exactly one GPU option, `VISP_VULKAN`; the release bundles
+  only the vulkan + cpu backends; it benches at parity with CUDA on these
+  models (their 4070 table: SAM 19 vs 16 ms, BiRefNet-lite 85 vs 84 vs
+  PyTorch-CUDA); the box's NVIDIA driver already ships the Vulkan ICD — a
+  runtime separate from vllm's CUDA context. A CUDA port would be engine
+  work, which we have agreed not to do; if it ever matters, that's an
+  upstream conversation.)
 - **Models**: MobileSAM, BiRefNet (full / lite / dynamic, 1024px; HR 2048),
   Depth-Anything V2, MI-GAN, Real-ESRGAN. The first two are exactly our lab
   models. Same provenance chain as today: MobileSAM = ChaoningZhang's
@@ -53,11 +61,15 @@ fallback; the in-browser onnxruntime-web copy stays the last resort.
   - So the full existing contract (N labeled points + optional box → 4
     masks + IoUs, at the requested size) is reachable; a door that exposes
     **all four heads** keeps the browser's mask selection byte-identical.
-- **No HTTP server in the project** (CLI + C API + Python bindings only).
-  The only non-stock code this project needs from us is therefore a thin
-  **door wrapper** (HTTP ↔ the C API) — the same category as our qwen boot
-  scripts and the matrix config, not an engine: no model math, no
-  backends, no runtime of our own.
+- **No HTTP server in the project** (CLI + C API + Python bindings only)
+  — until our fork adds one (D-037-5): a generic `vision-server` built
+  into the project and submitted upstream as a PR. If it merges, the door
+  runs the upstream release — zero code of ours anywhere, the sdcpp-shaped
+  ideal. If not, we run our fork pinned at `upstream-commit + the server
+  delta`, rebased as upstream moves (the llama-cpu pattern, aimed at
+  dissolving). The PR stays generic (all five model families, plain JSON,
+  no Kokon naming) and its tests cover large POSTs with
+  `Expect: 100-continue` — the hole the 11-22 Python door fell into.
 
 ## models & numbers
 
@@ -92,26 +104,26 @@ parity — the F16 quantization makes 100% impossible and uninteresting.
 ## plan
 
 **P1 — scratch proof on apollo. No matrix change, no vllm impact, ~a day.**
-1. Pin vision.cpp to the 2026-04 main commit (or v0.3.0 if it proves
-   equivalent); build `VISP_VULKAN=ON` (Vulkan SDK headers only at build
-   time; the prebuilt lib works as the fallback). **Home: `backends/
-   kokon-vision/`** (source + built door), per the box's engine layout.
+1. **The fork (D-037-5):** fork `Acly/vision.cpp` → `iamskeole/vision.cpp`
+   at the 2026-04 main commit and build the **server into the project** —
+   a `vision-server` binary next to `vision-cli` (vendored single-header
+   HTTP, JSON API for all five model families, all four SAM heads exposed
+   with their indices, HTTP/1.1 answering `Expect: 100-continue` — the
+   Python door's lesson, tested). Home on the box: `backends/kokon-vision/`
+   = the fork checkout (upstream + our delta). **Draft the upstream PR in
+   the same pass** (generic, no Kokon naming, with the test suite); the
+   owner sends it or we do, per their word. Build `VISP_VULKAN=ON` (Vulkan
+   SDK headers only at build time; the prebuilt lib works as the fallback).
 2. Download the two GGUFs into **`models/gguf/Acly/{MobileSAM,BiRefNet-
    lite}/`** with a `provenance.md` in each (HF repo + pinned revision +
    SHA-256 + size) — the box's model convention; SETUP.md's model step is
    what re-creates them on a fresh box.
-3. **The door**: `backends/kokon-vision/vision_server.cpp` (~300–500 lines
-   over the C API, linked against the built lib): `GET /health`,
-   `POST /sam/encode` (image bytes), `POST /sam/predict` (points/box → 4
-   base64 PNGs + IoUs), `POST /birefnet` (image → 0/255 PNG). HTTP/1.1 with
-   a proper `100 Continue` answer (the 11-22 Python-door lesson), `${PORT}`
-   bound, one process hosting both models (they're ~110 MB combined).
-4. **Bench, vllm resident**: per-call latency (CPU and Vulkan variants),
+3. **Bench, vllm resident**: per-call latency (CPU and Vulkan variants),
    `nvidia-smi` delta for the Vulkan run (weights ~110 MiB + ggml's arena —
    **the card is at 23.8/24.5 GB under vllm, so the Vulkan variant's budget
    is the free ~0.7 GB minus vllm's wobble — the number decides the set
    membership, see decisions**), and 1-token vllm probes before/after.
-5. **Per-head parity** vs the in-process ONNX reference set (the existing
+4. **Per-head parity** vs the in-process ONNX reference set (the existing
    test images + reference masks; the 100-continue-free harness).
 
 **P2 — the matrix door (window protocol, only after P1's numbers and the
@@ -135,12 +147,15 @@ resort). The browser contract is untouched either way.
 accelerator as a stock GGUF door; a single box stays in-process; the
 45→26 MB + 224→85 MB shrink), prod-box handover, this file closed with the
 numbers. **Durability (the owner's box-down question, answered 11-22):**
-the ml repo tracks only text — the door source, the boot script
-(`_scripts/serve-kokon-vision.sh`), the matrix entry, and the pin records;
-SETUP.md's step 1 gains the 8th pinned checkout (vision.cpp) and its model
-step the two `provenance.md` recipes, so a bare machine rebuilt from the
-apollo-ml repo gets the door in the same pass as the gateway and every
-other door. Nothing exists only on this box.
+the ml repo tracks only text — the fork pin (repo + commit, the PIN-file
+pattern), the boot script (`_scripts/serve-kokon-vision.sh`), the matrix
+entry, and the model pin records; the server code itself lives in the
+`iamskeole/vision.cpp` fork (GitHub) — or in upstream once the PR merges.
+SETUP.md's step 1 gains the 8th pinned checkout (the vision.cpp fork — or
+upstream, once merged) and its model step the two `provenance.md`
+recipes, so a bare machine rebuilt from the apollo-ml repo gets the door in
+the same pass as the gateway and every other door. Nothing exists only on
+this box.
 
 ## decisions
 
@@ -167,6 +182,19 @@ other door. Nothing exists only on this box.
 - **D-037-4 (proposed): the parity bar is per-head selection equivalence**
   (above), because F16 ≠ FP32 byte-for-byte and the heads' IoUs are
   unreliable by the model's own S1 note.
+- **D-037-5 (owner, 11-22): the server is built into a fork of vision.cpp
+  and submitted upstream as a PR** — merge ⇒ pin upstream (zero code of
+  ours; the sdcpp-shaped ideal); no merge ⇒ run the fork pinned at
+  `upstream-commit + the server delta`, rebased as upstream moves (the
+  llama-cpu pattern, aimed at dissolving). This replaces the external
+  C-API wrapper from the original plan — the fork has no version-skew seam.
+  The PR stays generic: all five model families, plain JSON, no Kokon
+  naming, tests covering large POSTs with `Expect: 100-continue`.
+- **D-037-6 (recorded 11-22): GPU = Vulkan, by the project's design** —
+  the only GPU it ships (one build, all vendors, parity with CUDA on these
+  models, ICD already on the box, a runtime separate from vllm's CUDA
+  context). A CUDA build would be engine work — out of scope; if it ever
+  matters, that's an upstream conversation.
 
 ## acceptance criteria
 
