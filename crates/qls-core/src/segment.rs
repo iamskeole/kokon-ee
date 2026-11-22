@@ -24,6 +24,7 @@ use image::{GrayImage, RgbaImage, imageops::FilterType};
 
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::matting;
+use base64::Engine as _;
 use ort::session::{RunOptions, Session};
 use ort::value::Tensor;
 
@@ -267,6 +268,148 @@ impl Sam {
     }
 }
 
+/// The split-box relay (D-036-1): when this box has no local copy of the two pinned
+/// files, the lab's encode/predict travel to the gateway's `kokon-sam` door — the engine
+/// on the compute box loads the same pinned files and answers with the *same JSON this
+/// service would have produced itself* (its contract mirrors this module), so the relay
+/// is byte-transparent: the browser never knows where the model ran, and the serving box
+/// stores no 45 MB and runs no ONNX.
+pub struct Relay {
+    client: reqwest::blocking::Client,
+    key: Option<String>,
+    base: String,
+}
+
+impl Relay {
+    /// `gateway` is the box's load-on-demand gateway (the `externalEngine.gateway` root);
+    /// the door is `kokon-sam`, a sibling of the sdcpp door the box already names.
+    /// `key` is the gateway's admission key (empty = a keyless gateway, no header).
+    ///
+    /// The request timeout covers a *cold* door: a request to an unloaded model makes
+    /// the gateway boot it (venv + the two models, ~10-20 s) before the first answer.
+    pub fn new(gateway: &str, key: &str) -> AppResult<Self> {
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .map_err(|e| AppError::new(ErrorCode::Internal, format!("The selection relay cannot start: {e}")))?;
+        let key = key.trim().to_string();
+        Ok(Self {
+            client,
+            key: (!key.is_empty()).then_some(key),
+            base: format!("{}/kokon-sam", gateway.trim_end_matches('/')),
+        })
+    }
+
+    fn req(&self, method: reqwest::Method, path: &str) -> reqwest::blocking::RequestBuilder {
+        let r = self.client.request(method, format!("{}{}", self.base, path));
+        match &self.key {
+            Some(k) => r.bearer_auth(k),
+            None => r,
+        }
+    }
+
+    /// The door's `checkEndpoint`: 200 when the engine is up (a request boots it on
+    /// demand). Any failure here means "not installed", not an error worth toasting.
+    pub fn capabilities(&self) -> AppResult<()> {
+        let res = self
+            .req(reqwest::Method::GET, "/segment/capabilities")
+            .send()
+            .map_err(|e| AppError::new(ErrorCode::Internal, format!("The selection relay is unreachable: {e}")))?;
+        if res.status().is_success() {
+            Ok(())
+        } else {
+            let s = res.status().as_u16();
+            Err(AppError::new(
+                ErrorCode::Internal,
+                format!("The selection engine door answered {s} at /segment/capabilities."),
+            ))
+        }
+    }
+
+    /// `POST /segment/encode`: the image bytes once per (image, size) on the door.
+    pub fn encode(&self, image: &[u8], w: u32, h: u32) -> AppResult<()> {
+        let body = serde_json::json!({
+            "image": base64::engine::general_purpose::STANDARD.encode(image),
+            "width": w,
+            "height": h,
+        });
+        let res = self
+            .req(reqwest::Method::POST, "/segment/encode")
+            .json(&body)
+            .send()
+            .map_err(|e| AppError::new(ErrorCode::Internal, format!("The selection relay failed: {e}")))?;
+        if !res.status().is_success() {
+            let s = res.status().as_u16();
+            let t = res.text().unwrap_or_default();
+            return Err(AppError::new(
+                ErrorCode::Internal,
+                format!("The selection engine failed to read the image: {s} {t}"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// `POST /segment/predict`: the 4 masks as 0/255 PNG bytes plus the predicted IoUs —
+    /// the same shape this service's own handler returns to the browser.
+    pub fn predict(
+        &self,
+        image: &[u8],
+        w: u32,
+        h: u32,
+        points: &[(f32, f32, i32)],
+        box_: Option<(f32, f32, f32, f32)>,
+    ) -> AppResult<(Vec<Vec<u8>>, Vec<f32>)> {
+        let body = serde_json::json!({
+            "image": base64::engine::general_purpose::STANDARD.encode(image),
+            "width": w,
+            "height": h,
+            "points": points.iter().map(|(x, y, l)| serde_json::json!({ "x": x, "y": y, "label": l })).collect::<Vec<_>>(),
+            "box": box_.map(|(x0, y0, x1, y1)| serde_json::json!({ "x0": x0, "y0": y0, "x1": x1, "y1": y1 })),
+        });
+        let res = self
+            .req(reqwest::Method::POST, "/segment/predict")
+            .json(&body)
+            .send()
+            .map_err(|e| AppError::new(ErrorCode::Internal, format!("The selection relay failed: {e}")))?;
+        if !res.status().is_success() {
+            let s = res.status().as_u16();
+            let t = res.text().unwrap_or_default();
+            return Err(AppError::new(
+                ErrorCode::Internal,
+                format!("The selection engine failed: {s} {t}"),
+            ));
+        }
+        let v: serde_json::Value = res
+            .json()
+            .map_err(|e| AppError::new(ErrorCode::Internal, format!("The selection engine answered unparseably: {e}")))?;
+        let masks = v
+            .get("masks")
+            .and_then(|m| m.as_array())
+            .ok_or_else(|| AppError::new(ErrorCode::Internal, "The selection engine answered without masks."))?;
+        let iou = v
+            .get("iou")
+            .and_then(|m| m.as_array())
+            .ok_or_else(|| AppError::new(ErrorCode::Internal, "The selection engine answered without IoUs."))?;
+        let pngs = masks
+            .iter()
+            .map(|m| {
+                m.as_str()
+                    .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
+                    .ok_or_else(|| AppError::new(ErrorCode::Internal, "A selection mask came back unparseable."))
+            })
+            .collect::<AppResult<Vec<_>>>()?;
+        let iou: Vec<f32> = iou.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect();
+        if pngs.len() != 4 || iou.len() != 4 {
+            return Err(AppError::new(
+                ErrorCode::Internal,
+                "The selection engine returned the wrong number of masks or IoUs.",
+            ));
+        }
+        Ok((pngs, iou))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +466,113 @@ mod tests {
         let e = sam.encode("k", &RgbaImage::new(4, 4), 8, 8).unwrap_err();
         assert_eq!(e.code, ErrorCode::MissingModel);
         assert!(e.to_string().contains("not downloaded"));
+    }
+
+    /// A fake `kokon-sam` door for the relay tests: answers the queued responses one per
+    /// connection and records (first line, auth header, body) of every request.
+    fn fake_door(responses: Vec<(u16, String)>) -> (String, std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, String, String)>::new()));
+        let seen2 = seen.clone();
+        std::thread::spawn(move || {
+            for (status, resp_body) in responses {
+                let Ok((mut sock, _)) = listener.accept() else { break };
+                let mut req = Vec::new();
+                let mut buf = [0u8; 8192];
+                loop {
+                    let n = sock.read(&mut buf).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    req.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&req).to_string();
+                    if let Some(end) = text.find("\r\n\r\n") {
+                        let have = text[end + 4..].len();
+                        let mut len = 0usize;
+                        for l in text.lines() {
+                            let lower = l.to_ascii_lowercase();
+                            if let Some(v) = lower.strip_prefix("content-length:") {
+                                len = v.trim().parse::<usize>().unwrap_or(0);
+                            }
+                        }
+                        if have >= len {
+                            break;
+                        }
+                    }
+                }
+                let text = String::from_utf8_lossy(&req).to_string();
+                let head = text.split("\r\n\r\n").next().unwrap_or("").to_string();
+                let line = head.lines().next().unwrap_or("").to_string();
+                let mut auth = String::new();
+                for l in head.lines() {
+                    let lower = l.to_ascii_lowercase();
+                    if let Some(v) = lower.strip_prefix("authorization:") {
+                        auth = v.trim().to_string();
+                    }
+                }
+                let req_body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+                let resp_bytes = resp_body.clone().into_bytes();
+                let blen = resp_bytes.len();
+                seen2.lock().unwrap().push((line, auth, req_body));
+                let resp = format!(
+                    "HTTP/1.1 {} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    status, blen
+                );
+                let _ = sock.write_all(resp.as_bytes());
+                let _ = sock.write_all(&resp_bytes);
+                let _ = sock.flush();
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), seen)
+    }
+
+    #[test]
+    fn relay_sends_the_key_and_parses_the_contract() {
+        let masks: Vec<String> = (0u8..4).map(|i| base64::engine::general_purpose::STANDARD.encode([i; 3])).collect();
+        let body = serde_json::json!({ "masks": masks, "iou": [0.1, 0.2, 0.3, 0.4] });
+        let (gw, seen) = fake_door(vec![(200, r#"{"ready":true}"#.to_string()), (200, body.to_string())]);
+        let relay = Relay::new(&gw, "sekret").unwrap();
+        relay.capabilities().expect("capabilities");
+        let img = b"the image bytes";
+        let (pngs, iou) = relay.predict(img, 800, 600, &[(10.0, 20.0, 1)], Some((1.0, 2.0, 3.0, 4.0))).expect("predict");
+        assert_eq!(pngs.len(), 4);
+        assert_eq!(pngs[0], vec![0u8; 3]);
+        assert_eq!(pngs[3], vec![3u8; 3]);
+        assert_eq!(iou, vec![0.1, 0.2, 0.3, 0.4]);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].0, "GET /kokon-sam/segment/capabilities HTTP/1.1");
+        assert_eq!(seen[0].1.to_ascii_lowercase(), "bearer sekret");
+        assert_eq!(seen[1].0, "POST /kokon-sam/segment/predict HTTP/1.1");
+        assert_eq!(seen[1].1.to_ascii_lowercase(), "bearer sekret");
+        let v: serde_json::Value = serde_json::from_str(&seen[1].2).unwrap();
+        let b64 = base64::engine::general_purpose::STANDARD;
+        assert_eq!(b64.decode(v["image"].as_str().unwrap()).unwrap(), img);
+        assert_eq!(v["width"], 800);
+        assert_eq!(v["points"], serde_json::json!([{ "x": 10.0, "y": 20.0, "label": 1 }]));
+        assert_eq!(v["box"], serde_json::json!({ "x0": 1.0, "y0": 2.0, "x1": 3.0, "y1": 4.0 }));
+    }
+
+    #[test]
+    fn relay_keyless_sends_no_auth_header() {
+        let (gw, seen) = fake_door(vec![(200, r#"{"ready":true}"#.to_string())]);
+        Relay::new(&gw, "").unwrap().capabilities().expect("capabilities");
+        assert_eq!(seen.lock().unwrap()[0].1, "");
+    }
+
+    #[test]
+    fn relay_maps_failures() {
+        let (gw, _) = fake_door(vec![(503, r#"{"error":"down"}"#.to_string()), (500, r#"{"error":"boom"}"#.to_string())]);
+        let relay = Relay::new(&gw, "k").unwrap();
+        let e = relay.capabilities().unwrap_err();
+        assert!(e.to_string().contains("503"));
+        let e = relay.encode(b"x", 8, 8).unwrap_err();
+        assert!(e.to_string().contains("boom"));
+        let (gw, _) = fake_door(vec![(200, r#"{"masks":["QQ=="],"iou":[]}"#.to_string())]);
+        let e = Relay::new(&gw, "k").unwrap().predict(b"x", 8, 8, &[], None).unwrap_err();
+        assert!(e.to_string().contains("wrong number"));
     }
 
     /// Real model (the two pinned files, `KOKON_SEGMENT_DIR` a folder with
