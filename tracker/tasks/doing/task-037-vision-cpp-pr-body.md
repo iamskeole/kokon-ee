@@ -1,6 +1,6 @@
 # task-037 — the upstream PR body (D-037-7: shown to the owner 2026-11-22, NOT submitted)
 
-Source: `iamskeole/vision.cpp` branch `vision-server` (3 commits on
+Source: `iamskeole/vision.cpp` branch `vision-server` (4 commits on
 upstream main `26a7529`), pushed. PR target: `Acly/vision.cpp`.
 
 **Title:** `Add vision-server: an HTTP server for the GGUF model families`
@@ -37,10 +37,16 @@ the project's `util/string.h` (gained base64), and a new self-contained
 - SAM keeps a per-image encoder-output cache (hashed on the preprocessed
   pixels), so a stream of clicks/boxes on the same image skips TinyViT after
   the first.
-- GPU co-residency: on a Vulkan backend `--max-arena <MB>` (default 4096) is
-  **probed at boot** — the server allocates and frees that size and fails
-  with an actionable message if the device cannot provide it, so it fails
-  loudly instead of starving other tenants of the card.
+- GPU co-residency: `--max-arena <MB>` (default 4096) is a per-request
+  device-memory budget. It is probed at boot (the server fails with an
+  actionable message if the device cannot provide it), and it is enforced
+  before every graph allocation: this ggml-vulkan allocates one buffer per
+  tensor, so a request that does not fit fails mid-allocation inside
+  another client's headroom. The server instead dry-runs the graph
+  allocator (`ggml_gallocr_reserve_n_size`, no allocation) to report exactly
+  what the real allocation would need - in-place ops included - and refuses
+  an over-budget request with 503 and its measured figure, before touching
+  memory. The door fails loudly and stays a polite GPU tenant.
 - POSIX only for now (Linux/macOS; UNIX guard in CMake). The code uses only
   POSIX socket APIs, so a Windows port is mechanical.
 
@@ -49,15 +55,27 @@ the project's `util/string.h` (gained base64), and a new self-contained
 - `tests/test-json.cpp` (19): parse/write roundtrips, strict rejections
   (trailing data, leading zeros, depth limit, bad escapes, unpaired
   surrogates), base64 encode/decode.
-- `tests/test-server.cpp` (9): forks the real server on a random port, polls
+- `tests/test-server.cpp` (10): forks the real server on a random port, polls
   `/health` for readiness, then exercises `/health`, `/sam` point and box on
   a real image, inverted-box → 400, a real `Expect: 100-continue` roundtrip,
-  bad JSON → 400, bad image → 400, unknown route → 404, unloaded model → 404.
+  bad JSON → 400, bad image → 400, unknown route → 404, unloaded model →
+  404, and a server with a 16 MB budget refusing a request it cannot hold,
+  with the measured size, instead of attempting the allocation.
+
+All five families verified end-to-end over the API on CPU (Ryzen 5800X,
+1376x768 input): measured per-request graphs 188 MB (SAM), 1332 MB (BiRefNet
+lite), 742 MB (Depth V2 Small), 211 MB (MI-GAN), 217 MB (ESRGAN 1024x1024
+tile) - all inside the 4096 MB default budget; 0.65 / 2.72 / 4.99 / 0.64 /
+2.58 s respectively. Semantic checks: the matte is bimodal, the depth map
+has full dynamic range, inpainting changes only the masked region, the
+upscale is 4x.
 
 Verified on Linux x86_64 (Ryzen 5800X, `GGML_NATIVE=OFF` SSE4.2/AVX2/F16C,
 `VISP_FMT_LIB=ON`, `GGML_BACKEND_DL=ON`): `ctest -C Release` — all C++ tests
 pass, including an AddressSanitizer build of the server under a sustained
-point/box mix. The pre-existing
+point/box mix. No Vulkan-specific tests: the project's CI already runs
+Vulkan off (llvmpipe is unreliable there) and this PR adds no Vulkan code.
+The pre-existing
 `tests/test_birefnet.py::test_relative_position_index` Python failure is
 unrelated (it fails on `main` on the same machine).
 
@@ -67,8 +85,6 @@ head), not by pixels.
 
 Happy to first discuss the shape of this in an issue if you prefer — the
 branch is ready either way.
-
-Signed-off-by: p <iamskeole@users.noreply.github.com>
 
 ---
 
@@ -83,4 +99,6 @@ Signed-off-by: p <iamskeole@users.noreply.github.com>
 - [ ] **Owner sign-off of this body** — required before `gh pr create`
       against `Acly/vision.cpp`
 - [ ] Open the PR (command ready: `gh pr create --repo Acly/vision.cpp
-      --head iamskeole:vision-server --base main --title "..." --body @file`)
+      --head iamskeole:vision-server --base main --title "..." --body @file)`
+- [x] No `Signed-off-by` in the body (owner, 2026-11-22: "we are one. we
+      are legion.") - the branch's commit trailers are unaffected

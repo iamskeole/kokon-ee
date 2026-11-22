@@ -1,21 +1,30 @@
 # task-037 — the lab's models as stock GGUF doors (vision.cpp)
 
-## status: **doing** — GO received 2026-11-22. **P1 code complete 2026-11-22:**
-fork at `backends/kokon-vision/` (3 commits on upstream `26a7529`, branch
+## status: **doing** — GO received 2026-11-22. **P1 complete 2026-11-22 (evening):**
+fork at `backends/kokon-vision/` (4 commits on upstream `26a7529`, branch
 `vision-server` pushed to the fork) — `vision-server` (all five families,
-4 SAM heads, embed cache, 100-continue, arena probe) + `util/json.h` +
-base64 in `util/string.h` + test-json (19) and test-server (9, functional).
-All C++ ctest green, 5x flake loop clean, ASAN build clean under a 60-call
-point/box mix. Two memory bugs found and fixed via ASAN (dangling
-`elapsed_str` stack pointer; use-after-free reading a freed ggml tensor
-header from the embed cache — the span is now sized from cached
-shape/type). CMake files were briefly clang-format-mangled and restored —
-this repo does not clang-format CMake. **PR body drafted in
-`task-037-vision-cpp-pr-body.md` and shown to the owner — not opened
-without their sign-off (D-037-7, now D-037-9).** Remaining P1: Vulkan SDK
-headers for the GPU build test, vllm-up `nvidia-smi` delta (D-037-1),
-per-head parity on the standing set (D-037-4). P2 (the matrix door) stays
-gated on the measured delta.
+4 SAM heads, embed cache, 100-continue) + `util/json.h` + base64 in
+`util/string.h` + **the per-request device-memory budget check** (dry-run
+of the graph allocator, 503 with the measured size before any allocation)
++ test-json (19) and test-server (10, functional, incl. the budget
+refusal). All C++ ctest green (29 total, 5x flake loop clean), ASAN build
+clean under a 60-call point/box mix (two memory bugs found and fixed via
+ASAN: dangling `elapsed_str` stack pointer; use-after-free reading a freed
+ggml tensor header from the embed cache). **All five families verified
+end-to-end on CPU over the API** (1376×768): measured per-request graphs
+188 / 1332 / 742 / 211 / 217 MB (all inside the 4 GB default), 0.65 / 2.72 /
+4.99 / 0.64 / 2.58 s, semantic checks pass (bimodal matte, full-range
+depth, masked-only inpaint change, 4× upscale); per-head SAM parity on the
+standing click met (D-037-4). **Model artifacts kept per the owner's word:**
+`models/gguf/Acly/<5>/` on the ml box with provenance (ml `582bcd0`).
+**PR body revised and re-shown** (`task-037-vision-cpp-pr-body.md`):
+`Signed-off-by` out per D-037-10, budget-check story and the all-five E2E
+in; **not opened without the owner's sign-off (D-037-7/9).** Open items:
+Vulkan build needs `glslc` (owner's one-liner; `libvulkan-dev` is already
+installed), and P2 (the matrix door) is gated on the owner's ruling — with
+vllm resident on this box the door runs **CPU** (everything fits, no VRAM),
+which D-037-8's fallback makes acceptable; Vulkan co-residency on this
+card is knife-edge at best (measured, below).
 
 ## trigger (fired 2026-11-22): the owner's go/no-go on the plan below —
 raised 2026-11-22 when the owner, digging on their own, found that Acly
@@ -155,6 +164,28 @@ questions):**
   head), and **both pick head 1 as best** (0.881 vs 0.897) — the D-037-4
   bar (same rule, same object, IoU within a few points) is met on the
   reference click.
+- **All five families, CPU E2E, measured 2026-11-22 (Ryzen 5800X, one
+  server process, all five models loaded, vllm resident, zero GPU touch):**
+  true per-request graph sizes from the server's allocator dry run —
+  SAM **188 MB** (0.65 s), BiRefNet-lite **1332 MB** (2.72 s), Depth-V2-
+  Small **742 MB** (4.99 s), MI-GAN **211 MB** (0.64 s), ESRGAN **217 MB**
+  per 1024² tile (2.58 s) — all inside the 4096 MB default budget, all
+  200. (An earlier naive sum of tensor sizes said 5.6–24 GB: this ggml's
+  allocator reuses in-place ops' parents, so the dry run is the only honest
+  measure — that finding is why the budget check dry-runs instead of
+  summing.) Semantic checks: the BiRefNet matte is 99.4% extreme (clean
+  bimodal alpha); depth spans 0–254 (std 73.6); MI-GAN changes the masked
+  region (mean Δ 20.9) and is bit-identical outside it (0.00); ESRGAN is
+  4× and not nearest-neighbour. On a 15 GB RAM box the heaviest (BiRefNet)
+  peaks ~1.3 GB — comfortable.
+- **Q8/quantization question (owner, 11-22, answered with measurements):**
+  Acly publishes **F16 only** for all five families (no Q8/Q4 files exist
+  upstream). The ggml-vulkan kernels do implement Q4_0/Q8_0 (matmul FAs,
+  incl. the 3090's coopmat path), so quantized GGUFs would run — but
+  quantization is not the co-residency lever: the weights are a small share
+  of the graph (MobileSAM 26 MB of 188; BiRefNet 89 MB of 1332) and the
+  activations stay fp16/fp32 regardless. Making our own Q8 exports would be
+  engine work — against the stock-engine principle.
 
 ## plan
 
@@ -279,6 +310,23 @@ this box.
   matching their existing patterns; CMake left in the repo's own unformatted
   style (their .clang-format is C++-only and mangles CMake — verified,
   restored).
+- **D-037-10 (owner, 11-22): no `Signed-off-by` in the PR body** —
+  *"we are one. we are legion."* The body carries no identity trailer; the
+  pushed branch's DCO commit trailers are unaffected (they predate the
+  ruling and history is not rewritten).
+- **D-037-11 (measured 11-22 evening): the co-residency shape on this box.**
+  With vllm holding 23878 MiB of the 3090 (268 MiB free, stable), the
+  `kokon-vision` door runs **CPU**: all five families fit under the 4 GB
+  default budget in RAM (max ~1.3 GB peak), 0.65–4.99 s, zero VRAM, no
+  eviction, no window drama — D-037-8's fallback, now the measured default
+  rather than the guess. **Vulkan co-residency on this card is out:** the
+  uncapped MobileSAM peak measured 266 MiB (already over the 268 free), and
+  BiRefNet/Depth graphs are 0.7–1.3 GB even at half precision — the free
+  budget is a knife-edge for the smallest family and ~3–5× short for the
+  others. If the owner ever trims vllm's KV by a few hundred MiB, Vulkan
+  SAM becomes viable (the budget check makes any overflow a clean 503, not
+  a starvation of the LLM); the door stays backend-agnostic (`-b cpu|gpu`)
+  so that flip is a boot-script word.
 
 ## acceptance criteria
 
@@ -296,12 +344,15 @@ this box.
 
 ## blockers
 
-- **Vulkan SDK headers** (`sudo apt install libvulkan-dev` — owner's sudo,
-  one-liner) for building the capped Vulkan variant and proving the ~226
-  MiB fits under vllm's 268 MiB free. Everything else on P1 is measured
-  (numbers above). **P2 stays gated** on the owner's call given those
-  numbers (D-037-1/8: at vllm's current footprint the co-resident default
-  is CPU; Vulkan needs either the capped-build proof or vllm's KV trimmed)
-  and the window protocol; the PR itself stays gated on the owner's
-  sign-off of the body (D-037-7/9) — but the PR is not on P1's critical
-  path.
+- **`glslc`** (owner's one-liner: `sudo apt install -y glslc` —
+  `libvulkan-dev` is already installed; only the shader compiler is missing)
+  for the Vulkan build of the fork, so the budget check and the all-five
+  routes can be proven on GPU. Not on the CPU path: P1's CPU proof is
+  complete, and the door's default on this box is CPU (D-037-11).
+- **P2 (the matrix door) stays gated on the owner's ruling** with the
+  complete numbers in hand: CPU door (proven, co-resident, 0.65–4.99 s) vs
+  waiting on a Vulkan-capable budget (would need vllm's KV trimmed). Window
+  protocol per the standing rules when it goes.
+- **The upstream PR stays gated on the owner's sign-off of the revised body**
+  (D-037-7/9/10) — the branch is pushed and the command is ready; the PR is
+  not on P2's critical path.
