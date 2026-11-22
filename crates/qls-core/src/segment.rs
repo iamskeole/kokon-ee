@@ -238,7 +238,11 @@ impl Sam {
         inputs.insert("has_mask_input", has_in);
         inputs.insert("orig_im_size", orig);
         let outputs = s.dec.run_with_options(inputs, &opts).map_err(ort_err)?;
-        let (m_shape, m_data) = outputs[i_masks].try_extract_tensor::<f32>().map_err(ort_err)?;
+        // `try_extract_tensor` yields a *view* into the session's memory, not a copy: take
+        // the data out before any further work on the session, as the other consumers of
+        // this runtime do (watermark, matting).
+        let (m_shape, m_view) = outputs[i_masks].try_extract_tensor::<f32>().map_err(ort_err)?;
+        let m_data: Vec<f32> = m_view.to_vec();
         let k = *m_shape.iter().nth(1).unwrap_or(&4) as usize;
         if k != 4 {
             return Err(AppError::new(ErrorCode::Internal, "The selection model returned an unexpected number of masks."));
