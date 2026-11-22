@@ -1,9 +1,21 @@
 # task-037 — the lab's models as stock GGUF doors (vision.cpp)
 
-## status: **doing** — GO received 2026-11-22 (P1 in progress). The PR body
-is shown to the owner in full and **not opened upstream without their
-sign-off** (D-037-7). P2 (the matrix door) stays gated on P1's measured
-nvidia-smi delta (D-037-1/8).
+## status: **doing** — GO received 2026-11-22. **P1 code complete 2026-11-22:**
+fork at `backends/kokon-vision/` (3 commits on upstream `26a7529`, branch
+`vision-server` pushed to the fork) — `vision-server` (all five families,
+4 SAM heads, embed cache, 100-continue, arena probe) + `util/json.h` +
+base64 in `util/string.h` + test-json (19) and test-server (9, functional).
+All C++ ctest green, 5x flake loop clean, ASAN build clean under a 60-call
+point/box mix. Two memory bugs found and fixed via ASAN (dangling
+`elapsed_str` stack pointer; use-after-free reading a freed ggml tensor
+header from the embed cache — the span is now sized from cached
+shape/type). CMake files were briefly clang-format-mangled and restored —
+this repo does not clang-format CMake. **PR body drafted in
+`task-037-vision-cpp-pr-body.md` and shown to the owner — not opened
+without their sign-off (D-037-7, now D-037-9).** Remaining P1: Vulkan SDK
+headers for the GPU build test, vllm-up `nvidia-smi` delta (D-037-1),
+per-head parity on the standing set (D-037-4). P2 (the matrix door) stays
+gated on the measured delta.
 
 ## trigger (fired 2026-11-22): the owner's go/no-go on the plan below —
 raised 2026-11-22 when the owner, digging on their own, found that Acly
@@ -230,6 +242,13 @@ this box.
   **Vulkan co-resident** (arena-capped, no exclusion set, no eviction),
   **CPU co-resident** the fallback, the eviction pattern a last resort.
   P1's measured nvidia-smi delta is what chooses.
+- **D-037-9 (recorded 11-22): the PR is built, tested, pushed, and its body
+  is drafted and shown** (`task-037-vision-cpp-pr-body.md`) — opening it
+  against `Acly/vision.cpp` waits for the owner's sign-off. Style followed
+  their CONTRIBUTING.md (clang-format on the C++ files, tests, plain C++),
+  matching their existing patterns; CMake left in the repo's own unformatted
+  style (their .clang-format is C++-only and mangles CMake — verified,
+  restored).
 
 ## acceptance criteria
 
