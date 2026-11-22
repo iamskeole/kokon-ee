@@ -177,11 +177,18 @@ Agreed — the split overreached, and the record says why:
   segment — sit with the service). The relay stays in the service as a
   **dormant fallback**: it engages only for a box with no local files whose
   `externalEngine` points at a matrix that has the door — no standard box
-  does. The `kokon-sam` door was **unloaded via the API that evening** (no
-  window, vllm untouched); its matrix entry stays dormant in the config (it
-  only revives on a request, and nothing on this box requests it) and its
-  files stay in `/home/p/ml/backends/kokon-sam/`. Removing the config line
-  would cost a ~3-min window — deferred until the owner asks.
+  does. The `kokon-sam` door was first **unloaded via the API that evening**
+  (no window, vllm untouched); the owner then asked for the config line gone
+  too, and the **15:36 window** did it (79 s: staged from the ml repo's
+  tracked HEAD config — the 036 diff was the only uncommitted drift, so the
+  revert was the exact inverse — reload in 4 s, 404 proof, last-good
+  re-seeded, vllm revived 69 s before the DONE marker). The matrix is back
+  at the tracked 11-21 state (ml repo `207ddd5`, DCO-signed; both config
+  files byte-identical to HEAD, the one-shot job dirs left untracked per the
+  house convention), and the engine files stay on disk in
+  `/home/p/ml/backends/kokon-sam/` (venv gitignored) as the dormant
+  fallback's home — the boot script and server are the only things a future
+  split-box deployment would re-point at.
 - **The "seconds per click" was a measurement artifact, not the design.**
   The door's own server-side time: 50 ms warm / 0.57 s cold (journal). The
   1.07 s wall clock was curl's `Expect: 100-continue`: Python's
