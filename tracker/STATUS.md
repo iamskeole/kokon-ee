@@ -78,10 +78,13 @@ exposes vllm for the whole battery, so long batteries only when the owner
 is off chat. **The owner's report** (CPU vs
 GPU timings, 3090 measurements, per-request budgets, 3090-vs-4090
 framing) is written up in `doing/task-037-vision-cpp-bench.md`, ready to
-forward. **The PR body is revised again** (`task-037-vision-cpp-pr-body.md`
-: budget-check story, all-five E2E on both backends, the two-graph
-embedding flow, no `Signed-off-by` per D-037-10) — **not opened against
-`Acly/vision.cpp` without the owner's sign-off** (D-037-7/9). **P2** (the
+forward. **The PR is open: [Acly/vision.cpp#25](https://github.com/Acly/vision.cpp/pull/25)**
+(2026-11-23, after the owner's sign-off — D-037-7 satisfied; +2202/−0,
+8 files, purely additive; same-day ops wart: this gh build does not expand
+`--body @file` on `pr create`, the body landed as the literal path, corrected
+with `pr edit`) — awaiting the author's review; if it merges the door pins
+upstream, if not we pin the fork at `26a7529` + our 5 commits (D-037-5's
+fallback). **P2** (the
 `kokon-vision` matrix door) is now a one-line ruling with full numbers
 (D-037-12): **CPU co-resident** door (proven end-to-end; 129 ms–4.98 s
 warm; zero VRAM; never touches vllm's headroom) or the same door with

@@ -110,9 +110,15 @@ branch is ready either way.
       behaviour, plain structs/functions, `snake_case`, no new dependencies,
       C++20, comments explain *why*
 - [x] Pushed to `iamskeole/vision.cpp:vision-server` (our fork — allowed)
-- [ ] **Owner sign-off of this body** — required before `gh pr create`
-      against `Acly/vision.cpp`
-- [ ] Open the PR (command ready: `gh pr create --repo Acly/vision.cpp
-      --head iamskeole:vision-server --base main --title "..." --body @file)`
+- [x] **Owner sign-off of this body** (2026-11-23: "pr body signed off.
+      go on submit.")
+- [x] **PR opened: [Acly/vision.cpp#25](https://github.com/Acly/vision.cpp/pull/25)**
+      (2026-11-23, `main` ← `iamskeole:vision-server`, +2202/−0, 8 files;
+      purely additive) — awaiting the author's review; if it merges the door
+      pins upstream, if not we run the fork pinned at `26a7529` + our 5
+      commits (D-037-5's fallback)
+  (ops note: this gh build does not expand `--body @file` on `pr create`
+  — the body arrived as the literal path; corrected with `pr edit --body
+  "$(cat file)"`.)
 - [x] No `Signed-off-by` in the body (owner, 2026-11-22: "we are one. we
       are legion.") - the branch's commit trailers are unaffected

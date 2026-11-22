@@ -462,6 +462,26 @@ this box.
   at vllm's current 608 MiB free but with no headroom for KV growth).
   Window protocol per the standing rules when it goes; the 037 window job
   (`backends/_jobs/vision-vulkan-037/`) is the proven template.
-- **The upstream PR stays gated on the owner's sign-off of the revised
-  body** (D-037-7/9/10) — the branch is pushed (5 commits) and the command
-  is ready; the PR is not on P2's critical path.
+- **Upstream PR opened: [Acly/vision.cpp#25](https://github.com/Acly/vision.cpp/pull/25)**
+  (2026-11-23, after the owner’s sign-off — D-037-7 satisfied; +2202/−0,
+  8 files, purely additive). Awaiting the author’s review; the fork
+  (`iamskeole/vision.cpp:vision-server`) stays pushed either way — if it
+  merges the door pins upstream `Acly/vision.cpp`, if not we pin the fork
+  at `26a7529` + our 5 commits (D-037-5’s fallback). Not on P2’s
+  critical path.
+- **P2 needs the owner’s question answered (asked 11-23, answered in the
+  session):** is vllm the only co-residency issue on the GPU, or every
+  gateway model? And what does "-b gpu restricted to MobileSAM" mean when
+  the lab needs *two* models (MobileSAM + BiRefNet)? Answer: vllm is the
+  only *resident* big tenant (the assistant runtime, always loaded) —
+  evicting it for a click is what D-037-8 ruled out; every other matrix
+  model (klein/qwen DiTs, MeroMero, Gemma, muse) is evictable by the same
+  set mechanics a qwen job already uses, so they are not co-residency
+  problems, just set-membership questions. On GPU, MobileSAM is the only
+  family that even *fits* beside vllm (160 MB request + ~180 MB weights
+  vs 300–608 MiB free) — "restricted" means the GPU door would
+  load and serve only MobileSAM; the other four (211–1327 MB) would
+  503 or force a vllm eviction, so they stay CPU. The lab’s second
+  model (BiRefNet) therefore cannot ride a vllm-co-resident GPU door; a
+  CPU door carries both (129 ms / 2.75 s, zero VRAM), which is the
+  recommendation. Awaiting the ruling.
