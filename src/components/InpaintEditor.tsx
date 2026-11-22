@@ -4,7 +4,7 @@ import { api, urls } from "../lib/api";
 import { area, dilate, fromLogits, maskOrder, samSelection } from "../lib/layers";
 import { withActionVerb } from "../lib/logic";
 import { inBrowser, shortcut } from "../lib/platform";
-import { Segmenter, type SamResult } from "../lib/sam";
+import { loadSegmenter, type SamResult, type Segmenter, type ServiceSegmenter } from "../lib/sam";
 import { MARK_COLOURS, marksPrompt, type MarkColour } from "../lib/sceneEdit";
 import { closeEditor, focusPrompt, getState, toastError, toastInfo, updateComposer, useStore } from "../lib/store";
 import { IconButton } from "./ui";
@@ -80,7 +80,7 @@ export function InpaintEditor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const current = useRef<Op | null>(null);
-  const segmenter = useRef<Segmenter | null>(null);
+  const segmenter = useRef<Segmenter | ServiceSegmenter | null>(null);
   // The last click of Select: the same spot again takes SAM's next output (part -> whole).
   const lastClick = useRef<{ x: number; y: number; result: SamResult; order: number[]; pos: number; op: Op } | null>(null);
 
@@ -201,7 +201,8 @@ export function InpaintEditor() {
     setSam("loading");
     (async () => {
       try {
-        const s = await Segmenter.load(true, (pct) => open.current && setSamPct(pct));
+        // The service's model when the box has it (the box runs it, D-035-1), else the in-browser one.
+        const s = await loadSegmenter(ref0?.source ?? null, (pct) => open.current && setSamPct(pct));
         if (!open.current) return;
         setSamPct(null);
         if (!s) return setSam("missing");

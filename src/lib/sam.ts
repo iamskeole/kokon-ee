@@ -78,6 +78,66 @@ export interface SamResult {
   iou: number[];
 }
 
+/** The lab's click-to-select model run **in the service** (D-035-1): the box owns MobileSAM
+ * (the same pinned files this one would download) and runs it on its CPU, so a thin browser
+ * that cannot run ONNX gets the lab too — the 11-11 "could not be downloaded" whine's other
+ * support. `src`: the service's image ("input:"/"gen:"). The wire contract mirrors `Segmenter`:
+ * encode once per (image, size) (embeddings cached in the service), then per click the decoder;
+ * masks come back as 0/255 PNGs at the size asked (the consumers test >0, so the same bytes). */
+export class ServiceSegmenter {
+  /** Where the model runs (Segmenter.device is "webgpu"/"wasm"). */
+  readonly device = "service";
+
+  constructor(private src: string) {}
+
+  /** `img` is not needed: the service reads its own copy of the image. */
+  async encode(_img: CanvasImageSource, w: number, h: number): Promise<void> {
+    await api.segmentEncode(this.src, w, h);
+  }
+
+  async predict(
+    points: { x: number; y: number; label: 0 | 1 }[],
+    w: number,
+    h: number,
+    box?: { x0: number; y0: number; x1: number; y1: number },
+  ): Promise<SamResult> {
+    const r = await api.segmentPredict(this.src, w, h, points, box);
+    return { masks: await Promise.all(r.masks.map((m) => pngToLogits(m, w, h))), iou: r.iou };
+  }
+}
+
+/** The 0/255 PNG the service returns for one mask, as the Float32Array the in-browser path
+ * produces. Downsampled from a same-size PNG, so no smoothing is involved. */
+async function pngToLogits(b64: string, w: number, h: number): Promise<Float32Array> {
+  const im = new Image();
+  im.src = `data:image/png;base64,${b64}`;
+  await im.decode();
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d")!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(im, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const out = new Float32Array(w * h);
+  for (let i = 0; i < out.length; i++) out[i] = d[i * 4] > 0 ? 255 : 0;
+  return out;
+}
+
+/** The lab's segmenter: the service's model when the service has the files (the box runs it —
+ * any browser is a thin client, D-035-1), else the in-browser one (the stock default; its
+ * download goes through `onProgress`). Null when neither is possible (the callers' "missing"). */
+export async function loadSegmenter(
+  source: string | null,
+  onProgress?: (pct: number) => void,
+): Promise<Segmenter | ServiceSegmenter | null> {
+  if (source) {
+    const st = await api.segmentStatus().catch(() => null);
+    if (st?.installed) return new ServiceSegmenter(source);
+  }
+  return Segmenter.load(true, onProgress);
+}
+
 export class Segmenter {
   private emb: Ort.Tensor | null = null;
   private scale = 1;

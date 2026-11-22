@@ -142,6 +142,24 @@ export const api = {
   segmentStatus: () => call<{ installed: boolean; bytes: number }>("/segment"),
   /** Progress in `installStatus` (preset "segment"). */
   downloadSegment: () => call<InstallStatus>("/segment/download", { method: "POST" }),
+  /** The lab's click-to-select encoder run in the service (the browser stays thin, D-035-1):
+   * once per (image, size) — the embeddings are cached there, so later clicks are just the decoder. */
+  segmentEncode: (image: string, width: number, height: number) =>
+    call<{ ready: boolean }>("/segment/encode", { method: "POST", body: json({ image, width, height }) }),
+  /** A click (or a box) through the lab's selection model run in the service: the 4 masks as
+   * 0/255 PNGs (base64) at the size asked, plus their predicted IoUs. The same contract as the
+   * in-browser ONNX path (`Segmenter.predict`), which this replaces whenever the service has the files. */
+  segmentPredict: (
+    image: string,
+    width: number,
+    height: number,
+    points: { x: number; y: number; label: 0 | 1 }[],
+    box?: { x0: number; y0: number; x1: number; y1: number },
+  ) =>
+    call<{ masks: string[]; iou: number[] }>("/segment/predict", {
+      method: "POST",
+      body: json({ image, width, height, points, box: box ?? null }),
+    }),
   /** The fast-sticker model of the layers lab: there or not, and its download size. */
   matteStatus: () => call<{ installed: boolean; bytes: number }>("/matte"),
   /** Progress in `installStatus` (preset "matting"). */
