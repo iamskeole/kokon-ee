@@ -40,10 +40,10 @@ Do, in order:
    the compose and the data dirs (see the doc's Layout). The build is
    self-contained (its own Rust/npm toolchain in the image); allow it
    up to 30 minutes cold.
-3. Build the image, from inside <parent>/kokon-ee/ (current one: 95450c1;
+3. Build the image, from inside <parent>/kokon-ee/ (current one: fe302e7;
    if the repo's main has moved on since, use its short commit instead):
    docker build -f docker/Dockerfile -t
-   ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-95450c1 .
+   ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-fe302e7 .
    (or pull that tag from ghcr instead, if the owner says it is pushed
    and hands you a registry token).
 4. Write <parent>/compose.yaml per the doc, and create
@@ -124,7 +124,7 @@ dirs. Same shape; the clone just isn't nested.
 # front), 39151 = token API (127.0.0.1 only: the MCP on this box).
 services:
   kokon-ee:
-    image: ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-95450c1
+    image: ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-fe302e7
     container_name: kokon-ee
     restart: unless-stopped
     network_mode: host
@@ -231,11 +231,17 @@ token door stays 127.0.0.1-only, for the MCP).
    → **404** (key accepted, model unknown). Without the key → **401**.
    (A 401 with the key means the key in the config is wrong.)
 4. The lab models: the service's `/api/v1/segment` and `/api/v1/matte`
-   report `installed: true` (they arrive with a migrated data dir;
-   fresh starts download them on first lab use — ~45 MB and ~224 MB).
-   The lab's click-to-select runs on **this** box (the service's CPU, the
-   same two MobileSAM files; the browser only sends clicks and reads back
-   masks), so a weak or ONNX-less browser gets the lab as a thin client.
+   report `installed: true` — checked **from a signed-in browser** (a
+   named session or the password), not with the API token: the LAN
+   listener keeps an allowlist of what a browser may call, and a token
+   check would pass even where a browser call is refused (11-22:
+   the segment routes were missing from it, and the lab read
+   "could not be downloaded" on every real box). They arrive with a
+   migrated data dir; fresh starts download them on first lab use —
+   ~45 MB and ~224 MB. The lab's click-to-select runs on **this** box
+   (the service's CPU, the same two MobileSAM files; the browser only
+   sends clicks and reads back masks), so a weak or ONNX-less browser
+   gets the lab as a thin client.
 5. The UI: open `https://<ui-name>` from **another device** on the
    LAN → sign in with the password → the gallery loads.
 6. One real generated image (accelerator up): a short text-to-image

@@ -144,3 +144,31 @@ None.
   healthy, vllm never touched (all-CPU work). Task-025 stays parked for
   the CUDA-EP/BiRefNet-GPU half (D-035-2). **Queue next: task-031** (the
   chaff cut).
+
+## Post-close fix (same day, fe302e7 — the owner hit the whine on the real box)
+
+"The selection model could not be downloaded, paint with the brush" was
+back, on a signed-in browser — and the loopback-token verifications had
+all passed. The second support, found by reproducing a real browser
+session (a named probe account, real cookie, real CSRF header, through
+the LAN door's exact auth path): **the LAN listener's `browser_allowed`
+allowlist never carried the segment routes** (`/segment` status,
+`/segment/download`, `/segment/models/{file}`, and the new
+`encode`/`predict`) — every browser call to them got 403 "This is not
+available from a browser", the UI's catch turned that into null, and
+null is the "missing" whine. Login sits outside the gate, so everything
+else worked — which is exactly why the box looked healthy from the
+token door (39151 has no allowlist). This was also 11-11's other
+support: the browser's own download click was being refused, and only
+an agent with the token could complete the files. `fe302e7` adds the
+routes (the browser only asks, downloads and runs the box's own pinned
+files — same class as matte) and the test tables. Proven before/after
+with the browser probe: before, login 200 + `GET /segment` 403 +
+segmenter null (the owner's exact state); after, status installed +
+`ServiceSegmenter` + encode + predict (4 masks) + the in-browser
+fallback's model-file fetch — all through 39152 with a session cookie.
+Dev box runs `multiuser-fe302e7` (compose backup `compose.yaml.bak-fe302e7`);
+the prod-box handover now points at `fe302e7` and its checklist says
+the lab check must come from a signed-in browser, never the token.
+(ghcr push still impossible from this box — no `packages` scope, as
+11-11 recorded; the box uses the local image, the stable box builds.)
