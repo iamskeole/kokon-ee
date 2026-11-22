@@ -297,7 +297,11 @@ impl Relay {
         Ok(Self {
             client,
             key: (!key.is_empty()).then_some(key),
-            base: format!("{}/kokon-sam", gateway.trim_end_matches('/')),
+            // The gateway's direct-upstream route (llama-swap v269: /upstream/<model>/<path>
+        // is the only per-model path — a bare /<model>/... is a 404, verified on the
+        // box 2026-11-22); the box's key is forwarded as Bearer, the door itself is
+        // keyless. `gateway` is the gateway root the box configures for its engines.
+        base: format!("{}/upstream/kokon-sam", gateway.trim_end_matches('/')),
         })
     }
 
@@ -543,9 +547,9 @@ mod tests {
         assert_eq!(iou, vec![0.1, 0.2, 0.3, 0.4]);
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 2);
-        assert_eq!(seen[0].0, "GET /kokon-sam/segment/capabilities HTTP/1.1");
+        assert_eq!(seen[0].0, "GET /upstream/kokon-sam/segment/capabilities HTTP/1.1");
         assert_eq!(seen[0].1.to_ascii_lowercase(), "bearer sekret");
-        assert_eq!(seen[1].0, "POST /kokon-sam/segment/predict HTTP/1.1");
+        assert_eq!(seen[1].0, "POST /upstream/kokon-sam/segment/predict HTTP/1.1");
         assert_eq!(seen[1].1.to_ascii_lowercase(), "bearer sekret");
         let v: serde_json::Value = serde_json::from_str(&seen[1].2).unwrap();
         let b64 = base64::engine::general_purpose::STANDARD;
