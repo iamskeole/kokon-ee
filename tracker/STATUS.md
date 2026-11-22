@@ -60,15 +60,22 @@ back from a tensor this ggml's allocator may hand to a later in-place op,
 so repeated same-image requests drifted until the encoder got its own
 graph and the predictor always re-uploads the host copy — 6/6 + 3/3
 requests now bit-identical on both backends, ASAN-clean.
-**The 21:24 404 the owner's session saw is post-mortemed** (all three
-causes mine, all proven fixed in two more clean windows of ~92 s each):
-the window's intended ~22 s registry gap, plus my journal-offset reload
-wait failing on a rotated journal, whose false FAIL re-cp'd the config and
-interrupted a vllm the daemon had been booting from the owner's ping; the
-window now waits functionally on the gateway's `/v1/models`, restores by
-rename (the daemon's watcher drops in-place writes), wipes stale markers
-at start, and revives vllm before every marker — box clean since ~21:33
-(vllm the sole model, the 11-22 state). **The owner's report** (CPU vs
+**The 21:24 404 the owner's session saw is post-mortemed against the
+daemon's own journal** (unit `ml-llama-swap`): the 404s were the intended
+window exposure (run 2's ~4.5-min battery kept vllm out of the registry;
+the owner messaged near its tail), and their ping to me triggered the
+on-demand revival (vllm ready 21:27:27, OWUI 200 at 21:27:28 — ≈ 3 min
+impact); my false FAIL (a reload-wait that wasn't the proven 036 form
+reading `ml-llama-swap`) then re-cp'd the config and made the daemon
+restart the healthy vllm (21:32:22→21:33:24) — churn only, no further
+owner-facing 404s. The window now waits functionally on the gateway's
+`/v1/models` (never journal parsing), restores by rename (3 s pickup in
+every window), wipes stale markers at start, no-ops `fail()` when the
+runtime is healthy, and revives vllm before every marker — proven in two
+clean ~92-s windows (21:50, 22:07); the current vllm instance has served
+since 22:09 without a single error. Standing rule: a full-battery window
+exposes vllm for the whole battery, so long batteries only when the owner
+is off chat. **The owner's report** (CPU vs
 GPU timings, 3090 measurements, per-request budgets, 3090-vs-4090
 framing) is written up in `doing/task-037-vision-cpp-bench.md`, ready to
 forward. **The PR body is revised again** (`task-037-vision-cpp-pr-body.md`

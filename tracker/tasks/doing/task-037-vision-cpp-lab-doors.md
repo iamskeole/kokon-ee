@@ -232,31 +232,43 @@ Vulkan; ASAN hammer clean; full ctest green. Lesson recorded: in this
 ggml, never read an intermediate node after the graph that contains it
 ran — only terminal outputs are stable.
 
-**The 21:24 owner-facing 404s (post-mortem — all three causes were mine).**
-Run 2 of the window completed every measurement, then its restore (an
-in-place `cp`) was not picked up by the daemon's config watcher within the
-job's 3-minute wait — even though the daemon *had* reloaded 2 s later
-(the job waited on `journalctl` line offsets, and the user journal rotated
-under vllm's log volume, so the offset arithmetic never saw the reload
-line). The false FAIL path re-cp'd the config again 5 minutes later, which
-reloaded the daemon and **restarted a vllm that had already been loading
-since the owner's own ping** — extending the outage. Timeline from the
-daemon's journal: 21:24:26–21:24:48 the registry lacked vllm (the window's
-intended ~22 s gap — the 404s the owner's session saw), the owner's ping
-at 21:26:24 triggered the daemon's on-demand boot, vllm up ~21:27:30,
-21:32:22 my false-fail re-cp killed it and booted a second instance,
-fully healthy 21:33:24. Total owner impact ~2–3 min, then clean. Fixes,
-all proven in the two subsequent windows (runs 3–4, each ~92 s, vllm
-revived before the marker, no owner-facing gap beyond the intended
-registry swap): (1) the reload wait is **functional** — it polls the
-gateway's `/v1/models` (the router truth the owner's clients see), never
-journal offsets; (2) restores are **renames** (`cp` to temp + `mv`) — every
-rename in all four runs was picked up in 3–12 s, in-place cp is what the
-watcher drops; (3) markers are wiped at job start (a stale FAIL from run 1
-had blinded run 2's watcher), and `fail()` is a no-op when the runtime is
-already healthy. The window's unavoidable exposure remains the ~22–30 s
-registry gap (the daemon cannot resurrect a model it no longer knows);
-everything after the restore is verified before the marker.
+**The 21:24 owner-facing 404s (post-mortem, corrected against the daemon's
+own journal, unit `ml-llama-swap`).** The 404s the owner's session saw at
+21:24:2x–21:24:4x ("no router for requested model") were the **intended
+window exposure**: run 2's battery kept vllm out of the registry for its
+whole ~4.5-min duration (21:20:xx swap → 21:24:29 restore-reload), and the
+owner happened to send a message near the tail of it. Their 21:26:24 ping
+reached me (pi, 127.0.0.1) and triggered the daemon's on-demand boot:
+vllm up 21:27:22, healthy 21:27:27, the owner's OWUI refreshed 200 at
+21:27:28 — impact ≈ 3 min, then clean; no further owner-facing 404s all
+night (the only 404s in the last 30 min of journal are my own
+mis-named probes). **My fault extended the churn after the owner had
+already recovered:** run 2's reload-wait (journal line offsets) never saw
+the 21:24:29 reload that did happen — the proven 036 template reads the
+`ml-llama-swap` unit and its offset method has never failed across many
+windows, under vllm's log volume included, so the 037 original's wait was
+not that form (it watched something without the reload line; the daemon's
+unit is `ml-llama-swap` — there is no `llama-swap` user unit). The 3-min
+timeout fired at 21:29:27 as a false FAIL; the fail path's re-cp (21:32:22,
+content-identical bytes) made the daemon reload again and **restart the
+healthy vllm instance** (3208917 → 3214207, healthy 21:33:24) — four more
+minutes of unnecessary churn, though the registry never lacked vllm in
+that stretch, so it stayed invisible to the owner. Fixes, proven in the
+two subsequent windows (runs 3–4, 21:50–21:52 and 22:07–22:09, ~92 s
+each, every rename picked up in 3 s, vllm revived and 1-token-verified
+before the DONE marker, the current instance 3246006 has been serving
+since 22:09 without a single error): (1) the reload wait is
+**functional** — it polls the gateway's `/v1/models` (the router truth the
+owner's clients see), never journal parsing; (2) restores are **renames**
+(`cp` to temp + `mv`) — every rename all night was picked up in 3–12 s,
+and the in-place-cp delay that bit run 2 (2 s, just past a fast poll) can
+no longer matter because nothing waits on file-watch events anymore;
+(3) markers are wiped at job start (a stale FAIL from run 1 had blinded
+run 2's watcher); (4) `fail()` is a no-op when the runtime is already
+healthy (the 21:32 churn class). Standing rule recorded: a full-battery
+window exposes vllm for the whole battery (minutes, not seconds) —
+short windows for quick proofs, long batteries only when the owner is
+off chat; everything after the restore is verified before the marker.
 
 - **D-037-11 (measured 11-22 evening): the co-residency shape on this box.**
   With vllm holding 23878 MiB of the 3090 (268 MiB free, stable), the
