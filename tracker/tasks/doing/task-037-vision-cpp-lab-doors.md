@@ -1,13 +1,26 @@
 # task-037 — the lab's models as stock GGUF doors (vision.cpp)
 
-**trigger (parked until it fires): the owner's go/no-go on the plan below** —
+## status: **doing** — GO received 2026-11-22 (P1 in progress). The PR body
+is shown to the owner in full and **not opened upstream without their
+sign-off** (D-037-7). P2 (the matrix door) stays gated on P1's measured
+nvidia-smi delta (D-037-1/8).
+
+## trigger (fired 2026-11-22): the owner's go/no-go on the plan below —
 raised 2026-11-22 when the owner, digging on their own, found that Acly
 (the same HuggingFace author of the two MobileSAM/BiRefNet ONNX exports the
 lab already uses) also publishes **GGUF** builds of both models, runnable by
 his **vision.cpp** — a stock, self-contained C++ inference library. Owner's
 framing: *"the whole point is for us not to create and maintain an inference
 engine but use stock inference engines — e.g. llama.cpp, vllm, and now this
-vision.cpp."*
+vision.cpp."* **GO (same day, evening):** *"go on P1. After you've built and
+tested the code, show me the PR body before submitting — do not submit
+before I sign off. Make sure you follow either specific contribution
+guidelines the author specifically asks for if those exist, if not try to
+match their own coding style if possible and finally if thats too
+cumbersome i guess something close to llama.cpp server style would make
+sense."* Plus the co-residency ruling: *"vllm + kokon work will never run
+inference concurrently … just given the size delta i wouldn't want to
+evict vllm just for a click on an image."*
 
 ## goal
 
@@ -204,6 +217,19 @@ this box.
   models, ICD already on the box, a runtime separate from vllm's CUDA
   context). A CUDA build would be engine work — out of scope; if it ever
   matters, that's an upstream conversation.
+- **D-037-7 (owner, 11-22): the PR gate.** The server code is built and
+  tested before any PR; the PR body is shown to the owner in full and is
+  **not opened against `Acly/vision.cpp` without their sign-off** (pushing
+  a branch to *our* fork is fine — that is just our repo). Style order:
+  (1) the author's explicit contribution guidelines, if any exist;
+  (2) their own coding style; (3) llama.cpp server style as the fallback
+  reference (ggml lineage).
+- **D-037-8 (owner, 11-22): the co-residency ruling.** vllm and Kokon
+  inference never run concurrently on this box, and on the size delta
+  alone, evicting vllm for a lab click is not worth it — so the target is
+  **Vulkan co-resident** (arena-capped, no exclusion set, no eviction),
+  **CPU co-resident** the fallback, the eviction pattern a last resort.
+  P1's measured nvidia-smi delta is what chooses.
 
 ## acceptance criteria
 
@@ -221,7 +247,8 @@ this box.
 
 ## blockers
 
-- The owner's go/no-go on the plan (especially D-037-1) — nothing here
-  touches the live matrix or vllm until P2, which won't start without it.
-- P1 needs the Vulkan SDK headers for the GPU build (apt; trivial) and ~1
-  GB of /tmp for the build — both fine on apollo.
+- None on P1 (GO received). P1 needs the Vulkan SDK headers for the GPU
+  build (apt; trivial) and ~1 GB of /tmp for the build — both fine on
+  apollo. **P2 stays gated** on P1's measured delta (D-037-1/8) and the
+  window protocol; the PR itself stays gated on the owner's sign-off of
+  the body (D-037-7) — but the PR is not on P1's critical path.
