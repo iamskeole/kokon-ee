@@ -100,3 +100,47 @@ None.
   MobileSAM-on-the-box half is executed here (the trigger's "someone with a
   weak device / the owner wants the lab to work" is the owner himself,
   2026-11-22).
+
+## Done record (2026-11-22, one working session, no GPU window)
+
+- **No rebase needed** (the owner's first ask, done first): `upstream/master`
+  is `bff35ca` (0.12.1) — an ancestor of HEAD since task-030; `origin/main`
+  == HEAD (0/0 after fetch of both).
+- **Box editor**: (1) the description input capped to 340px in the app's
+  input style (`flex: 0 1 340px`, 32px, radius 10, focus ring; was
+  `flex: 1` at ~71% of a 1600px row — harness screenshots before/after in
+  `/tmp/uitest/`, the harness itself was dev-only and is deleted);
+  (2) the move bug: `onMove`'s move branch wrote only `x1/y1` (the rect
+  shrank toward the drag — the keep box 100,150,250,300 became
+  250,250,100,200 after a +0.15/+0.10 drag, both tabs); now `movedBox`
+  (logic.ts, unit-tested: translation preserves size, clamps at the edges)
+  and a headless-browser re-run proves every body drag translates while
+  corner handles still resize and drawing is unchanged. Commits
+  `eec32e5` + `56d949a`.
+- **The lab's SAM on the box (task-025's triggered half)**: `segment.rs`
+  (encoder once per image+size — embeddings cached, 8-entry cap; decoder
+  per click; the webview's ONNX contract mirrored exactly, including the
+  rank-3 batchless `input_image` the export demands and name-bound inputs;
+  masks out as 0/255 PNGs, the same bytes `fromLogits` consumes) +
+  `POST /api/v1/segment/encode|predict` (D-035-1). The UI's
+  `loadSegmenter` prefers it whenever `segmentStatus.installed`, else the
+  in-browser one (stock default, D-035-2 CPU-first: same ORT runtime as
+  BiRefNet — no image change, no GPU). Proven three ways: the qls-core
+  suite (417 green incl. 6 new), a native run against the box's own pinned
+  files (encode 0.6 s, click 40 ms, mask on the lantern in the dev photo,
+  two clicks → two different masks), and **the deployed box**: image
+  `multiuser-95450c1` built and recreated on `frontends/kokon-ee`,
+  `/segment` reports installed, and encode + a click over the real API
+  returned the identical masks (IoUs 0.88/0.97/0.93/0.85 match the native
+  run byte-for-byte) in 613 ms / 73 ms, logged. The 11-11 incident's
+  whine had a second support (the in-browser path as the only one that
+  ran); both are now covered — the box runs it, the browser is thin.
+  Commits `f047046` + `95450c1` (service) and the UI commit, docs
+  `553579a`.
+- **Docs**: fresh-box.md's lab-models paragraph now says the service runs
+  MobileSAM (size corrected to ~45 MB); service-on-prod-box.md's handover
+  points at 95450c1 and its checklist notes the thin-client lab.
+- **Suites**: qls-core 417 / UI 248 / mcp 35+3sk green; box recreated and
+  healthy, vllm never touched (all-CPU work). Task-025 stays parked for
+  the CUDA-EP/BiRefNet-GPU half (D-035-2). **Queue next: task-031** (the
+  chaff cut).
