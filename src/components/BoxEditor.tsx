@@ -6,7 +6,7 @@ import { focusPrompt, setState, updateComposer, useStore } from "../lib/store";
 import { isTyping } from "./Viewer";
 import { IconButton } from "./ui";
 import { ZoomPan } from "./ZoomPan";
-import { parseRatio, type BoxRect, type BoxRow } from "../lib/logic";
+import { movedBox, parseRatio, type BoxRect, type BoxRow } from "../lib/logic";
 
 const PALETTE = ["#ef4035", "#2f7de1", "#e8a317", "#1f9d6b", "#a24ad8", "#e0569b", "#14a3b8", "#7a8b2e", "#d2691e", "#5562d6"];
 const MIN = 0.01;
@@ -163,9 +163,7 @@ export function BoxEditor() {
         }
       }
       const s = d.start;
-      const nx = clamp(Math.min(1 - (s.x2 - s.x1), Math.max(0, s.x1 + dx)));
-      const ny = clamp(Math.min(1 - (s.y2 - s.y1), Math.max(0, s.y1 + dy)));
-      setRows((cur) => setMain(cur, d.idx, { ...s, x1: nx, y1: ny }));
+      setRows((cur) => setMain(cur, d.idx, movedBox(s, dx, dy)));
       return;
     }
     // resize

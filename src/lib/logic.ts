@@ -188,6 +188,17 @@ export function modelSupportsInpaint(model?: string | null): boolean {
 /** A painted mask the request will actually send, for `model` (see modelSupportsInpaint). */
 const maskLive = (c: Composer, model?: string | null) => maskInUse(c) && modelSupportsInpaint(model);
 
+/** The rect after dragging a box's body by `dx`/`dy` (0-1): the whole rect travels (the far
+ * corners with the near ones), clamped at the canvas edges. The previous version moved only the
+ * top-left corner, so a drag shrank the box instead of moving it (the owner, 2026-11-22). */
+export function movedBox(r: BoxRect, dx: number, dy: number): BoxRect {
+  const w = r.x2 - r.x1;
+  const h = r.y2 - r.y1;
+  const x1 = Math.min(1 - w, Math.max(0, r.x1 + dx));
+  const y1 = Math.min(1 - h, Math.max(0, r.y1 + dy));
+  return { x1, y1, x2: x1 + w, y2: y1 + h };
+}
+
 /** One box as the model reads it, on BFL's 0-1000 canvas ([y_min, x_min, y_max, x_max],
  * top-left origin). Boxes drawn on the blank canvas are plain placements (text-to-image);
  * boxes drawn over a reference are edit rows - keep/move/remove against that reference

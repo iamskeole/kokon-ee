@@ -13,7 +13,7 @@ import {
   planPipeline, remainingSeconds, sizeForWidth, timeAgo, upscaleRequest, upscaleTargets, versionLabels, type JobClock, type Ref,
   neighbourAfterRemoval, pageOutdated, previewIndex, starPromptDue, STAR_PROMPT_AFTER, formatBytes, formatDuration, installItemShort, installItemText, installProgress, installStep, installTimeLeft, timelineLinks, undoTarget, aspectLabel, parseRatio, sizeForRatio, sizeForLongSide, expandToRatio, expandToSize, arcLayout,
   goneVersions, moreLikeThisRequest, MORE_LIKE_THIS, PREVIEW_SIDE, stageFitsPreview, viewerWantsFull,
-  modelRequest, entryForModel, entryForGeneration, boxRows, appendBoxTable, splitBoxTable, modelSupportsBoxes, modelSupportsInpaint, type BoxRow,
+  modelRequest, entryForModel, entryForGeneration, boxRows, movedBox, appendBoxTable, splitBoxTable, modelSupportsBoxes, modelSupportsInpaint, type BoxRow,
 } from "./logic";
 import type { GenerationRecord, InstallItem, JobView, LoraItem, Plan } from "./types";
 
@@ -915,6 +915,36 @@ describe("entryForGeneration", () => {
 
 describe("layout boxes", () => {
   const rect = { x1: 0.1, y1: 0.2, x2: 0.3, y2: 0.4 };
+
+  it("a body drag moves the whole rect (the far corners travel too)", () => {
+    // The pre-fix drag wrote only the new top-left: the rect collapsed toward the drag.
+    const m = movedBox(rect, 0.15, 0.1);
+    expect(m.x1).toBeCloseTo(0.25);
+    expect(m.y1).toBeCloseTo(0.3);
+    expect(m.x2).toBeCloseTo(0.45);
+    expect(m.y2).toBeCloseTo(0.5);
+    expect(m.x2 - m.x1).toBeCloseTo(rect.x2 - rect.x1);
+    expect(m.y2 - m.y1).toBeCloseTo(rect.y2 - rect.y1);
+  });
+
+  it("a body drag clamps at the canvas edges without stretching", () => {
+    const big = { x1: 0.8, y1: 0.8, x2: 0.99, y2: 0.99 };
+    const m = movedBox(big, 0.5, -2);
+    expect(m.x1).toBeCloseTo(0.81);
+    expect(m.y1).toBeCloseTo(0);
+    expect(m.x2).toBeCloseTo(1);
+    expect(m.y2).toBeCloseTo(0.19);
+    const up = movedBox(rect, -5, 0.5);
+    expect(up.x1).toBeCloseTo(0);
+    expect(up.y1).toBeCloseTo(0.7);
+    expect(up.x2).toBeCloseTo(0.2);
+    expect(up.y2).toBeCloseTo(0.9);
+  });
+
+  it("a zero-length drag is the same rect", () => {
+    expect(movedBox(rect, 0, 0)).toEqual(rect);
+  });
+
   const box = (o: Partial<BoxRow> = {}): BoxRow => ({
     id: "obj_1", ref: 0, kind: "new", src: null, tgt: { ...rect }, desc: "a bird", ...o,
   });
