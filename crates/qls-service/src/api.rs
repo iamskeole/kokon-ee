@@ -516,16 +516,12 @@ async fn matte_download(State(s): St) -> ApiResult<Json<Value>> {
 }
 
 /// The layers lab's click-to-select model (MobileSAM): there or not, and its size.
-/// Installed when this box has the two pinned files (it runs them in-process) or, on the
-/// split box, when the gateway's `kokon-sam` door answers (D-036-1 — the model runs on
-/// the compute box; this box stores nothing). The probe boots the door on demand, so the
-/// first lab open on a split box may wait the door's cold boot.
+/// Installed when this box has the two pinned files (the service runs them in-process);
+/// a box without them falls back to the in-browser onnxruntime-web copy, the stock path.
 async fn segment_status(State(s): St) -> Json<Value> {
     let dir = s.engine.config().sdcpp_dir;
     let bytes: u64 = qls_core::matting::MOBILE_SAM.iter().map(|d| d.size).sum();
-    let local = qls_core::matting::sam_installed(&dir);
-    let installed = local || s.engine.segment_relay_available().await;
-    Json(json!({ "installed": installed, "bytes": bytes }))
+    Json(json!({ "installed": qls_core::matting::sam_installed(&dir), "bytes": bytes }))
 }
 
 async fn segment_download(State(s): St) -> ApiResult<Json<Value>> {
