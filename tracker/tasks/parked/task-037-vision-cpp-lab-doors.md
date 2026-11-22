@@ -109,7 +109,10 @@ parity — the F16 quantization makes 100% impossible and uninteresting.
    a `vision-server` binary next to `vision-cli` (vendored single-header
    HTTP, JSON API for all five model families, all four SAM heads exposed
    with their indices, HTTP/1.1 answering `Expect: 100-continue` — the
-   Python door's lesson, tested). Home on the box: `backends/kokon-vision/`
+   Python door's lesson, tested), **and a hard arena cap** (e.g. 512 MB:
+   fail the door's own startup check rather than over-allocate a shared
+   card — the co-residency story's safety valve; D-037-1). Home on the box:
+   `backends/kokon-vision/`
    = the fork checkout (upstream + our delta). **Draft the upstream PR in
    the same pass** (generic, no Kokon naming, with the test suite); the
    owner sends it or we do, per their word. Build `VISP_VULKAN=ON` (Vulkan
@@ -119,10 +122,10 @@ parity — the F16 quantization makes 100% impossible and uninteresting.
    SHA-256 + size) — the box's model convention; SETUP.md's model step is
    what re-creates them on a fresh box.
 3. **Bench, vllm resident**: per-call latency (CPU and Vulkan variants),
-   `nvidia-smi` delta for the Vulkan run (weights ~110 MiB + ggml's arena —
-   **the card is at 23.8/24.5 GB under vllm, so the Vulkan variant's budget
-   is the free ~0.7 GB minus vllm's wobble — the number decides the set
-   membership, see decisions**), and 1-token vllm probes before/after.
+   **the `nvidia-smi` delta for the Vulkan run is the decision number for
+   D-037-1** (weights ~110 MiB + activations + the capped arena, against
+   the stable ~0.7 GB vllm left free — under ~0.4 GB ⇒ co-resident is the
+   default), and 1-token vllm probes before/after.
 4. **Per-head parity** vs the in-process ONNX reference set (the existing
    test images + reference masks; the 100-continue-free harness).
 
@@ -163,13 +166,19 @@ this box.
   *CPU* variant: zero VRAM, **co-resides with vllm** (no eviction, no window
   drama; ~0.5 s encode / ~0.1–0.2 s per click — about where in-process sits,
   but on the accelerator, off the serving box, and ¼ the model bytes).
-  *Vulkan* variant: 19 ms / 85 ms (their 4070 bench; ours to measure), but
-  the card is 97% vllm → it can only follow the **qwen-doors' eviction
-  pattern** (the lab session evicts vllm until its TTL; the owner's chat
-  goes down for the lab's lifetime) or a tight-fit co-residency if the
-  nvidia-smi delta leaves comfortable headroom. Leaning: **CPU first**
-  (free, immediate, no eviction), Vulkan as a follow-up with the exclusion
-  set if the owner wants the 19 ms.
+  *Vulkan* variant: 19 ms / 85 ms (their 4070 bench; ours to measure). The
+  co-residency question, refined on the owner's point (11-22 evening): the
+  110 MB of GGUFs is only the *weights*; realistic peak for both models in
+  one process is ~0.3–0.5 GB (BiRefNet's activations dominate), and the
+  card's free ~0.7 GB is a **stable** budget (vllm pre-allocated its KV at
+  startup — it doesn't grow at runtime and squeeze), so it is a
+  fixed-budget question, not a wobble question. The door caps its own
+  ggml-Vulkan arena (hard fail at the cap instead of eating a neighbor's
+  card — a generic feature, part of the upstream PR), and **P1's
+  nvidia-smi delta decides**: under ~0.4 GB ⇒ Vulkan co-resident is the
+  default (no exclusion set, no eviction); tight ⇒ CPU variant (still
+  co-resident) or the exclusion pattern. Leaning Vulkan-co-resident, on
+  the measurement.
 - **D-037-2 (proposed): one door, both models** (`kokon-vision`) — one
   process, ~110 MB, one boot/TTL lifecycle, two endpoint families; a door
   per model would double the matrix footprint for no isolation gain.
