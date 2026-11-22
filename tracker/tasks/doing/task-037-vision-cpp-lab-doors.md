@@ -126,6 +126,36 @@ shape it does today, and the parity bar is **per-head selection equivalence**
 (same rule picks the same object; IoU within a few points), not byte
 parity — the F16 quantization makes 100% impossible and uninteresting.
 
+**Measured 2026-11-22 evening (both numbers below settle the two open P1
+questions):**
+
+- **Vulkan co-residency delta (D-037-1).** Prebuilt v0.3.0 `vision-cli`
+  with `-b gpu`, MobileSAM F16, vllm resident (23878 MiB used / **268 MiB
+  free**, probe 200 before and after — vllm never touched): backend init
+  150 ms, **weights load into VRAM in 14.5 ms (f16)**, then inference dies:
+  `vk::Device::allocateMemory: ErrorOutOfDeviceMemory` on a **4.5 MB**
+  arena chunk, with nvidia-smi peaking at **24144 MiB** — i.e. MobileSAM
+  Vulkan wants **~266 MiB** (25.7 weights + ~240 ggml arena/activations),
+  2 MiB over the stable free budget, and it is the *last small chunk* that
+  fails, so it is borderline, not close. Verdict: **uncapped Vulkan does
+  not co-reside with vllm's current footprint.** The server's
+  `--max-arena` cap is the lever: 26 + ≤200 ≈ ≤226 MiB would fit under
+  268 — proving it needs a Vulkan build of the capped code (SDK headers
+  only; blocked on the owner's `sudo apt install libvulkan-dev`). Until
+  then the door's default on this box is **CPU co-resident** (0.62 s/click
+  measured, zero VRAM — D-037-8's fallback); if the owner ever wants the
+  19 ms Vulkan variant, the lever is trimming vllm's KV budget by a few
+  hundred MiB, which is the owner's call.
+- **Per-head parity (D-037-4), the standing lantern click (300,200), CPU:**
+  our `vision-server` returns **IoUs [0.619, 0.881, 0.868, 0.794]** —
+  **bit-identical to the prebuilt stock CLI v0.3.0** (0.619/0.881/0.868 +
+  its 4th head), which independently validates our pipeline code. Against
+  the in-process ONNX reference **[0.676, 0.897, 0.850, 0.811]**: per-head
+  |Δ| = **0.057 / 0.016 / 0.018 / 0.017** (max on head 0, the weakest
+  head), and **both pick head 1 as best** (0.881 vs 0.897) — the D-037-4
+  bar (same rule, same object, IoU within a few points) is met on the
+  reference click.
+
 ## plan
 
 **P1 — scratch proof on apollo. No matrix change, no vllm impact, ~a day.**
@@ -266,8 +296,12 @@ this box.
 
 ## blockers
 
-- None on P1 (GO received). P1 needs the Vulkan SDK headers for the GPU
-  build (apt; trivial) and ~1 GB of /tmp for the build — both fine on
-  apollo. **P2 stays gated** on P1's measured delta (D-037-1/8) and the
-  window protocol; the PR itself stays gated on the owner's sign-off of
-  the body (D-037-7) — but the PR is not on P1's critical path.
+- **Vulkan SDK headers** (`sudo apt install libvulkan-dev` — owner's sudo,
+  one-liner) for building the capped Vulkan variant and proving the ~226
+  MiB fits under vllm's 268 MiB free. Everything else on P1 is measured
+  (numbers above). **P2 stays gated** on the owner's call given those
+  numbers (D-037-1/8: at vllm's current footprint the co-resident default
+  is CPU; Vulkan needs either the capped-build proof or vllm's KV trimmed)
+  and the window protocol; the PR itself stays gated on the owner's
+  sign-off of the body (D-037-7/9) — but the PR is not on P1's critical
+  path.
