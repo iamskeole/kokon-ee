@@ -20,12 +20,24 @@ budget overcount (fixed by dry-running the allocator). Model artifacts
 kept per the owner's word: `models/gguf/Acly/<5>/` on the ml box with
 provenance (ml `582bcd0`). **PR body revised twice and re-shown**
 (`task-037-vision-cpp-pr-body.md`); **not opened without the owner's
-sign-off (D-037-7/9).** Open items: owner sign-off on the PR body; the
-P2 matrix door (now a one-line decision, D-037-12: CPU co-resident is
-the proven standing variant; Vulkan SAM fits on the current card but
-carries no headroom). One owner-facing incident to note (the 21:24
-window's 404s — post-mortem below; the window script is fixed and was
-proven clean in two subsequent runs).
+sign-off (D-037-7/9).** **PR submitted 11-23: [Acly/vision.cpp#25](https://github.com/Acly/vision.cpp/pull/25)** (owner sign-off;
++2202/−0, 8 files, purely additive) — awaiting the author's
+review; the fork stays pinned either way (D-037-5's fallback).
+**P2 COMPLETE 11-23 (owner: "agree on CPU for now"): the
+`kokon-vision` door is LIVE in the matrix** — CPU, both lab models
+(MobileSAM + BiRefNet-lite), permanent co-tenant of every set (`& kv`,
+the sidekick pattern), `ttl 86400`, `/health` readiness, one-word
+`-b gpu` flip documented in the boot script. Proven through the
+gateway in a 65-second window (the change window: no restore on
+success): cold-door first click 0.91 s, warm 0.29 s, IoUs bit-identical
+to the CPU reference (`[0.619, 0.8813, 0.8677, 0.7937]`); BiRefNet matte
+2.75 s, bimodal; vllm revived 58 s later and a co-resident click cost
+**0 MiB of VRAM** (608 free before and after) — zero-VRAM co-tenancy
+proven against the live assistant runtime. Owner exposure 62 s.
+(The 21:24 window's 404s — post-mortem below; that lesson shaped
+this window: functional router waits, rename restore, healthy-runtime
+no-op fail.) **P3 (service integration, no in-browser fallback per
+D-037-13) and P4 (docs/handover) remain.**
 
 ## trigger (fired 2026-11-22): the owner's go/no-go on the plan below —
 raised 2026-11-22 when the owner, digging on their own, found that Acly
@@ -294,6 +306,24 @@ off chat; everything after the restore is verified before the marker.
   503. P2's ruling is therefore: CPU door now (proven end-to-end both
   ways), or CPU door + the knowledge that a 3090 with a trimmed KV also
   runs Vulkan SAM.
+- **D-037-12 (RESOLVED 11-23, owner): P2 = CPU door, both lab models**
+  ("agree on CPU for now") — `kokon-vision`, CPU, MobileSAM +
+  BiRefNet-lite, permanent co-tenant of every matrix set (`& kv`, the
+  sidekick pattern): zero VRAM, never evicts, never evicted, ~0.5 s cold
+  boot, 334 MB idle, 163 ms warm click / 2.75 s matte measured with vllm
+  co-resident. The Vulkan-SAM variant stays a documented one-word flip in
+  the boot script (`-b gpu`) for a day when vllm's KV is trimmed — not
+  wired tonight.
+- **D-037-13 (owner, 11-23, before sleep): P3 has NO in-browser
+  fallback.** The point of this entire workstream is that the gateway /
+  service handles the lab's models and the UI is a thin client; any
+  failure means *we* failed at our job — so the UI reports it plainly
+  instead of silently degrading to onnxruntime-web. P3 retires the
+  in-browser path from the capability ladder (door → in-process →
+  hard, honest error), including removing the fallback wiring that
+  task-035 kept (the in-browser stock default is gone; the browser
+  canvas/outline interaction stays — only the *model* must come from
+  the service).
 
 ## plan
 
@@ -323,12 +353,15 @@ off chat; everything after the restore is verified before the marker.
 4. **Per-head parity** vs the in-process ONNX reference set (the existing
    test images + reference masks; the 100-continue-free harness).
 
-**P2 — the matrix door (window protocol, only after P1's numbers and the
-owner's call).** One entry `kokon-vision` (both models, one boot script,
-one key, `checkEndpoint /health`, TTL unload — sidekick pattern). Set
-membership per the P1 evidence (decision D-037-1 below). Window per the
-standing protocol: stage → `-validate` → atomic swap → reload → last-good
-re-seed → proofs → **vllm revived before the marker**.
+**P2 — the matrix door (DONE 11-23).** One entry `kokon-vision`
+(both models, one boot script, `checkEndpoint /health`, `ttl 86400`
+resident, `& kv` in all seven sets — sidekick pattern). The 037p2 change
+window ran the standing protocol (wipe markers → stage → `-validate`
+→ rename swap → functional router waits → last-good re-seed with the NEW
+config → gateway proofs → **vllm revived before the marker**): 65 s
+total, no restore needed (the change is the point). Measured: cold
+first click 0.91 s / warm 0.29 s, matte 2.75 s, co-resident click
+0 MiB VRAM cost, door RSS 134 MB, vllm 23.5 GB untouched.
 
 **P3 — service integration.** A `visionEngine` config section (gateway base
 + key + door id — the D-036-10 shape: one base, one key, door id in the
@@ -336,9 +369,10 @@ path, sibling of the sdcpp doors). **Revive the relay** that left the tree
 this afternoon — it is the right client for this door (the contract it
 speaks, 4-mask PNGs + IoUs, is exactly what a vision.cpp door returns; the
 deleted code is the starting point, git history has it). Capability, in
-order: relay to the door → in-process ONNX (single box, the stock default
-for boxes without an accelerator) → in-browser onnxruntime-web (last
-resort). The browser contract is untouched either way.
+order: the door (through the gateway) → in-process ONNX (single box).
+**There is no in-browser fallback (D-037-13)** — if neither is available
+the `/segment` capability says so and the UI shows a plain failure: the
+gateway/service owns the lab's inference, the UI is a thin client.
 
 **P4 — docs & handover.** fresh-box (the lab's models live on the
 accelerator as a stock GGUF door; a single box stays in-process; the
@@ -455,13 +489,10 @@ this box.
 - ~~`glslc`~~ **resolved 11-22 night** (owner installed it); the Vulkan
   build, the all-five GPU E2E and the budget table are done — Vulkan is
   proven, not pending.
-- **P2 (the matrix door) stays gated on the owner's ruling**, now a
-  one-line call with the full numbers in hand (D-037-12): CPU co-resident
-  door (proven end-to-end, 129–4977 ms warm, zero VRAM) vs the same door
-  with `-b gpu` restricted to MobileSAM (110 ms click, 160 MB budget, fits
-  at vllm's current 608 MiB free but with no headroom for KV growth).
-  Window protocol per the standing rules when it goes; the 037 window job
-  (`backends/_jobs/vision-vulkan-037/`) is the proven template.
+- ~~**P2 (the matrix door)**~~ **done 11-23** (owner's CPU ruling; the
+  037p2 window, 65 s, all proofs in the status above). The `-b gpu`
+  variant stays a documented one-word flip in the boot script for a
+  future trimmed-KV vllm.
 - **Upstream PR opened: [Acly/vision.cpp#25](https://github.com/Acly/vision.cpp/pull/25)**
   (2026-11-23, after the owner’s sign-off — D-037-7 satisfied; +2202/−0,
   8 files, purely additive). Awaiting the author’s review; the fork
