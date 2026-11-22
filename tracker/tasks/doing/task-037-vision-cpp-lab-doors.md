@@ -1,30 +1,31 @@
 # task-037 — the lab's models as stock GGUF doors (vision.cpp)
 
-## status: **doing** — GO received 2026-11-22. **P1 complete 2026-11-22 (evening):**
-fork at `backends/kokon-vision/` (4 commits on upstream `26a7529`, branch
-`vision-server` pushed to the fork) — `vision-server` (all five families,
-4 SAM heads, embed cache, 100-continue) + `util/json.h` + base64 in
-`util/string.h` + **the per-request device-memory budget check** (dry-run
-of the graph allocator, 503 with the measured size before any allocation)
-+ test-json (19) and test-server (10, functional, incl. the budget
-refusal). All C++ ctest green (29 total, 5x flake loop clean), ASAN build
-clean under a 60-call point/box mix (two memory bugs found and fixed via
-ASAN: dangling `elapsed_str` stack pointer; use-after-free reading a freed
-ggml tensor header from the embed cache). **All five families verified
-end-to-end on CPU over the API** (1376×768): measured per-request graphs
-188 / 1332 / 742 / 211 / 217 MB (all inside the 4 GB default), 0.65 / 2.72 /
-4.99 / 0.64 / 2.58 s, semantic checks pass (bimodal matte, full-range
-depth, masked-only inpaint change, 4× upscale); per-head SAM parity on the
-standing click met (D-037-4). **Model artifacts kept per the owner's word:**
-`models/gguf/Acly/<5>/` on the ml box with provenance (ml `582bcd0`).
-**PR body revised and re-shown** (`task-037-vision-cpp-pr-body.md`):
-`Signed-off-by` out per D-037-10, budget-check story and the all-five E2E
-in; **not opened without the owner's sign-off (D-037-7/9).** Open items:
-Vulkan build needs `glslc` (owner's one-liner; `libvulkan-dev` is already
-installed), and P2 (the matrix door) is gated on the owner's ruling — with
-vllm resident on this box the door runs **CPU** (everything fits, no VRAM),
-which D-037-8's fallback makes acceptable; Vulkan co-residency on this
-card is knife-edge at best (measured, below).
+## status: **doing** — GO received 2026-11-22. **P1 complete 2026-11-22 (night):**
+fork at `backends/kokon-vision/` (**5 commits** on upstream `26a7529`,
+branch `vision-server` pushed to the fork) — `vision-server` (all five
+families, 4 SAM heads, embed cache, 100-continue) + `util/json.h` +
+base64 in `util/string.h` + the per-request device-memory budget check
+(dry-run of the graph allocator, 503 with the measured size before any
+allocation) + test-json (19) and test-server (10, functional, incl. the
+budget refusal). All C++ ctest green; ASAN clean under mixed-request
+hammers. **All five families verified end-to-end on CPU (with vllm
+resident) and on GPU (3090, card free, via the window protocol)** —
+numbers and the 3090-vs-4090 analysis in
+[`task-037-vision-cpp-bench.md`](task-037-vision-cpp-bench.md) (the doc to
+forward). **Two real bugs found and fixed in the server along the way**
+(both recorded below with measurements): the embedding-cache corruption
+(commit `73a7699` — a cache hit predicted from stale intermediate data;
+now bit-identical across repeated requests on CPU and Vulkan) and the
+budget overcount (fixed by dry-running the allocator). Model artifacts
+kept per the owner's word: `models/gguf/Acly/<5>/` on the ml box with
+provenance (ml `582bcd0`). **PR body revised twice and re-shown**
+(`task-037-vision-cpp-pr-body.md`); **not opened without the owner's
+sign-off (D-037-7/9).** Open items: owner sign-off on the PR body; the
+P2 matrix door (now a one-line decision, D-037-12: CPU co-resident is
+the proven standing variant; Vulkan SAM fits on the current card but
+carries no headroom). One owner-facing incident to note (the 21:24
+window's 404s — post-mortem below; the window script is fixed and was
+proven clean in two subsequent runs).
 
 ## trigger (fired 2026-11-22): the owner's go/no-go on the plan below —
 raised 2026-11-22 when the owner, digging on their own, found that Acly
@@ -187,6 +188,101 @@ questions):**
   activations stay fp16/fp32 regardless. Making our own Q8 exports would be
   engine work — against the stock-engine principle.
 
+**Measured 2026-11-22 night (the Vulkan window + timing battery — the
+owner's "test what we claim" ask; `glslc` was installed by the owner,
+`libvulkan-dev` was already there). Four window runs of
+`backends/_jobs/vision-vulkan-037/` (config swap out of the matrix → card
+free → battery → rename-restore → daemon reboots vllm → 1-token probe
+200 → marker; vllm never running mid-window, revived before every marker):
+
+- **All five families on the 3090 (card free, 24.1 GB, warm shader cache):**
+  first requests 13–909 ms, **warm 76–320 ms** (SAM point/box 110 ms,
+  BiRefNet 320, Depth 143, MI-GAN 271, ESRGAN 76); peaks 694–2052 MiB with
+  all five resident. IoUs: point [0.6271, 0.8843, 0.8670, 0.7910], box
+  [0.5830, 0.8646, 0.8105, 0.7231] — the box row matches the CPU box row
+  [0.5804, 0.8644, 0.8099, 0.7227] to <0.004 per head, and the point row
+  matches CPU (0.6184/0.8812/0.8677/0.7940) within 0.009: **Vulkan and CPU
+  are the same model, per D-037-4.**
+- **Per-request budget table, Vulkan (the dry-run measure the server
+  enforces with `--max-arena`):** SAM **160 MB**, BiRefNet 1327, Depth
+  303, MI-GAN 211, ESRGAN 218 (CPU: 188 / 1332 / 742 / 211 / 217). The
+  two-graph SAM split (below) cut this from 200 → 160 and the all-five
+  peak from 883 → 694 MiB.
+- **CPU battery, vllm co-resident (the production scenario, zero GPU
+touch — VRAM flat to the MiB):** warm 129–2760 ms as in the bench doc.
+
+**The embedding-cache corruption (the significant find; fixed in commit
+`73a7699`).** While measuring the warm (cache-hit) requests, the SAM IoUs
+drifted run to run — first request of a fresh server correct
+(0.6190/0.8813/…), every later request on the same image different
+(0.398/0.512/…, 0.719/0.781/…, never converging). Root cause, proven with
+a 6-request probe: the server captured the encoder's output tensor *after*
+the combined encode+predict graph ran, and this ggml's allocator may reuse
+a parent's buffer for a later **in-place** op — so the "cached embedding"
+was sometimes the tail of the prediction's intermediate data, which the
+next cache-hit request then predicted from (each run's intermediates
+feeding the next run's "embedding" — the drift never settled). Fix:
+phase 1 runs the encoder in **its own graph** (its output registered via
+`compute_graph_output`, which also registers the chain and image input in
+the graph so the allocator gives them buffers — the missing registration
+surfaced as a null-buffer assert on the first attempt); phase 2 runs the
+predictor with the embedding always re-uploaded from the host copy.
+Result: 6/6 point and 3/3 box requests bit-identical on CPU *and*
+Vulkan; ASAN hammer clean; full ctest green. Lesson recorded: in this
+ggml, never read an intermediate node after the graph that contains it
+ran — only terminal outputs are stable.
+
+**The 21:24 owner-facing 404s (post-mortem — all three causes were mine).**
+Run 2 of the window completed every measurement, then its restore (an
+in-place `cp`) was not picked up by the daemon's config watcher within the
+job's 3-minute wait — even though the daemon *had* reloaded 2 s later
+(the job waited on `journalctl` line offsets, and the user journal rotated
+under vllm's log volume, so the offset arithmetic never saw the reload
+line). The false FAIL path re-cp'd the config again 5 minutes later, which
+reloaded the daemon and **restarted a vllm that had already been loading
+since the owner's own ping** — extending the outage. Timeline from the
+daemon's journal: 21:24:26–21:24:48 the registry lacked vllm (the window's
+intended ~22 s gap — the 404s the owner's session saw), the owner's ping
+at 21:26:24 triggered the daemon's on-demand boot, vllm up ~21:27:30,
+21:32:22 my false-fail re-cp killed it and booted a second instance,
+fully healthy 21:33:24. Total owner impact ~2–3 min, then clean. Fixes,
+all proven in the two subsequent windows (runs 3–4, each ~92 s, vllm
+revived before the marker, no owner-facing gap beyond the intended
+registry swap): (1) the reload wait is **functional** — it polls the
+gateway's `/v1/models` (the router truth the owner's clients see), never
+journal offsets; (2) restores are **renames** (`cp` to temp + `mv`) — every
+rename in all four runs was picked up in 3–12 s, in-place cp is what the
+watcher drops; (3) markers are wiped at job start (a stale FAIL from run 1
+had blinded run 2's watcher), and `fail()` is a no-op when the runtime is
+already healthy. The window's unavoidable exposure remains the ~22–30 s
+registry gap (the daemon cannot resurrect a model it no longer knows);
+everything after the restore is verified before the marker.
+
+- **D-037-11 (measured 11-22 evening): the co-residency shape on this box.**
+  With vllm holding 23878 MiB of the 3090 (268 MiB free, stable), the
+  `kokon-vision` door runs **CPU**: all five families fit under the 4 GB
+  default budget in RAM (max ~1.3 GB peak), 0.65–4.99 s, zero VRAM, no
+  eviction, no window drama — D-037-8's fallback, now the measured default
+  rather than the guess. **Vulkan co-residency on this card is out:** the
+  uncapped MobileSAM peak measured 266 MiB (already over the 268 free), and
+  BiRefNet/Depth graphs are 0.7–1.3 GB even at half precision — the free
+  budget is a knife-edge for the smallest family and ~3–5× short for the
+  others. If the owner ever trims vllm's KV by a few hundred MiB, Vulkan
+  SAM becomes viable (the budget check makes any overflow a clean 503, not
+  a starvation of the LLM); the door stays backend-agnostic (`-b cpu|gpu`)
+  so that flip is a boot-script word.
+  **Refined by the night windows (D-037-12):** after the two-graph split,
+  MobileSAM Vulkan's per-request budget is **160 MB** (peak 694 MiB with
+  all five resident); with vllm's post-boot free memory measured at
+  608 MiB, **Vulkan MobileSAM now fits on this card — BiRefNet/Depth/
+  MI-GAN/ESRGAN do not** (211–1327 MB per request). Standing door variant:
+  **CPU co-resident** (zero VRAM, never touches vllm's headroom); Vulkan
+  SAM is a measured one-word flip (`-b gpu`) the moment the owner wants
+  the 110 ms click, with the budget check making any regression a clean
+  503. P2's ruling is therefore: CPU door now (proven end-to-end both
+  ways), or CPU door + the knowledge that a 3090 with a trimmed KV also
+  runs Vulkan SAM.
+
 ## plan
 
 **P1 — scratch proof on apollo. No matrix change, no vllm impact, ~a day.**
@@ -344,15 +440,16 @@ this box.
 
 ## blockers
 
-- **`glslc`** (owner's one-liner: `sudo apt install -y glslc` —
-  `libvulkan-dev` is already installed; only the shader compiler is missing)
-  for the Vulkan build of the fork, so the budget check and the all-five
-  routes can be proven on GPU. Not on the CPU path: P1's CPU proof is
-  complete, and the door's default on this box is CPU (D-037-11).
-- **P2 (the matrix door) stays gated on the owner's ruling** with the
-  complete numbers in hand: CPU door (proven, co-resident, 0.65–4.99 s) vs
-  waiting on a Vulkan-capable budget (would need vllm's KV trimmed). Window
-  protocol per the standing rules when it goes.
-- **The upstream PR stays gated on the owner's sign-off of the revised body**
-  (D-037-7/9/10) — the branch is pushed and the command is ready; the PR is
-  not on P2's critical path.
+- ~~`glslc`~~ **resolved 11-22 night** (owner installed it); the Vulkan
+  build, the all-five GPU E2E and the budget table are done — Vulkan is
+  proven, not pending.
+- **P2 (the matrix door) stays gated on the owner's ruling**, now a
+  one-line call with the full numbers in hand (D-037-12): CPU co-resident
+  door (proven end-to-end, 129–4977 ms warm, zero VRAM) vs the same door
+  with `-b gpu` restricted to MobileSAM (110 ms click, 160 MB budget, fits
+  at vllm's current 608 MiB free but with no headroom for KV growth).
+  Window protocol per the standing rules when it goes; the 037 window job
+  (`backends/_jobs/vision-vulkan-037/`) is the proven template.
+- **The upstream PR stays gated on the owner's sign-off of the revised
+  body** (D-037-7/9/10) — the branch is pushed (5 commits) and the command
+  is ready; the PR is not on P2's critical path.

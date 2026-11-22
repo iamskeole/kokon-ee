@@ -1,6 +1,6 @@
 # task-037 — the upstream PR body (D-037-7: shown to the owner 2026-11-22, NOT submitted)
 
-Source: `iamskeole/vision.cpp` branch `vision-server` (4 commits on
+Source: `iamskeole/vision.cpp` branch `vision-server` (5 commits on
 upstream main `26a7529`), pushed. PR target: `Acly/vision.cpp`.
 
 **Title:** `Add vision-server: an HTTP server for the GGUF model families`
@@ -36,7 +36,12 @@ the project's `util/string.h` (gained base64), and a new self-contained
   a single local client; a request queue is a reasonable follow-up.
 - SAM keeps a per-image encoder-output cache (hashed on the preprocessed
   pixels), so a stream of clicks/boxes on the same image skips TinyViT after
-  the first.
+  the first. The encoder runs in a graph of its own (the predictor is a
+  second graph that takes the embedding as an input): in this ggml the
+  allocator may reuse a parent's buffer for a later in-place op, so the
+  embedding can only be read back reliably from a graph where it is the
+  terminal output. With the split, repeated requests for the same image are
+  bit-identical (verified, CPU and Vulkan).
 - GPU co-residency: `--max-arena <MB>` (default 4096) is a per-request
   device-memory budget. It is probed at boot (the server fails with an
   actionable message if the device cannot provide it), and it is enforced
@@ -62,13 +67,22 @@ the project's `util/string.h` (gained base64), and a new self-contained
   404, and a server with a 16 MB budget refusing a request it cannot hold,
   with the measured size, instead of attempting the allocation.
 
-All five families verified end-to-end over the API on CPU (Ryzen 5800X,
-1376x768 input): measured per-request graphs 188 MB (SAM), 1332 MB (BiRefNet
-lite), 742 MB (Depth V2 Small), 211 MB (MI-GAN), 217 MB (ESRGAN 1024x1024
-tile) - all inside the 4096 MB default budget; 0.65 / 2.72 / 4.99 / 0.64 /
-2.58 s respectively. Semantic checks: the matte is bimodal, the depth map
-has full dynamic range, inpainting changes only the masked region, the
-upscale is 4x.
+All five families verified end-to-end over the API on both backends, one
+server process, all five models resident:
+
+- **CPU** (Ryzen 5800X, with a 24 GB vLLM running on the GPU at the same
+time - zero VRAM touched): measured per-request graphs 188 MB (SAM), 1332 MB
+(BiRefNet lite), 742 MB (Depth V2 Small), 211 MB (MI-GAN), 217 MB (ESRGAN
+1024x1024 tile) - all inside the 4096 MB default budget; warm 129 ms (SAM
+point, cache hit) / 2.6-5.0 s for the rest. Semantic checks: the matte is
+bimodal, the depth map has full dynamic range, inpainting changes only the
+masked region, the upscale is 4x.
+- **Vulkan** (RTX 3090, card free): all five 200; warm 76-320 ms (SAM
+point/box 110 ms). Per-request budget as dry-run measured by the server:
+SAM 160 MB, BiRefNet 1327, Depth 303, MI-GAN 211, ESRGAN 218; peak with all
+five resident 694-2052 MiB. SAM per-head IoUs on a fixed reference click
+match the CPU server to < 0.01 per head (both backends run the same F16
+GGUFs), i.e. the Vulkan path introduces no quality delta.
 
 Verified on Linux x86_64 (Ryzen 5800X, `GGML_NATIVE=OFF` SSE4.2/AVX2/F16C,
 `VISP_FMT_LIB=ON`, `GGML_BACKEND_DL=ON`): `ctest -C Release` — all C++ tests

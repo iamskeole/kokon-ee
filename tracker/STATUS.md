@@ -36,41 +36,56 @@ Keep this file current at the end of every task.
 [x] WP6 stock-cleanup — task-020 done 11-04, reopened 11-05, **re-land COMPLETE and closed this span** — the 11-04 record (stock-016 live, deferral proven in both directions, chat-priority the product fact) stands as the provenance of the invariants; the 11-05 re-land: layout surgery (pure stock trees; `_scripts`/`_configs`/`_jobs` homes; 10 pure-boot scripts; **no `cmdStop` anywhere**; `.last-good` + reload semantics; `logToStdout: both`), the owner's handover to the daemon-owned vllm, the pre-window daemon restart (journal mirror engaged; the P3 bind-handover race found + gated), and the **w020r window PASSED 223 s** (vllm 4-s group stop with `EngineCore` in the journal, llama.cpp 2-s, every set eviction per the stock-017 sets, vllm restored last, DONE marker last). Record: `done/task-020.md`.
 
 ## Current
-**task-037 — IN PROGRESS (P1 complete 2026-11-22 evening; awaiting the
-owner: PR-body sign-off, `glslc`, and the P2 ruling)** (the lab's two
-models as a stock GGUF door via **vision.cpp** — the owner's own dig-up;
-record in the task file, `doing/task-037-vision-cpp-lab-doors.md`):
-**P1 done** — the fork `iamskeole/vision.cpp` (4 commits on upstream
-`26a7529`, pushed) carries a generic `vision-server`: all five model
-families over plain JSON, the four SAM heads indexed with a per-image
-encoder-embedding cache, HTTP/1.1 answering `Expect: 100-continue`, and a
-**per-request device-memory budget** (a dry run of the graph allocator —
-the only honest measure, because this ggml reuses in-place ops' parents;
-an over-budget request gets a 503 with its measured size *before* touching
-memory, so the door can never starve a GPU tenant). 29 C++ tests green
-(incl. the budget refusal), AddressSanitizer-clean under a sustained mixed
-hammer. **All five families verified end-to-end on CPU** with vllm
-resident (1376×768; graphs 188 / 1332 / 742 / 211 / 217 MB, all inside the
-4 GB default; 0.65–4.99 s; semantic checks pass) — so on this box, where
-vllm leaves 268 MiB of the 3090, the door's standing variant is **CPU
-co-resident** (D-037-11; Vulkan co-residency is out at vllm's current
-footprint — the uncapped SAM peak measured 266 MiB and the bigger families
-are 3–10× the free budget — and stays a boot-script word if the owner ever
-trims vllm's KV). Per-head parity on the standing click met (D-037-4:
-[0.619, 0.881, 0.868, 0.794], bit-identical to the stock CLI, both pick
-head 1). The five GGUFs are kept on the ml box per the owner's word:
-`models/gguf/Acly/<5>/` with hash- and rev-pinned provenance (ml
-`582bcd0`); Q8 was asked about and measured away — F16 is all Acly
-publishes, and the weights are a small share of the graph, so quantization
-is not the co-residency lever (D-037-11's note in the task file). **The PR
-body is revised and re-shown** (`task-037-vision-cpp-pr-body.md`: budget-
-check story, all-five E2E, no `Signed-off-by` per D-037-10) — **not opened
-against `Acly/vision.cpp` without the owner's sign-off** (D-037-7/9). P2
-(the `kokon-vision` matrix door) is gated on the owner's ruling — CPU door
-now that the numbers are in — plus the `glslc` one-liner for the Vulkan
-build; P3 revives the purged relay as the door's client (capability: door →
-in-process → in-browser); P4 the docs. Parity bar: per-head selection
-equivalence (F16 ≠ FP32; D-037-4).
+**task-037 — IN PROGRESS (P1 fully done 2026-11-22 night; awaiting the
+owner: PR-body sign-off and the P2 ruling)** (the lab's two models as a
+stock GGUF door via **vision.cpp** — the owner's own dig-up; record in the
+task file, `doing/task-037-vision-cpp-lab-doors.md`):
+**P1 done on both backends** — the fork `iamskeole/vision.cpp` (5 commits
+on upstream `26a7529`, pushed) carries a generic `vision-server`: all five
+model families over plain JSON, the four SAM heads indexed with a
+per-image encoder-embedding cache, HTTP/1.1 answering `Expect:
+100-continue`, and a **per-request device-memory budget** (a dry run of
+the graph allocator — the only honest measure, because this ggml reuses
+in-place ops' parents; an over-budget request gets a 503 with its measured
+size *before* touching memory, so the door can never starve a GPU tenant).
+**CPU** (vllm co-resident, zero VRAM touched): all five E2E, graphs 188 /
+1332 / 742 / 211 / 217 MB, warm 129 ms–2.76 s. **Vulkan** (the 3090, card
+free — `glslc` installed by the owner during the night, `libvulkan-dev`
+already there): all five 200, warm **76–320 ms** (SAM 110), peaks 694–2052
+MiB, budget table SAM **160** / 1327 / 303 / 211 / 218 MB; SAM IoUs match
+CPU to < 0.01 per head on the standing click — **Vulkan and CPU are the
+same model**. The warm-run measurement surfaced one real bug and one real
+lesson, both fixed in `73a7699` (5th commit): the SAM embedding was read
+back from a tensor this ggml's allocator may hand to a later in-place op,
+so repeated same-image requests drifted until the encoder got its own
+graph and the predictor always re-uploads the host copy — 6/6 + 3/3
+requests now bit-identical on both backends, ASAN-clean.
+**The 21:24 404 the owner's session saw is post-mortemed** (all three
+causes mine, all proven fixed in two more clean windows of ~92 s each):
+the window's intended ~22 s registry gap, plus my journal-offset reload
+wait failing on a rotated journal, whose false FAIL re-cp'd the config and
+interrupted a vllm the daemon had been booting from the owner's ping; the
+window now waits functionally on the gateway's `/v1/models`, restores by
+rename (the daemon's watcher drops in-place writes), wipes stale markers
+at start, and revives vllm before every marker — box clean since ~21:33
+(vllm the sole model, the 11-22 state). **The owner's report** (CPU vs
+GPU timings, 3090 measurements, per-request budgets, 3090-vs-4090
+framing) is written up in `doing/task-037-vision-cpp-bench.md`, ready to
+forward. **The PR body is revised again** (`task-037-vision-cpp-pr-body.md`
+: budget-check story, all-five E2E on both backends, the two-graph
+embedding flow, no `Signed-off-by` per D-037-10) — **not opened against
+`Acly/vision.cpp` without the owner's sign-off** (D-037-7/9). **P2** (the
+`kokon-vision` matrix door) is now a one-line ruling with full numbers
+(D-037-12): **CPU co-resident** door (proven end-to-end; 129 ms–4.98 s
+warm; zero VRAM; never touches vllm's headroom) or the same door with
+`-b gpu` restricted to MobileSAM (110 ms click; 160 MB budget fits vllm's
+measured 608 MiB post-boot free, but with no headroom for KV growth);
+BiRefNet/Depth/MI-GAN/ESRGAN stay CPU either way on this card. P3 revives
+the purged relay as the door's client (capability: door → in-process →
+in-browser); P4 the docs. Parity bar: per-head selection equivalence (F16
+≠ FP32; D-037-4). **Box state for the morning:** vllm the sole model
+(11-22 state), the dev box on `multiuser-b25e7af` serving both doors,
+no GPU work left standing.
 **task-036 — DONE 2026-11-22 (apollo half built and proven, then retired as
 the design on the owner's call — see the Updated line)** (the lab's
 selection model over the wire: the `kokon-sam` gateway door, the service's
