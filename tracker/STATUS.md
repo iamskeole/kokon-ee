@@ -36,38 +36,40 @@ Keep this file current at the end of every task.
 [x] WP6 stock-cleanup — task-020 done 11-04, reopened 11-05, **re-land COMPLETE and closed this span** — the 11-04 record (stock-016 live, deferral proven in both directions, chat-priority the product fact) stands as the provenance of the invariants; the 11-05 re-land: layout surgery (pure stock trees; `_scripts`/`_configs`/`_jobs` homes; 10 pure-boot scripts; **no `cmdStop` anywhere**; `.last-good` + reload semantics; `logToStdout: both`), the owner's handover to the daemon-owned vllm, the pre-window daemon restart (journal mirror engaged; the P3 bind-handover race found + gated), and the **w020r window PASSED 223 s** (vllm 4-s group stop with `EngineCore` in the journal, llama.cpp 2-s, every set eviction per the stock-017 sets, vllm restored last, DONE marker last). Record: `done/task-020.md`.
 
 ## Current
-**task-030 — rebase onto 0.12.1 — IN PROGRESS (the rebase, the three
-post-rebase design decisions, and the image are done; the image
-`ghcr.io/iamskeole/kokon-ee:multiuser-80bf7bf` is already running on the
-box with the config passing the 0.12.1 migration chain byte-identical;
-remaining: the two proof jobs — one t2i and one more-like-this — on the
-production qwen wiring, then tracker close-out and push. Window w030
-ran seven times; run 7's 404 gate was the window's own typo (it polled
-the model path without the `/upstream` prefix — the box was fine), and
-its fail path left vllm out of the registry after the window — the
-owner's correction, now the window protocol: **a window never writes
-the registry at all** (the matrix owns the eviction, the daemon's
-on-demand start the revival; the window stops the vllm process instead)
-and **every exit path restores the runtime — service config
-byte-identical, vllm ready — before the marker**, so the blocked agent
-session resumes with inference working. Run 8 implements that and is
-next.** **Box engine breakage found in that window's work and FIXED the
-same afternoon:** the `Qwen3-VL` sidecar VLMs under
-`/home/p/ml/models/gguf/Qwen/` (4B for klein, 8B for turbo/full — each
-engine's own text encoder, *not* the PUP doors) had been removed by the
-owner's 2026-11-14 data-recovery session (the shell history carries the
-glob: `rm -rf Qwen3-VL-*`), so no image job could run on the box at all
-from 11-14 until 14:50 today; both pairs are now restored byte-exact from
-the same HF revisions the originals came from (the HF cache's `refs/main`
-still held them), renamed to the boot scripts' convention, with
-`provenance.md` per dir and all 10 preflight checks re-proven. The PE
-door files (the production PUP) and every DiT were never missing. The
-two proof jobs are the only thing left in 030 — w030 run 9, ready at the
-owner's GO.**
+**task-035 — demo day: the box editor's two UI faults + the lab's
+MobileSAM moved to the box (task-025's trigger fires) — IN PROGRESS
+(owner-assigned 2026-11-22, ahead of the queue; the sync check he asked
+for first: upstream `master` is `bff35ca` (0.12.1) — an ancestor of our
+HEAD since the task-030 rebase — with zero commits ahead, and
+`origin/main` == HEAD: no rebase needed).** The box editor (the klein
+layout-box piece of box create/edit): (1) its description input stretched
+nearly the whole tools row (`flex: 1`, ~1135 px on a 1600 px window) —
+capped to a normal field; (2) dragging a box *resized* it — `onMove`'s
+move branch wrote `{ ...s, x1: nx, y1: ny }` and left `x2`/`y2` at the
+start values, so only the top-left corner travelled (reproduced in a
+headless-browser harness before touching anything: keep box
+100,150,250,300 → 250,250,100,200 after a +0.15/+0.10 drag); the far
+corner now travels with the near one. The lab: MobileSAM (click-to-select)
+ran in the browser (onnxruntime-web) — the 11-11 incident's "could not be
+downloaded" whine was the in-browser path's only support, which is also
+why weak clients (the 12-inch) never had the lab. **D-035-1**: the UI's
+`Segmenter.load` now prefers the *service's* MobileSAM whenever the service
+has the model files (the box runs it: new `POST /segment/encode` /
+`/segment/predict`, CPU ORT — the runtime BiRefNet already uses, no image
+change, no GPU, D-035-2), else the in-browser one (stock behaviour,
+upstream default kept; LabScene's canvas-derived outline stays in-browser).
+The task-025 file notes its MobileSAM half executed here; its CUDA-EP/
+BiRefNet-GPU half stays parked.**
+**task-030 is CLOSED** (the Updated line above carries the proof jobs:
+run 9's plain t2i + More-like-this and 9b's native-PE-door Prompt+ t2i,
+every window restoring the runtime before its marker) and **task-034**
+(the stale-job toast recurrence the owner hit behind their 'scary 500',
+`508182b`) is done and deployed.
 Queue: **031** (the chaff cut, on the merged 0.12.1 tree) → **032** (projects → DB,
 once the byte-identity constraint is actually gone). 023/025/027/033
 stay parked on the owner's trigger (`tasks/parked/` — 033 = the ghcr
-distribution after the current phase, D-033-1). **Owner inputs resolved
+distribution after the current phase, D-033-1; 025's remaining half per
+D-035-2). **Owner inputs resolved
 2026-11-17: name = `kokon-ee` (D-IND1 final) and the Tauri shell = cut
 (D-031-1 final — 031's scope is settled).** **task-029 is DONE (11-17,
 the move session — record in the task file and the Updated line above);

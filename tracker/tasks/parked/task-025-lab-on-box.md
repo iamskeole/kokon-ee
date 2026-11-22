@@ -1,5 +1,14 @@
 # Task-025 (PARKED — owner-triggered) — run the Layers lab's models on the box (GPU-first) so weak clients use the lab as a thin client
 
+**2026-11-22: the trigger fired** — the owner reported the lab whining about
+not loading its model and asked for "make sure its fixed": the **MobileSAM
+half is executed as part of task-035** (service-side MobileSAM on the CPU
+ORT that BiRefNet already uses, D-035-1/D-035-2 — no image change; the UI
+prefers it whenever the service has the files, in-browser stays the
+stock-mode default and fallback). This file stays parked for the remaining
+half: **BiRefNet on the GPU** (the small one — CUDA EP in the image, capped
+arena, a GPU window) and, if ever wanted, MobileSAM on the GPU.
+
 **Created:** 2026-11-11 — the owner asked, after the 401/Layers
 incident night: "could we eventually get both to run on the box on
 GPU? I think we should have the VRAM after the DiT and PUPs"; and
