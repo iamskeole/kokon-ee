@@ -1,7 +1,12 @@
 // Click-to-select for the layers lab (components/LayersEditor.tsx): MobileSAM (Apache-2.0, Acly's
-// ONNX export, MIT) run in the webview with onnxruntime-web. kokon-service downloads the two files
-// the first time Select is used (44 MB, pinned: crates/qls-core/src/matting.rs MOBILE_SAM) and serves
-// them; without the service's copy, the vite dev server's `lab-models/mobilesam/` (gitignored).
+// ONNX export, MIT). The **service runs it in-process** (D-035-1, crates/qls-core/src/segment.rs):
+// the box downloads the two files the first time Select is used (~45 MB, pinned: crates/qls-core/
+// src/matting.rs MOBILE_SAM) and runs the encoder/decoder on its own CPU, so any browser —
+// including one that cannot run ONNX — gets the lab as a thin client, and the first use lands
+// on the box, not in the browser. The in-browser onnxruntime-web copy (Segmenter below) is the
+// last resort: a box with no reachable service, or whose download failed, still gets Select, as
+// in stock 0.12. With no service copy at all, the vite dev server's `lab-models/mobilesam/`
+// (gitignored).
 //
 // The encoder runs once per image (longest side 1024, 0-255 RGB, HWC); the decoder runs per click
 // on the cached embeddings and returns SAM's 4 masks at the size asked for: index 0 = the single-mask
@@ -50,18 +55,24 @@ export async function cancelSamDownload() {
   if (downloadIsFor(await api.installStatus().catch(() => null), "segment")) await api.cancelInstall();
 }
 
-/** Where the model files are: kokon-service's copy (downloaded now if it isn't there, `onProgress`
- * 0-100), else the dev server's. Null when neither has them. */
-async function modelUrls(onProgress?: (pct: number) => void): Promise<((file: string) => string) | null> {
-  const st = await api.segmentStatus().catch(() => null);
-  if (st && !st.installed) {
-    if (onProgress) progressListeners.add(onProgress);
+/** The one download, with a progress listener wired in for its duration (the in-browser path
+ * and the service path share the same in-flight install). */
+function awaitDownload(onProgress?: (pct: number) => void) {
+  if (onProgress) progressListeners.add(onProgress);
+  return (async () => {
     try {
       await (downloading ??= download().finally(() => (downloading = null)));
     } finally {
       if (onProgress) progressListeners.delete(onProgress);
     }
-  }
+  })();
+}
+
+/** Where the model files are: kokon-service's copy (downloaded now if it isn't there, `onProgress`
+ * 0-100), else the dev server's. Null when neither has them. */
+async function modelUrls(onProgress?: (pct: number) => void): Promise<((file: string) => string) | null> {
+  const st = await api.segmentStatus().catch(() => null);
+  if (st && !st.installed) await awaitDownload(onProgress);
   if ((await api.segmentStatus().catch(() => null))?.installed) return urls.segmentModel;
   const head = await fetch(DEV_DIR + DECODER, { method: "HEAD" }).catch(() => null);
   if (head?.ok && !head.headers.get("content-type")?.includes("text/html")) return (f) => DEV_DIR + f;
@@ -125,8 +136,11 @@ async function pngToLogits(b64: string, w: number, h: number): Promise<Float32Ar
 }
 
 /** The lab's segmenter: the service's model when the service has the files (the box runs it —
- * any browser is a thin client, D-035-1), else the in-browser one (the stock default; its
- * download goes through `onProgress`). Null when neither is possible (the callers' "missing"). */
+ * any browser is a thin client, D-035-1). A box that has the service but not yet the files
+ * downloads them now (the pinned ~45 MB, `onProgress`) and runs them in-process **in this same
+ * session** — first use lands on the box. The in-browser copy (the stock default) is the last
+ * resort: no reachable service, or the box's download failed. Null when nothing can run it (the
+ * callers' "missing"). */
 export async function loadSegmenter(
   source: string | null,
   onProgress?: (pct: number) => void,
@@ -134,6 +148,10 @@ export async function loadSegmenter(
   if (source) {
     const st = await api.segmentStatus().catch(() => null);
     if (st?.installed) return new ServiceSegmenter(source);
+    if (st) {
+      await awaitDownload(onProgress);
+      if ((await api.segmentStatus().catch(() => null))?.installed) return new ServiceSegmenter(source);
+    }
   }
   return Segmenter.load(true, onProgress);
 }
