@@ -35,7 +35,12 @@ pub const DEFAULT_REMOTE_PORT: u16 = 39152;
 /// Schema 15 (2026-11-12): additive `multiUser` (default false): named accounts with their own
 /// gallery on top of the single-user service. Off, the service behaves exactly as before;
 /// it is set only by the users endpoints, never by a settings save.
-const SCHEMA_VERSION: u32 = 15;
+/// Schema 16 (2026-11-23, task-037 P3): additive optional `visionEngine` (the lab's
+/// click-to-select engine as a stock GGUF door behind the box's gateway — the split-box
+/// path, D-037-12/13): the serving box runs no ONNX and stores no model files when the
+/// door serves the lab. Deployment-level like the VLM doors: the UI carries no such field,
+/// so a settings save keeps the stored one (`absorb_secrets`).
+const SCHEMA_VERSION: u32 = 16;
 /// `upscaler_model` value for a plain Lanczos resize (no model).
 pub const LANCZOS: &str = "lanczos";
 /// Upscalers offered in Settings: (file stem, label). Superscale-SP is a setup download, MoSR is
@@ -435,6 +440,25 @@ pub struct ExternalModel {
     pub prompt_bundle: String,
 }
 
+/// The lab's click-to-select engine run **outside this box** as a stock GGUF door
+/// (task-037 P3, D-037-12/13): a `vision-server` (vision.cpp — the author of the lab's
+/// own ONNX exports) scheduled by the box's load-on-demand gateway. The split-box shape:
+/// the serving box stores no model files and runs no ONNX; the accelerator box loads the
+/// pinned GGUFs and answers the same 4-mask contract the in-process path produces, so the
+/// browser stays a thin client either way and the model never lands twice.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct VisionEngine {
+    /// Base URL of the gateway, e.g. `http://127.0.0.1:8081/upstream` — the same root and
+    /// `/upstream/<model>/<path>` route shape as `externalEngine.gateway` on a v269 matrix.
+    pub gateway: String,
+    /// Bearer key for a keyed gateway; empty for a keyless one (no header sent).
+    #[serde(default)]
+    pub api_key: String,
+    /// The door's id in the gateway's vocabulary (the matrix's `kokon-vision` entry).
+    pub door: String,
+}
+
 impl ExternalEngine {
     /// The folder this pipeline's prompt-bundle reference points at, resolved
     /// against the deployment's data directory.
@@ -579,6 +603,11 @@ pub struct AppConfig {
     /// Externally managed inference engine (see [`ExternalEngine`]); unset = Kokon runs its own.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub external_engine: Option<ExternalEngine>,
+    /// The lab's click-to-select engine as a stock GGUF door behind the gateway (see
+    /// [`VisionEngine`]); unset = the service runs MobileSAM in-process (the single-box
+    /// path, the stock default).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub vision_engine: Option<VisionEngine>,
     /// Selectable models of the external engine (see [`ExternalModel`]); empty = no picker.
     /// Key renamed from `flavors` in schema 12; the old key is still read.
     #[serde(alias = "flavors", skip_serializing_if = "Vec::is_empty", default)]
@@ -630,6 +659,7 @@ impl Default for AppConfig {
             loras: vec![],
             ui: serde_json::json!({}),
             external_engine: None,
+            vision_engine: None,
             models: vec![],
         }
     }
@@ -862,6 +892,12 @@ impl AppConfig {
                         // gallery). Old files read it as off, which is the stock behaviour.
                         tracing::debug!("config migrated to schema 15 (multi-user gate)");
                     }
+                    if c.schema_version < 16 {
+                        // Additive: the lab's segment engine as a stock GGUF door behind the
+                        // box's gateway (task-037 P3). Old files read it as unset, which is
+                        // exactly the single-box behaviour: the service runs the model in-process.
+                        tracing::debug!("config migrated to schema 16 (visionEngine door for the lab)");
+                    }
                     // The official weights are always available as a profile, built for the
                     // configured folder and preset; the active one stays as it is.
                     c.normalize();
@@ -909,6 +945,14 @@ impl AppConfig {
         self.external_engine.as_ref()
     }
 
+    /// The lab's segment door, if one is named and complete (an entry the UI's empty-default
+    /// deserialisation can produce, `{}`, does not count: no gateway or door id, no door).
+    pub fn vision_engine(&self) -> Option<&VisionEngine> {
+        self.vision_engine
+            .as_ref()
+            .filter(|v| !v.gateway.trim().is_empty() && !v.door.trim().is_empty())
+    }
+
     /// A settings save round-trips the config through the UI, which never shows the key
     /// fields (the UI's `ExternalEngine` type has no gateway key at all): an empty key in
     /// the incoming config therefore means "unchanged", and the stored value is kept for
@@ -917,6 +961,17 @@ impl AppConfig {
     /// key and every request to the keyed gateway answered 401 until the key was restored
     /// by hand.
     pub fn absorb_secrets(&mut self, from: &AppConfig) {
+        // The lab's segment door is deployment state the UI never carries (it has no
+        // `visionEngine` field at all): an incoming config without one inherits the
+        // stored door, the same rule as the VLM doors — otherwise a routine settings
+        // save would silently strand a split box's lab on the download path.
+        if self.vision_engine.is_none() || {
+            self.vision_engine
+                .as_ref()
+                .is_some_and(|v| v.gateway.trim().is_empty() || v.door.trim().is_empty())
+        } {
+            self.vision_engine = from.vision_engine.clone();
+        }
         if let (Some(e), Some(f)) = (&mut self.external_engine, &from.external_engine) {
             if e.api_key.trim().is_empty() && !f.api_key.trim().is_empty() {
                 e.api_key = f.api_key.clone();
@@ -2073,13 +2128,52 @@ mod tests {
         c.models[0].vlm_vision = Some(vision.clone());
         c.external_engine.as_mut().unwrap().vlm_vision = Some(vision);
         let saved = serde_json::to_string(&c).unwrap();
-        assert!(saved.contains("\"schemaVersion\":15"), "the load migrated it, the save writes the current schema");
+        assert!(
+            saved.contains(&format!("\"schemaVersion\":{SCHEMA_VERSION}")),
+            "the load migrated it, the save writes the current schema"
+        );
         assert!(saved.contains("\"vlmVision\""));
         std::fs::write(&p, &saved).unwrap();
         let r = AppConfig::load_from(&p);
         assert_eq!(r.models[0].vlm_vision.as_ref().unwrap().entrypoint, "http://127.0.0.1:8081/upstream/pup-i2i");
         assert_eq!(r.models[0].vlm.as_ref().unwrap().entrypoint, "http://127.0.0.1:8081/upstream/pup");
         assert_eq!(r.external_engine.as_ref().unwrap().vlm_vision, r.models[0].vlm_vision);
+    }
+
+    #[test]
+    fn schema_16_adds_the_vision_door_and_migrates_15_files() {
+        // A schema-15 file (the last shape before the lab's GGUF door) reads with the
+        // door unset; naming it round-trips. An absent field must never read as a
+        // half-configured door (the ladder treats absent as "no door", D-037-12).
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.json");
+        let old = r#"{"schemaVersion":15,"externalEngine":{"gateway":"http://gw","model":"m","modelName":"m.gguf"}}"#;
+        std::fs::write(&p, old).unwrap();
+        let c = AppConfig::load_from(&p);
+        assert_eq!(c.schema_version, SCHEMA_VERSION);
+        assert!(c.vision_engine.is_none());
+        assert!(c.vision_engine().is_none());
+        let mut c = c;
+        c.vision_engine = Some(VisionEngine {
+            gateway: "http://127.0.0.1:8081/upstream".into(),
+            api_key: "k".into(),
+            door: "kokon-vision".into(),
+        });
+        let saved = serde_json::to_string(&c).unwrap();
+        assert!(saved.contains("\"visionEngine\""));
+        assert!(saved.contains("\"door\":\"kokon-vision\""));
+        std::fs::write(&p, &saved).unwrap();
+        let r = AppConfig::load_from(&p);
+        assert_eq!(r.vision_engine.as_ref().unwrap().door, "kokon-vision");
+        // A named door must name both its gateway and its id, or it is not a door:
+        // the accessor is what the ladder and the status endpoint read.
+        let mut c = AppConfig::default();
+        c.vision_engine = Some(VisionEngine {
+            gateway: String::new(),
+            api_key: String::new(),
+            door: String::new(),
+        });
+        assert!(c.vision_engine().is_none());
     }
 
     #[test]
