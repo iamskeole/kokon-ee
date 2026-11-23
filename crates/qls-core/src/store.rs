@@ -1061,7 +1061,7 @@ mod tests {
         assert_eq!(ids(&OwnerFilter::User("ben".into())), vec!["b1"]);
         assert!(ids(&OwnerFilter::User("nobody".into())).is_empty());
         // The owner survives the round-trip: the column is the source, the record copies it.
-        let mut anna2 = s.get_generation("a1").unwrap();
+        let anna2 = s.get_generation("a1").unwrap();
         assert_eq!(anna2.user.as_deref(), Some("Anna"));
         assert_eq!(s.get_generation("o1").unwrap().user, None);
         // The owner filter composes with search, favourites and the hidden rows.

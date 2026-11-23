@@ -1,5 +1,5 @@
-//! Environment inspection: GPU, sd-server version/devices, first-launch readiness checks
-//! and the copyable diagnostics report.
+//! Environment inspection: the box's GPU, the box-health checks and the copyable
+//! diagnostics report.
 
 use std::path::Path;
 use std::time::Duration;
@@ -7,7 +7,49 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::config::AppConfig;
-use crate::process::{parse_device_list, run_server_probe};
+
+/// Runs a command with a hard deadline, capturing its output (a driver query must never
+/// wedge the service).
+pub(crate) fn run_cmd_bounded(mut cmd: std::process::Command, timeout: Duration) -> Option<(i32, String, String)> {
+    use std::io::Read;
+    cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().ok()?;
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let out = child
+                    .stdout
+                    .take()
+                    .and_then(|mut m| {
+                        let mut b = String::new();
+                        m.read_to_string(&mut b).ok()?;
+                        Some(b)
+                    })
+                    .unwrap_or_default();
+                let err = child
+                    .stderr
+                    .take()
+                    .and_then(|mut m| {
+                        let mut b = String::new();
+                        m.read_to_string(&mut b).ok()?;
+                        Some(b)
+                    })
+                    .unwrap_or_default();
+                return Some((status.code().unwrap_or(-1), out, err));
+            }
+            Ok(None) => {
+                if std::time::Instant::now() > deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => return None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct GpuInfo {
@@ -60,71 +102,6 @@ pub fn query_gpus() -> Option<Vec<GpuInfo>> {
         .or_else(query_dxgi)
         .or_else(query_drm)
         .or_else(query_apple)
-}
-
-/// Card and engine device names refer to the same GPU ("NVIDIA GeForce RTX 3090" from
-/// nvidia-smi, DXGI or ggml; one may carry a suffix).
-fn same_gpu(card: &str, device: &str) -> bool {
-    let (a, b) = (
-        card.trim().to_ascii_lowercase(),
-        device.trim().to_ascii_lowercase(),
-    );
-    !a.is_empty() && !b.is_empty() && (a.contains(&b) || b.contains(&a))
-}
-
-/// Engine devices (`--list-devices`) of this engine's kind, in their order.
-fn engine_gpus<'a>(
-    devices: &'a [(String, String)],
-    prefix: &str,
-) -> impl Iterator<Item = &'a (String, String)> {
-    let prefix = prefix.to_string();
-    devices
-        .iter()
-        .filter(move |(n, _)| n.to_ascii_lowercase().starts_with(&prefix))
-}
-
-/// The engine device (e.g. "cuda1") of card `card` in `cards`. Matched by name, not by
-/// position: nvidia-smi, DXGI (sorted by VRAM) and the engine each order cards their own
-/// way. The k-th card of a name maps to the k-th engine device of that name.
-pub fn device_for_card(
-    devices: &[(String, String)],
-    cards: &[GpuInfo],
-    card: usize,
-    prefix: &str,
-) -> Option<String> {
-    let name = &cards.get(card)?.name;
-    let k = cards[..card]
-        .iter()
-        .filter(|c| c.name.eq_ignore_ascii_case(name))
-        .count();
-    engine_gpus(devices, prefix)
-        .filter(|(_, d)| same_gpu(name, d))
-        .nth(k)
-        .map(|(n, _)| n.to_ascii_lowercase())
-}
-
-/// The card in `cards` behind engine device `device` (inverse of `device_for_card`).
-pub fn card_for_device(
-    devices: &[(String, String)],
-    cards: &[GpuInfo],
-    device: &str,
-    prefix: &str,
-) -> Option<usize> {
-    let gpus: Vec<_> = engine_gpus(devices, prefix).collect();
-    let i = gpus
-        .iter()
-        .position(|(n, _)| n.eq_ignore_ascii_case(device))?;
-    let desc = &gpus[i].1;
-    let k = gpus[..i]
-        .iter()
-        .filter(|(_, d)| d.eq_ignore_ascii_case(desc))
-        .count();
-    cards
-        .iter()
-        .enumerate()
-        .filter(|(_, c)| same_gpu(&c.name, desc))
-        .nth(k)
-        .map(|(j, _)| j)
 }
 
 /// Apple Silicon: chip name and unified memory from sysctl (they never change, so read once).
@@ -191,7 +168,7 @@ fn nvidia_smi(fields: &str) -> Option<String> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    let (code, stdout, _) = crate::process::run_cmd_bounded(cmd, NVIDIA_SMI_TIMEOUT)?;
+    let (code, stdout, _) = run_cmd_bounded(cmd, NVIDIA_SMI_TIMEOUT)?;
     (code == 0).then_some(stdout)
 }
 
@@ -392,17 +369,6 @@ pub struct SetupReport {
     pub backend_version: Option<String>,
 }
 
-pub fn backend_version(exe: &Path) -> Option<String> {
-    run_server_probe(exe, &["--help"], Duration::from_secs(20))
-        .and_then(|t| crate::sdcpp::parse_version_banner(&t))
-}
-
-pub fn list_devices(exe: &Path) -> Vec<(String, String)> {
-    run_server_probe(exe, &["--list-devices"], Duration::from_secs(30))
-        .map(|t| parse_device_list(&t))
-        .unwrap_or_default()
-}
-
 fn fmt_size(bytes: u64) -> String {
     if bytes >= 1 << 30 {
         format!("{:.2} GB", bytes as f64 / (1u64 << 30) as f64)
@@ -411,172 +377,74 @@ fn fmt_size(bytes: u64) -> String {
     }
 }
 
-/// Box-health checks. `server_ok` is the live health result if known. On a split box this
-/// reports what this box holds (the lab's models, the watermark) plus the engine it calls;
-/// on a single box it checks the local engine and its model files.
-pub fn setup_checks(cfg: &AppConfig, server_ok: Option<bool>) -> SetupReport {
-    let exe = cfg.server_exe();
-    let probe = exe.is_file();
-    let devices = if probe { list_devices(&exe) } else { vec![] };
-    let version = if probe { backend_version(&exe) } else { None };
-    setup_checks_with(cfg, server_ok, devices, version)
-}
-
-/// [`setup_checks`] with the engine's devices and version already known (the service keeps
-/// them per engine build: each probe starts sd-server, which takes seconds).
-pub fn setup_checks_with(
-    cfg: &AppConfig,
-    server_ok: Option<bool>,
-    devices: Vec<(String, String)>,
-    backend_version: Option<String>,
-) -> SetupReport {
-    // Split box: this box keeps no engine and no inference model files — the engine box
-    // holds those. Report what this box does hold, plus the door it calls through.
-    if let Some(ee) = cfg.external_engine() {
-        let mut checks = vec![Check {
-            id: "external_engine",
-            label: "Engine (the other box)".into(),
-            ok: true,
-            detail: format!(
+/// Box-health checks: what this box holds and the doors it calls through. The engine
+/// itself runs on the engine box (its live state is the /status engine field).
+pub fn setup_checks(cfg: &AppConfig, _server_ok: Option<bool>) -> SetupReport {
+    let mut checks = vec![Check {
+        id: "external_engine",
+        label: "Engine (the other box)".into(),
+        ok: cfg.external_engine().is_some(),
+        detail: match cfg.external_engine() {
+            Some(ee) => format!(
                 "{} via {} — model {}; starts on demand (its live state is the /status engine field)",
                 ee.model, ee.gateway, ee.model_name
             ),
-        }];
-        if let Some(v) = &cfg.vision_engine {
-            checks.push(Check {
-                id: "vision_door",
-                label: "Lab door (the other box)".into(),
-                ok: true,
-                detail: format!("door {} via {} — on demand, resident", v.door, v.gateway),
-            });
-        }
-        checks.push(upscaler_check(cfg));
-        checks.push(engine_release_check(cfg));
-        let d = cfg.sdcpp_dir.clone();
-        checks.push(Check {
-            id: "lab_sam",
-            label: "Lab: click segmentation (MobileSAM)".into(),
-            ok: crate::matting::sam_installed(&d),
-            detail: if crate::matting::sam_installed(&d) {
-                "installed".into()
-            } else {
-                "not downloaded (Settings → Lab)".into()
-            },
-        });
-        checks.push(Check {
-            id: "lab_birefnet",
-            label: "Lab: matting (BiRefNet-lite)".into(),
-            ok: crate::matting::birefnet_installed(&d),
-            detail: if crate::matting::birefnet_installed(&d) {
-                "installed".into()
-            } else {
-                "not downloaded (Settings → Lab)".into()
-            },
-        });
-        checks.push(Check {
-            id: "lab_segment",
-            label: "Lab: segmenter (MobileSAM GGUF)".into(),
-            ok: crate::segment::installed(&d),
-            detail: if crate::segment::installed(&d) {
-                "installed".into()
-            } else {
-                "not downloaded (Settings → Lab)".into()
-            },
-        });
-        checks.push(Check {
-            id: "watermark",
-            label: "AI watermark (TrustMark)".into(),
-            ok: crate::watermark::installed(&d),
-            detail: if crate::watermark::installed(&d) {
-                "installed".into()
-            } else {
-                "not downloaded (Settings → Lab)".into()
-            },
-        });
-        let ready = checks.iter().all(|c| c.ok);
-        return SetupReport { ready, checks, devices: vec![], backend_version: None };
-    }
-
-    let mut checks = Vec::new();
-    let dir_ok = cfg.sdcpp_dir.is_dir();
-    checks.push(Check {
-        id: "sdcpp_dir",
-        label: "stable-diffusion.cpp folder".into(),
-        ok: dir_ok,
-        detail: cfg.sdcpp_dir.display().to_string(),
-    });
-    let exe = cfg.server_exe();
-    let exe_ok = exe.is_file();
-    checks.push(Check {
-        id: "server_exe",
-        label: "stable-diffusion.cpp server".into(),
-        ok: exe_ok,
-        detail: exe.display().to_string(),
-    });
-    for (label, path, _required) in cfg.profile().files() {
-        let meta = std::fs::metadata(path).ok().filter(|m| m.is_file());
-        checks.push(Check {
-            id: "model_file",
-            label: label.to_string(),
-            ok: meta.is_some(),
-            detail: match &meta {
-                Some(m) => format!("{} ({})", path.display(), fmt_size(m.len())),
-                None => format!("Missing: {}", path.display()),
-            },
-        });
-    }
-    let wanted = cfg.effective_device();
-    let dev = devices
-        .iter()
-        .find(|(n, _)| n.to_ascii_lowercase() == wanted);
-    let gpu_ok = dev.is_some();
-    checks.push(Check {
-        id: "device",
-        label: "GPU device".into(),
-        ok: gpu_ok,
-        detail: match dev {
-            Some((n, d)) => format!("{n} — {d}"),
-            None if devices.is_empty() => "No devices reported by sd-server".into(),
-            None => format!(
-                "{wanted} not found. Available: {}",
-                devices
-                    .iter()
-                    .map(|(n, _)| n.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            None => "not configured — this version runs against an external engine".into(),
         },
-    });
-    if let Some(running) = server_ok {
-        // Informational: the server is started on demand, so "not running" is not a problem.
+    }];
+    if let Some(v) = &cfg.vision_engine {
         checks.push(Check {
-            id: "server",
-            label: "Inference server".into(),
+            id: "vision_door",
+            label: "Lab door (the other box)".into(),
             ok: true,
-            detail: if running {
-                "Running".into()
-            } else {
-                "Not running yet — starts automatically".into()
-            },
+            detail: format!("door {} via {} — on demand, resident", v.door, v.gateway),
         });
     }
     checks.push(upscaler_check(cfg));
-    if exe_ok {
-        checks.push(engine_release_check(cfg));
-    }
-    let backend_version = if exe_ok { backend_version } else { None };
-    // Informational: the server starts on demand; an engine of an older release still
-    // generates (enlargements fall back to Lanczos), and Setup offers the update.
-    let ready = checks
-        .iter()
-        .filter(|c| c.id != "server" && c.id != "engine_release")
-        .all(|c| c.ok);
-    SetupReport {
-        ready,
-        checks,
-        devices,
-        backend_version,
-    }
+    checks.push(engine_release_check(cfg));
+    let d = cfg.sdcpp_dir.clone();
+    checks.push(Check {
+        id: "lab_sam",
+        label: "Lab: click segmentation (MobileSAM)".into(),
+        ok: crate::matting::sam_installed(&d),
+        detail: if crate::matting::sam_installed(&d) {
+            "installed".into()
+        } else {
+            "not downloaded (Settings → Lab)".into()
+        },
+    });
+    checks.push(Check {
+        id: "lab_birefnet",
+        label: "Lab: matting (BiRefNet-lite)".into(),
+        ok: crate::matting::birefnet_installed(&d),
+        detail: if crate::matting::birefnet_installed(&d) {
+            "installed".into()
+        } else {
+            "not downloaded (Settings → Lab)".into()
+        },
+    });
+    checks.push(Check {
+        id: "lab_segment",
+        label: "Lab: segmenter (MobileSAM GGUF)".into(),
+        ok: crate::segment::installed(&d),
+        detail: if crate::segment::installed(&d) {
+            "installed".into()
+        } else {
+            "not downloaded (Settings → Lab)".into()
+        },
+    });
+    checks.push(Check {
+        id: "watermark",
+        label: "AI watermark (TrustMark)".into(),
+        ok: crate::watermark::installed(&d),
+        detail: if crate::watermark::installed(&d) {
+            "installed".into()
+        } else {
+            "not downloaded (Settings → Lab)".into()
+        },
+    });
+    let ready = checks.iter().all(|c| c.ok);
+    SetupReport { ready, checks, devices: vec![], backend_version: None }
 }
 
 /// The upscaler model (MoSR): enlarges results and runs Upscale. Shipped with the app and
@@ -627,7 +495,7 @@ pub fn upscaler_check(cfg: &AppConfig) -> Check {
             label,
             ok: false,
             detail: format!(
-                "Missing: {} — install it from Setup.",
+                "Missing: {} — Settings → Model downloads it to this box; on a split box the engine box keeps it.",
                 crate::catalog::UPSCALER.path(&cfg.sdcpp_dir).display()
             ),
         },
@@ -700,52 +568,6 @@ mod tests {
     }
 
     #[test]
-    fn cards_map_to_engine_devices_by_name() {
-        let card = |n: &str, mib| GpuInfo {
-            name: n.into(),
-            memory_total_mib: mib,
-            ..Default::default()
-        };
-        // DXGI sorts by VRAM; the engine lists the 3060 first.
-        let cards = vec![
-            card("NVIDIA GeForce RTX 3090", 24576),
-            card("NVIDIA GeForce RTX 3060", 12288),
-            card("NVIDIA GeForce RTX 3060", 12288),
-        ];
-        let devs: Vec<(String, String)> = [
-            ("CUDA0", "NVIDIA GeForce RTX 3060"),
-            ("CUDA1", "NVIDIA GeForce RTX 3090"),
-            ("CUDA2", "NVIDIA GeForce RTX 3060"),
-            ("CPU", "AMD Ryzen 9"),
-        ]
-        .iter()
-        .map(|(a, b)| (a.to_string(), b.to_string()))
-        .collect();
-        assert_eq!(
-            device_for_card(&devs, &cards, 0, "cuda").as_deref(),
-            Some("cuda1")
-        );
-        assert_eq!(
-            device_for_card(&devs, &cards, 1, "cuda").as_deref(),
-            Some("cuda0")
-        );
-        assert_eq!(
-            device_for_card(&devs, &cards, 2, "cuda").as_deref(),
-            Some("cuda2")
-        );
-        assert_eq!(
-            device_for_card(&devs, &cards, 0, "vulkan"),
-            None,
-            "another engine's devices"
-        );
-        for i in 0..3 {
-            let dev = device_for_card(&devs, &cards, i, "cuda").unwrap();
-            assert_eq!(card_for_device(&devs, &cards, &dev, "cuda"), Some(i));
-        }
-        assert_eq!(card_for_device(&devs, &cards, "cuda7", "cuda"), None);
-    }
-
-    #[test]
     fn dxgi_reports_real_adapters() {
         assert_eq!(
             (
@@ -779,46 +601,57 @@ mod tests {
             Some("AMD Some Device")
         );
         assert_eq!(parse_pci_name(ids, 0x1002, 0x9999), None);
-        assert!(same_gpu(
-            "AMD Radeon RX 9060 XT",
-            "AMD Radeon RX 9060 XT (RADV GFX1200)"
-        ));
+        // A driver-reported suffix still matches ("Radeon RX 9060 XT" vs "… (RADV GFX1200)").
+        let a = "amd radeon rx 9060 xt";
+        let b = "amd radeon rx 9060 xt (radv gfx1200)";
+        assert!(a.contains(b) || b.contains(a));
     }
 
     #[test]
-    fn checks_flag_missing_files() {
+    fn checks_report_the_box_and_its_doors() {
         let mut cfg = AppConfig::default();
         cfg.sdcpp_dir = std::env::temp_dir().join("qls-does-not-exist");
         cfg.upscaler_model = crate::config::UPSCALER_CHOICES[0].0.into(); // the PC default (Macs: Lanczos)
-        cfg.profiles = vec![crate::config::ModelProfile::official(&cfg.sdcpp_dir)];
+        // No engine configured: the report says so plainly, and the lab models are missing.
         let r = setup_checks(&cfg, None);
         assert!(!r.ready);
-        assert!(r.checks.iter().any(|c| c.id == "server_exe" && !c.ok));
-        assert_eq!(r.checks.iter().filter(|c| c.id == "model_file").count(), 4);
-        let up = r.checks.iter().find(|c| c.id == "upscaler").unwrap();
-        assert!(!up.ok && up.detail.contains("4xNomos2_hq_mosr.pth"));
-        assert!(
-            !r.checks.iter().any(|c| c.id == "engine_release"),
-            "no engine, nothing to compare"
-        );
+        let ee = r.checks.iter().find(|c| c.id == "external_engine").unwrap();
+        assert!(!ee.ok);
+        let sam = r.checks.iter().find(|c| c.id == "lab_sam").unwrap();
+        assert!(!sam.ok);
+        // With an engine configured: the doors are fine, the lab models still missing.
+        cfg.external_engine = Some(crate::config::ExternalEngine {
+            gateway: "http://gw".into(),
+            api_key: String::new(),
+            model: "m".into(),
+            model_name: "a-model.gguf".into(),
+            sample: serde_json::json!({}),
+            vlm: None,
+            vlm_vision: None,
+            prompt_bundle: String::new(),
+        });
+        let r = setup_checks(&cfg, None);
+        assert!(!r.ready, "the lab models are not downloaded yet");
+        let ee = r.checks.iter().find(|c| c.id == "external_engine").unwrap();
+        assert!(ee.ok && ee.detail.contains("http://gw"));
     }
 
     #[test]
     fn upscaler_and_engine_release_checks() {
-        let dir = tempfile::tempdir().unwrap();
         let mut cfg = AppConfig::default();
-        cfg.sdcpp_dir = dir.path().to_path_buf();
-        cfg.gpu_backend = crate::config::GpuBackend::Cuda;
         cfg.upscaler_model = crate::config::UPSCALER_CHOICES[0].0.into(); // the PC default (Macs: Lanczos)
-        assert!(!upscaler_check(&cfg).ok, "required");
-        let up = crate::catalog::UPSCALER;
-        std::fs::create_dir_all(up.path(dir.path()).parent().unwrap()).unwrap();
-        std::fs::File::create(up.path(dir.path()))
-            .unwrap()
-            .set_len(up.size)
-            .unwrap();
+        cfg.external_engine = Some(crate::config::ExternalEngine {
+            gateway: "http://gw".into(),
+            api_key: String::new(),
+            model: "m".into(),
+            model_name: "a-model.gguf".into(),
+            sample: serde_json::json!({}),
+            vlm: None,
+            vlm_vision: None,
+            prompt_bundle: String::new(),
+        });
         let c = upscaler_check(&cfg);
-        assert!(c.ok && c.detail.contains("4xNomos2_hq_mosr.pth"));
+        assert!(c.ok && c.detail.contains("engine box"));
         let e = engine_release_check(&cfg);
         assert!(e.ok && e.detail.contains("pinned"));
     }

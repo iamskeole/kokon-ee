@@ -22,7 +22,6 @@ use std::time::{Duration, Instant};
 
 use qls_core::config::{AppConfig, data_dir};
 use qls_core::engine::{APP_VERSION, Engine};
-use qls_core::process::ServerState;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -330,7 +329,6 @@ async fn run(args: Vec<String>) {
 
     tokio::spawn(engine.clone().run_worker());
     tokio::spawn(lifecycle(state.clone()));
-    tokio::spawn(server_watch(state.clone()));
     tokio::spawn(stop_on_signal(state.clone()));
 
     let app = api::router(state.clone(), false).into_make_service_with_connect_info::<SocketAddr>();
@@ -341,15 +339,7 @@ async fn run(args: Vec<String>) {
     }
 
     let _ = engine.clear_private();
-    // Shutdown: stop sd-server unless the user wants it kept loaded.
-    let cfg = engine.config();
-    if !cfg.keep_server_running {
-        if engine.server.stop().await {
-            tracing::info!("stopped sd-server on exit");
-        }
-    } else {
-        tracing::info!("leaving sd-server running (keep_server_running)");
-    }
+    // The engine is external: nothing to stop here, the gateway's TTL decides its lifetime.
     if let Ok(s) = std::fs::read_to_string(service_info_path())
         && let Ok(i) = serde_json::from_str::<ServiceInfo>(&s)
         && i.pid == std::process::id()
@@ -424,13 +414,6 @@ async fn lifecycle(state: Arc<AppState>) {
         if n_leases > 0 || busy {
             *state.exit_deadline.lock().unwrap() = None;
         } else if !state.persistent {
-            // Nobody is left to use the model: free the GPU now, exit after the grace.
-            let st = state.engine.server.status();
-            if st.owned && st.state != ServerState::Stopped && !state.engine.config().keep_server_running {
-                tracing::info!("no clients — unloading model");
-                state.engine.server.stop().await;
-                state.engine.emit_server();
-            }
             let grace = if state.quick_exit.load(std::sync::atomic::Ordering::Relaxed) { 3 } else { 60 };
             let mut d = state.exit_deadline.lock().unwrap();
             match *d {
@@ -442,22 +425,6 @@ async fn lifecycle(state: Arc<AppState>) {
                 }
                 _ => {}
             }
-        }
-        // Idle unload: free VRAM after N minutes without work, also with a window or browser tab
-        // open (a shared GPU stays usable for other programs). The next job loads the model again.
-        // `st.owned`: the service never unloads a model it does not own — in external-engine
-        // mode the gateway's TTL is the sole authority on the engine's lifetime (D-030-2).
-        let cfg = state.engine.config();
-        let st = state.engine.server.status();
-        if !busy
-            && cfg.idle_unload_minutes > 0
-            && st.state == ServerState::Ready
-            && st.owned
-            && state.engine.idle_for() > Duration::from_secs(cfg.idle_unload_minutes as u64 * 60)
-        {
-            tracing::info!("idle for {} min — unloading model (it loads again with the next job)", cfg.idle_unload_minutes);
-            state.engine.server.stop().await;
-            state.engine.emit_server();
         }
     }
 }
@@ -476,21 +443,6 @@ pub fn client_left(state: &AppState, kind: &str, ui_remaining: bool, remaining: 
     }
     if remaining == 0 {
         state.quick_exit.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-/// Detects an owned sd-server that died between jobs, so the UI shows the right state.
-async fn server_watch(state: Arc<AppState>) {
-    loop {
-        tokio::time::sleep(Duration::from_secs(3)).await;
-        let st = state.engine.server.status();
-        if st.state == ServerState::Ready && st.owned && state.engine.server.owned_alive() == Some(false) {
-            state.engine.server.mark_lost(qls_core::error::AppError::new(
-                qls_core::error::ErrorCode::ServerCrashed,
-                "The inference server stopped unexpectedly.",
-            ));
-            state.engine.emit_server();
-        }
     }
 }
 

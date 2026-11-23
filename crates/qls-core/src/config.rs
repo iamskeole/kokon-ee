@@ -40,7 +40,7 @@ pub const DEFAULT_REMOTE_PORT: u16 = 39152;
 /// path, D-037-12/13): the serving box runs no ONNX and stores no model files when the
 /// door serves the lab. Deployment-level like the VLM doors: the UI carries no such field,
 /// so a settings save keeps the stored one (`absorb_secrets`).
-const SCHEMA_VERSION: u32 = 16;
+const SCHEMA_VERSION: u32 = 17;
 /// `upscaler_model` value for a plain Lanczos resize (no model).
 pub const LANCZOS: &str = "lanczos";
 /// Upscalers offered in Settings: (file stem, label). Superscale-SP is a setup download, MoSR is
@@ -881,6 +881,12 @@ impl AppConfig {
                         // exactly the single-box behaviour: the service runs the model in-process.
                         tracing::debug!("config migrated to schema 16 (visionEngine door for the lab)");
                     }
+                    if c.schema_version < 17 {
+                        // The product is the box (task-031): the desktop-app fields of schema
+                        // 16 files (hardware preset, bundled-server tuning) keep their values
+                        // but no longer act; the service box's config is read as-is.
+                        tracing::debug!("config migrated to schema 17 (the service box keeps a stock config)");
+                    }
                     // The official weights are always available as a profile, built for the
                     // configured folder and preset; the active one stays as it is.
                     c.normalize();
@@ -910,7 +916,17 @@ impl AppConfig {
             std::fs::create_dir_all(dir)
                 .map_err(|e| AppError::io("create the settings folder", dir, e))?;
         }
-        let tmp = path.with_extension("json.tmp");
+        // Unique per writer: concurrent saves of the same file (tests share one config dir)
+        // must not race on one temp name — a rename taking another writer's file is an
+        // ENOENT, not an overwrite.
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = path.with_file_name(format!(
+            "{}.{}.{}.tmp",
+            path.file_name().and_then(|f| f.to_str()).unwrap_or("config.json"),
+            std::process::id(),
+            n
+        ));
         let json = serde_json::to_string_pretty(self).map_err(AppError::internal)?;
         std::fs::write(&tmp, json).map_err(|e| AppError::io("write settings", &tmp, e))?;
         std::fs::rename(&tmp, path).map_err(|e| AppError::io("save settings", path, e))?;
@@ -1134,36 +1150,7 @@ impl AppConfig {
         }
     }
 
-    /// Model files of the active profile that are not there (label, path).
-    pub fn missing_files(&self) -> Vec<(&'static str, PathBuf)> {
-        self.profile()
-            .files()
-            .into_iter()
-            .filter(|(_, p, required)| *required && !p.is_file())
-            .map(|(l, p, _)| (l, p.to_path_buf()))
-            .collect()
-    }
 
-    /// Why the inference server cannot start: the engine or a model file is missing.
-    pub fn missing_files_error(&self) -> Option<AppError> {
-        let exe = self.server_exe();
-        if !exe.is_file() {
-            return Some(
-                AppError::new(ErrorCode::MissingModel, format!("sd-server was not found in {}.", self.engine_dir().display()))
-                    .suggest("Install it from Settings → Models → Set up models…, or set the stable-diffusion.cpp folder in Settings."),
-            );
-        }
-        let missing = self.missing_files();
-        let (label, path) = missing.first()?;
-        let more = match missing.len() {
-            1 => String::new(),
-            n => format!(" (and {} more)", n - 1),
-        };
-        Some(
-            AppError::new(ErrorCode::MissingModel, format!("{label} not found: {}{more}", path.display()))
-                .suggest("If it is on a drive that is not connected, connect it and try again. Otherwise open Setup to find the file again, choose other files, or download the missing ones."),
-        )
-    }
 
     /// VRAM (MiB) the user's own files take beyond the official ones, which the planner's
     /// budgets were measured with: a larger diffusion model (and, with unified memory, a larger
@@ -1199,32 +1186,8 @@ impl AppConfig {
         }
     }
 
-    /// Folder of the active stable-diffusion.cpp build.
-    pub fn engine_dir(&self) -> PathBuf {
-        match self.gpu_backend.engine_subdir() {
-            "" => self.sdcpp_dir.clone(),
-            sub => self.sdcpp_dir.join(sub),
-        }
-    }
 
-    pub fn server_exe(&self) -> PathBuf {
-        self.engine_dir().join(if cfg!(windows) {
-            "sd-server.exe"
-        } else {
-            "sd-server"
-        })
-    }
 
-    /// The configured device when it belongs to the active engine, else its first GPU.
-    pub fn effective_device(&self) -> String {
-        let dev = self.device.trim().to_ascii_lowercase();
-        let prefix = self.gpu_backend.device_prefix();
-        match dev.strip_prefix(prefix) {
-            Some(i) if !i.is_empty() && i.chars().all(|c| c.is_ascii_digit()) => dev,
-            // Engines number their devices independently: fall back to the first one.
-            _ => format!("{prefix}0"),
-        }
-    }
 
     /// `--vae-tile-size` the engine runs with: the setting, at most
     /// [`crate::planner::VULKAN_VAE_TILE`] on Vulkan; 0 = no server-side tiling.
@@ -1533,39 +1496,6 @@ mod tests {
     }
 
     #[test]
-    fn missing_files_are_reported() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut c = AppConfig {
-            sdcpp_dir: dir.path().join("sd"),
-            ..AppConfig::default()
-        };
-        c.normalize();
-        assert!(
-            c.missing_files_error()
-                .unwrap()
-                .message
-                .contains("sd-server"),
-            "the engine first"
-        );
-        std::fs::create_dir_all(c.engine_dir()).unwrap();
-        std::fs::write(c.server_exe(), b"").unwrap();
-        let mine = own_files(dir.path());
-        c.profiles.push(mine.clone());
-        c.active_profile = USER_PROFILE_ID.into();
-        assert_eq!(c.missing_files().len(), 3);
-        let e = c.missing_files_error().unwrap();
-        assert_eq!(e.code, ErrorCode::MissingModel);
-        assert!(
-            e.message.starts_with("Diffusion model not found")
-                && e.message.ends_with("(and 2 more)"),
-            "{}",
-            e.message
-        );
-        touch_files(&mine);
-        assert!(c.missing_files().is_empty() && c.missing_files_error().is_none());
-    }
-
-    #[test]
     fn larger_own_files_take_planning_memory() {
             assert_eq!(extra_weights_mib(4_050_916_384, 0, false), 0);
         assert_eq!(
@@ -1642,11 +1572,9 @@ mod tests {
     }
 
     #[test]
-    fn engine_choice_sets_folder_device_and_flags() {
+    fn engine_choice_sets_flags() {
         let mut c = AppConfig::default();
         c.gpu_backend = GpuBackend::Cuda;
-        assert_eq!(c.engine_dir(), c.sdcpp_dir);
-        assert_eq!(c.effective_device(), "cuda0");
         assert!(c.uses_sage_attention());
         c.sage_unsupported = true;
         assert!(!c.uses_sage_attention(), "pre-Ampere card");
@@ -1654,32 +1582,11 @@ mod tests {
         assert!(!saved.sage_unsupported, "detected per run, not read back");
         c.sage_unsupported = false;
         c.gpu_backend = GpuBackend::Vulkan;
-        assert_eq!(c.engine_dir(), c.sdcpp_dir.join("engine-vulkan"));
-        assert!(
-            c.server_exe()
-                .starts_with(c.sdcpp_dir.join("engine-vulkan"))
-        );
-        assert_eq!(
-            c.effective_device(),
-            "vulkan0",
-            "a CUDA device name maps to the first Vulkan GPU"
-        );
-        c.device = "Vulkan1".into();
-        assert_eq!(c.effective_device(), "vulkan1");
-        c.device = "vulkan".into();
-        assert_eq!(c.effective_device(), "vulkan0");
         assert!(!c.uses_sage_attention(), "SageAttention is CUDA only");
         assert_eq!(GpuBackend::for_vendor("nvidia"), GpuBackend::Cuda);
         assert_eq!(GpuBackend::for_vendor("amd"), GpuBackend::Vulkan);
         assert_eq!(GpuBackend::for_vendor("apple"), GpuBackend::Metal);
         c.gpu_backend = GpuBackend::Metal;
-        c.device = "cuda0".into();
-        assert_eq!(
-            c.effective_device(),
-            "mtl0",
-            "matches MTL0 in --list-devices"
-        );
-        assert_eq!(c.engine_dir(), c.sdcpp_dir.join("engine-metal"));
         assert!(!c.uses_sage_attention());
         // Configs written before the field existed keep this platform's engine.
         let old: AppConfig = serde_json::from_str("{}").unwrap();
@@ -1762,8 +1669,6 @@ mod tests {
     }
 
     #[test]
-
-    #[test]
     fn schema_8_migration() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("config.json");
@@ -1797,6 +1702,23 @@ mod tests {
         // A tile size chosen after the change is kept.
         std::fs::write(&p, r#"{"schemaVersion":8,"upscaleTileSize":512}"#).unwrap();
         assert_eq!(AppConfig::load_from(&p).upscale_tile_size, 512);
+    }
+
+    #[test]
+    fn schema_17_migration() {
+        // The cut (task-031): a schema-16 file with the desktop-app fields reads, bumps to
+        // 17, and keeps the fields as dormant values.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.json");
+        let old = r#"{"schemaVersion":16,"hardwarePreset":"8gb","macEngine":true,"serverPort":7860,"keepServerRunning":true,"idleUnloadMinutes":7}"#;
+        std::fs::write(&p, old).unwrap();
+        let c = AppConfig::load_from(&p);
+        assert_eq!(c.schema_version, 17);
+        assert_eq!(c.hardware_preset, "8gb", "dormant: read, no effect");
+        assert!(c.mac_engine);
+        assert_eq!(c.server_port, 7860);
+        assert!(c.keep_server_running);
+        assert_eq!(c.idle_unload_minutes, 7);
     }
 
     #[test]
@@ -2455,8 +2377,6 @@ mod tests {
             "bundled with the file: unchanged"
         );
     }
-
-    #[test]
 
     #[test]
     fn roundtrip_and_partial_files() {

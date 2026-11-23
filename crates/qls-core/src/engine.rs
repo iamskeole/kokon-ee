@@ -22,7 +22,7 @@ use crate::lora::{self, AppliedLora};
 use crate::paths;
 use crate::pipeline;
 use crate::planner::{self, GenerationRequest, Mode, OutputFormat, Plan, PlanInputs, ResolutionMode, ResolvedMode};
-use crate::process::{BackendProgress, BackendStage, ProgressParser, ServerManager, ServerState};
+use crate::process::{BackendStage, ServerManager, ServerState};
 use crate::sdcpp::{
     BackendJobStatus, CancelOutcome, Capabilities, SdcppClient, TextGenDone, TextGenRequest, TextUsage,
     UpscaleRequest,
@@ -167,16 +167,10 @@ pub struct Engine {
     wake: Notify,
     pub events: broadcast::Sender<Event>,
     gpus: crate::bounded_cache::BoundedCache<(Option<Instant>, Vec<GpuInfo>)>,
-    /// `--list-devices` of the engine, keyed by its path and modification time.
-    devices: crate::bounded_cache::BoundedCache<Option<DeviceList>>,
-    /// First-run downloads (setup wizard).
+    /// The lab-model downloader (the mobile-SAM and BiRefNet files, the upscalers).
     pub installer: Arc<crate::installer::Installer>,
-    backend_version: crate::bounded_cache::BoundedCache<Option<String>>,
     last_activity: Mutex<Instant>,
 }
-
-/// An engine's path, its modification time and its `--list-devices` output.
-type DeviceList = (PathBuf, Option<std::time::SystemTime>, Vec<(String, String)>);
 
 fn random_seed() -> i64 {
     let b = uuid::Uuid::new_v4();
@@ -311,9 +305,7 @@ impl Engine {
             wake: Notify::new(),
             events,
             gpus: crate::bounded_cache::BoundedCache::new((None, Vec::new())),
-            devices: crate::bounded_cache::BoundedCache::new(None),
             installer: crate::installer::Installer::new(),
-            backend_version: crate::bounded_cache::BoundedCache::new(None),
             last_activity: Mutex::new(Instant::now()),
         });
         // In external mode the engine only runs on demand, so its capabilities are only
@@ -331,35 +323,9 @@ impl Engine {
         cfg
     }
 
-    /// The card `cfg` runs the CUDA engine on can't run SageAttention. Uses the cached card
-    /// list (queried once if empty) and engine devices, never `config()` or an engine probe.
-    fn lacks_sage_attention(&self, cfg: &AppConfig) -> bool {
-        if cfg.gpu_backend != crate::config::GpuBackend::Cuda {
-            return false;
-        }
-        // Queried once if the list was never taken; a refresh in flight does not
-        // make this wait (BoundedCache keeps the last known list readable).
-        let cached = self.gpus.age().is_some().then(|| self.gpus.get().1);
-        let cards = cached.unwrap_or_else(|| self.gpus());
-        let i = if cards.len() < 2 {
-            0
-        } else {
-            // The cached device list, without triggering a probe: `get` only reads.
-            let devices = self
-                .devices
-                .get()
-                .as_ref()
-                .map(|d| d.2.clone())
-                .unwrap_or_default();
-            crate::diagnostics::card_for_device(
-                &devices,
-                &cards,
-                &cfg.effective_device(),
-                cfg.gpu_backend.device_prefix(),
-            )
-            .unwrap_or(0)
-        };
-        cards.get(i).is_some_and(GpuInfo::lacks_sage_attention)
+    /// This build does not run an engine on this box, so it gates nothing.
+    fn lacks_sage_attention(&self, _cfg: &AppConfig) -> bool {
+        false
     }
 
     /// Replaces the configuration. Returns true when the backend must restart.
@@ -393,13 +359,9 @@ impl Engine {
         new.sage_unsupported = self.lacks_sage_attention(&new);
         let mut g = self.cfg.write().unwrap();
         g.sage_unsupported = self.lacks_sage_attention(&g);
-        let restart = crate::process::build_server_args(&g, g.profile()) != crate::process::build_server_args(&new, new.profile())
-            || g.sdcpp_dir != new.sdcpp_dir
-            || g.gpu_backend != new.gpu_backend;
-        // The engine's version is probed again only when another build is in use.
-        if g.server_exe() != new.server_exe() {
-            self.backend_version.reset(None);
-        }
+        // The adopted engine follows the configured model: a different gateway or model
+        // invalidates what was remembered (it is re-learned on the next job).
+        let restart = g.external_engine != new.external_engine;
         *g = new;
         drop(g);
         Ok(restart)
@@ -636,61 +598,10 @@ impl Engine {
             .1
     }
 
-    /// The engine's devices (`--list-devices`); empty until the engine is installed.
-    /// The probe starts the engine binary (a CUDA initialisation); like `gpus`, readers
-    /// take the last known list instead of queuing on an in-flight probe.
-    pub fn devices(&self) -> Vec<(String, String)> {
-        let exe = self.config().server_exe();
-        let mtime = std::fs::metadata(&exe).and_then(|m| m.modified()).ok();
-        if mtime.is_none() {
-            return Vec::new();
-        }
-        // Freshness is decided against the cached entry (path + mtime); the
-        // refresher gets its own owned copy so the two closures never share a
-        // borrow with a move.
-        let (cur_path, cur_mtime) = self
-            .devices
-            .get()
-            .map(|(p, t, _)| (p, t))
-            .unwrap_or_default();
-        let path = exe.to_path_buf();
-        let list = self.devices.refresh_if_stale(
-            move |d: &Option<DeviceList>|
-            // fresh: cached for exactly this binary build (path + modification time).
-                d.as_ref()
-                    .is_some_and(|(p, t, _)| p.as_path() == cur_path.as_path() && *t == cur_mtime),
-            move || {
-                let l = crate::diagnostics::list_devices(&path);
-                Some((path, mtime, l))
-            },
-        );
-        list.map(|(_, _, l)| l).unwrap_or_default()
-    }
-
-    /// Index in `gpus()` of the card the engine runs on (the configured device); the first
-    /// card when there is one or the engine can't tell.
-    pub fn gpu_index(&self) -> usize {
-        let cards = self.gpus();
-        if cards.len() < 2 {
-            return 0;
-        }
-        let cfg = self.config();
-        crate::diagnostics::card_for_device(&self.devices(), &cards, &cfg.effective_device(), cfg.gpu_backend.device_prefix()).unwrap_or(0)
-    }
-
-    /// The card the engine runs on; plans and presets are sized for it.
+    /// The card this box has (reported in the status; the engine itself runs on the
+    /// engine box, whose card the gateway reports).
     pub fn gpu(&self) -> Option<GpuInfo> {
-        let i = self.gpu_index();
-        self.gpus().into_iter().nth(i)
-    }
-
-    pub fn backend_version(&self) -> Option<String> {
-        // Cached per engine build; the probe starts the engine binary, so it runs under
-        // the bounded-refresh lock like the other probes, never on a reader's path.
-        self.backend_version.refresh_if_stale(
-            |v: &Option<String>| v.is_some(),
-            || Some(crate::diagnostics::backend_version(&self.config().server_exe())).flatten(),
-        )
+        self.gpus().into_iter().next()
     }
 
     pub fn emit_projects(&self, changes: Vec<crate::projects::Change>) {
@@ -802,15 +713,6 @@ impl Engine {
         if request.images.len() > 16 {
             return Err(AppError::invalid("Too many images."));
         }
-        // A model file on a drive that is not connected, moved or deleted: say so now, so the
-        // app can guide the user (Setup), instead of failing once the job starts. Also with the
-        // model loaded: sd-server opens the files again for every image. An external engine
-        // keeps its own files behind the gateway; there is nothing local to check.
-        if self.config().external_engine().is_none()
-            && let Some(e) = self.config().missing_files_error()
-        {
-            return Err(e);
-        }
         if let Some(seed) = request.seed
             && seed < 0
         {
@@ -886,8 +788,8 @@ impl Engine {
         Ok(self.job(id).unwrap())
     }
 
-    /// Cancels every unfinished job submitted by `client` (e.g. "ui" when the desktop app
-    /// closes). A running job stops the owned server, which frees the GPU right away.
+    /// Cancels every unfinished job submitted by `client` (e.g. "ui" when a browser
+    /// closes): the running job is cancelled at the engine, which frees the GPU.
     pub fn cancel_client_jobs(&self, client: &str) -> usize {
         let ids: Vec<String> = {
             let jobs = self.jobs.lock().unwrap();
@@ -1437,13 +1339,6 @@ impl Engine {
             j.view.started_at = Some(now_rfc3339());
             j.view.queue_position = 0;
         });
-        // A file that went missing while the job was queued (see `submit`); external engines
-        // have no local files to miss.
-        if self.config().external_engine().is_none()
-            && let Some(e) = self.config().missing_files_error()
-        {
-            return Err(e);
-        }
 
         // 1. Load inputs (off the async runtime: decoding large photos is CPU work).
         let this = self.clone();
@@ -1515,7 +1410,7 @@ impl Engine {
             None => c.model_matches(&profile.diffusion_model),
         });
         let mut cold_start = false;
-        if self.server.status().state != ServerState::Ready || self.server.owned_alive() == Some(false) || !model_loaded {
+        if self.server.status().state != ServerState::Ready || !model_loaded {
             cold_start = true;
             self.update(id, |j| j.view.status = JobStatus::StartingBackend);
             self.emit_server();
@@ -1637,62 +1532,52 @@ impl Engine {
                 sd_req.lora = lora::request_entries(&loras);
             }
 
-            // 5. Submit and follow.
-            let mut lines = self.server.subscribe_lines();
-            let detailed = self.server.status().owned;
+            // 5. Submit and follow: the engine reports its own job state (this build has
+            // no server log of its own to parse; progress is as truthful as the engine's).
             let submitted = Instant::now();
             let accepted = client.submit(&sd_req).await?;
             drop(sd_req); // release the base64 payloads
             self.update(id, |j| {
                 j.view.status = JobStatus::Running;
-                j.view.detailed_progress = detailed;
             });
-            let mut parser = ProgressParser::default();
-            let mut job_log: Vec<String> = Vec::new();
             let mut last_poll = Instant::now() - Duration::from_secs(10);
+            let mut poll_failing_since = None;
             let backend_job = loop {
-                // Drain log lines -> truthful stage/step.
-                loop {
-                    match lines.try_recv() {
-                        Ok(l) => {
-                            if job_log.len() < 4000 {
-                                job_log.push(l.clone());
-                            }
-                            if let Some(p) = parser.feed(&l) {
-                                self.apply_progress(id, p);
-                            }
-                        }
-                        Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
-                        Err(_) => break,
-                    }
-                }
                 if self.is_cancelled(id) {
-                    return self.cancel_running(id, &client, &accepted.id, &self.config()).await;
+                    return self.cancel_running(id, &client, &accepted.id).await;
                 }
                 if last_poll.elapsed() >= Duration::from_millis(500) {
                     last_poll = Instant::now();
                     match client.job(&accepted.id).await {
-                        Ok(bj) => match bj.status {
-                            BackendJobStatus::Completed | BackendJobStatus::Failed | BackendJobStatus::Cancelled => break bj,
-                            BackendJobStatus::Queued if !detailed => self.update(id, |j| j.view.stage = None),
-                            BackendJobStatus::Generating if !detailed => self.update(id, |j| j.view.stage = Some(BackendStage::Generating)),
-                            _ => {}
-                        },
-                        Err(e) => {
-                            if self.server.owned_alive() == Some(false) {
-                                let tail = self.server.log.tail(30).join("\n");
-                                self.server.mark_lost(AppError::new(ErrorCode::ServerCrashed, "The inference server stopped unexpectedly."));
-                                self.emit_server();
-                                let mut err = translate_generation_failure("server process exited", &tail, (plan.working.width, plan.working.height), None);
-                                if err.code == ErrorCode::GenerationFailed {
-                                    err = AppError::new(ErrorCode::ServerCrashed, "The inference server stopped unexpectedly.")
-                                        .suggest("It will restart automatically on the next job.")
-                                        .detail(tail);
-                                }
-                                return self.maybe_retry_oom(id, err).await;
+                        Ok(bj) => {
+                            poll_failing_since = None;
+                            match bj.status {
+                                BackendJobStatus::Completed | BackendJobStatus::Failed | BackendJobStatus::Cancelled => break bj,
+                                BackendJobStatus::Queued => self.update(id, |j| j.view.stage = None),
+                                BackendJobStatus::Generating => self.update(id, |j| j.view.stage = Some(BackendStage::Generating)),
+                                _ => {}
                             }
-                            if e.code == ErrorCode::NotFound {
-                                return Err(AppError::new(ErrorCode::GenerationFailed, "The inference server lost track of the job (it may have restarted)."));
+                        }
+                        Err(e) => {
+                            let failing = poll_failing_since.get_or_insert(Instant::now());
+                            // A gateway that keeps failing for half a minute is down, not
+                            // flaky: say so plainly and fail the job.
+                            if failing.elapsed() > Duration::from_secs(30) {
+                                let why = e.detail.clone().map(|d| format!("{} {d}", e.message)).unwrap_or_else(|| e.message.clone());
+                                let mk = || AppError::new(ErrorCode::ServerUnavailable, "The engine stopped answering mid-job.")
+                                    .suggest("Check the engine box and the gateway; the next job retries the load.")
+                                    .detail(why.clone());
+                                self.server.mark_lost(mk());
+                                self.emit_server();
+                                return Err(mk());
+                            }
+                            if e.code == ErrorCode::NotFound
+                                && poll_failing_since.is_some_and(|t| t.elapsed() > Duration::from_secs(10))
+                            {
+                                return Err(AppError::new(
+                                    ErrorCode::GenerationFailed,
+                                    "The inference server lost track of the job (it may have restarted).",
+                                ));
                             }
                         }
                     }
@@ -1706,7 +1591,7 @@ impl Engine {
                 _ => {
                     let msg = backend_job.error.map(|e| format!("{}: {}", e.code, e.message)).unwrap_or_default();
                     let smaller = Size::new(((plan.working.width as f64) * 0.75) as u32 / 32 * 32, ((plan.working.height as f64) * 0.75) as u32 / 32 * 32);
-                    let err = translate_generation_failure(&msg, &job_log.join("\n"), (plan.working.width, plan.working.height), Some((smaller.width, smaller.height)));
+                    let err = translate_generation_failure(&msg, &msg, (plan.working.width, plan.working.height), Some((smaller.width, smaller.height)));
                     return self.maybe_retry_oom(id, err).await;
                 }
             }
@@ -2266,17 +2151,6 @@ impl Engine {
             // for the in-engine path.
             Err(e) if e.code == ErrorCode::Upsampler => return Err(e),
             Err(e) => {
-                if self.server.owned_alive() == Some(false) {
-                    let tail = self.server.log.tail(30).join("\n");
-                    self.server.mark_lost(AppError::new(
-                        ErrorCode::ServerCrashed,
-                        "The inference server stopped unexpectedly.",
-                    ));
-                    self.emit_server();
-                    return Err(AppError::new(ErrorCode::ServerCrashed, "The inference server stopped while writing the prompt.")
-                        .suggest("It will restart automatically on the next job. Turn the prompt enhancer off if it happens again.")
-                        .detail(tail));
-                }
                 tracing::warn!("prompt enhancer failed: {} {:?}", e.message, e.detail);
                 e.detail.clone().map(|d| format!("{} {d}", e.message)).unwrap_or(e.message)
             }
@@ -2369,36 +2243,13 @@ impl Engine {
         Ok(Some(blocking(move || stitcher.finish(&content)).await?))
     }
 
-    fn apply_progress(&self, id: &str, p: BackendProgress) {
-        self.update(id, |j| {
-            j.view.stage = Some(p.stage);
-            j.view.step = p.step;
-            j.view.image = p.image;
-            j.view.seconds_per_step = p.seconds_per_step;
-        });
-    }
-
-    async fn cancel_running(&self, id: &str, client: &SdcppClient, backend_id: &str, cfg: &AppConfig) -> AppResult<()> {
+    async fn cancel_running(&self, id: &str, client: &SdcppClient, backend_id: &str) -> AppResult<()> {
         match client.cancel(backend_id).await {
             Ok(CancelOutcome::Cancelled) | Ok(CancelOutcome::AlreadyFinished) | Ok(CancelOutcome::NotFound) => {}
             Ok(CancelOutcome::NotInterruptible) | Err(_) => {
-                // This sd-server build cannot interrupt a running job. If we own the
-                // process, restart it to free the GPU now; otherwise the result is discarded.
-                if self.server.status().owned {
-                    self.update(id, |j| j.view.notes.push("Stopping the inference server to cancel immediately.".into()));
-                    self.server.stop().await;
-                    self.emit_server();
-                    let this_cfg = cfg.clone();
-                    let srv = self.server.clone();
-                    let has_more = self.next_queued().is_some();
-                    if has_more {
-                        tokio::spawn(async move {
-                            let _ = srv.ensure_ready(&this_cfg).await;
-                        });
-                    }
-                } else {
-                    self.update(id, |j| j.view.notes.push("The external server will finish this image; the result is discarded.".into()));
-                }
+                // This engine build cannot interrupt a running job: the result is
+                // discarded when it lands, and the engine frees itself.
+                self.update(id, |j| j.view.notes.push("The engine will finish this image; the result is discarded.".into()));
             }
         }
         Err(AppError::new(ErrorCode::Cancelled, "Cancelled."))
@@ -2561,7 +2412,7 @@ impl Engine {
             duration_ms,
             notes: plan.notes.clone(),
             app_version: APP_VERSION.into(),
-            backend_version: self.backend_version.get(),
+            backend_version: None,
             client: req.client.clone(),
             user: req.user.clone(),
             request: serde_json::to_value(req).unwrap_or_default(),
@@ -2818,24 +2669,21 @@ mod tests {
     async fn submit_validate_and_cancel_queued() {
         let dir = tempfile::tempdir().unwrap();
         let _cfg = use_config_dir(&dir.path().join("cfg"));
-        // Engine and model files (empty) in the test's own folder, never the real one.
         let mut cfg = AppConfig::default();
         cfg.sdcpp_dir = dir.path().join("sdcpp");
         cfg.normalize();
-        std::fs::create_dir_all(cfg.engine_dir()).unwrap();
-        std::fs::write(cfg.server_exe(), b"").unwrap();
-        for (_, p, _) in cfg.profile().files() {
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, b"").unwrap();
-        }
-        let te = cfg.profile().text_encoder.clone();
+        cfg.external_engine = Some(crate::config::ExternalEngine {
+            gateway: "http://127.0.0.1:1".into(),
+            api_key: String::new(),
+            model: "model-a".into(),
+            model_name: "a-model.gguf".into(),
+            sample: serde_json::json!({}),
+            vlm: None,
+            vlm_vision: None,
+            prompt_bundle: String::new(),
+        });
         let e = Engine::new(cfg, dir.path()).unwrap();
-        // A model file that is gone (drive disconnected, moved): refused before queueing.
-        std::fs::rename(&te, te.with_extension("moved")).unwrap();
-        let err = e.submit(GenerationRequest { prompt: "a fox".into(), ..Default::default() }, None).unwrap_err();
-        assert_eq!(err.code, ErrorCode::MissingModel);
-        assert!(err.message.contains("Text encoder") && err.suggestion.as_deref().unwrap().contains("drive"), "{err:?}");
-        std::fs::rename(te.with_extension("moved"), &te).unwrap();
+        // An empty prompt is refused before queueing.
         assert!(e.submit(GenerationRequest { prompt: " ".into(), ..Default::default() }, None).is_err());
         // Remove needs no prompt; other inpaint actions do.
         let remove = GenerationRequest { images: vec!["gen:x".into()], mask: Some("input:m".into()), inpaint_action: planner::InpaintAction::Remove, ..Default::default() };
@@ -2857,7 +2705,7 @@ mod tests {
         assert!(e.submit(up.clone(), None).is_err());
         let j3 = e.submit(GenerationRequest { images: vec!["gen:x".into()], ..up }, None).unwrap();
         assert_eq!(j3.prompt, "Upscale");
-        // Closing the desktop app cancels only its own jobs.
+        // Closing a client cancels only its own jobs.
         let ui = e.submit(GenerationRequest { prompt: "ui job".into(), client: Some("ui".into()), ..Default::default() }, None).unwrap();
         let mcp = e.submit(GenerationRequest { prompt: "mcp job".into(), client: Some("mcp".into()), ..Default::default() }, None).unwrap();
         assert_eq!(e.cancel_client_jobs("ui"), 1);
@@ -2906,12 +2754,6 @@ mod tests {
         let mut cfg = AppConfig::default();
         cfg.sdcpp_dir = dir.path().join("sdcpp");
         cfg.normalize();
-        std::fs::create_dir_all(cfg.engine_dir()).unwrap();
-        std::fs::write(cfg.server_exe(), b"").unwrap();
-        for (_, p, _) in cfg.profile().files() {
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, b"").unwrap();
-        }
         let e = Engine::new(cfg, dir.path()).unwrap();
         let id = e.submit(GenerationRequest { prompt: "a long strip".into(), ..Default::default() }, None).unwrap().id;
         let mut events = e.events.subscribe();
@@ -2945,12 +2787,6 @@ mod tests {
         let mut cfg = AppConfig::default();
         cfg.sdcpp_dir = dir.path().join("sdcpp");
         cfg.normalize();
-        std::fs::create_dir_all(cfg.engine_dir()).unwrap();
-        std::fs::write(cfg.server_exe(), b"").unwrap();
-        for (_, p, _) in cfg.profile().files() {
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, b"").unwrap();
-        }
         let e = Engine::new(cfg.clone(), dir.path()).unwrap();
         let caps = Capabilities { text_generation: true, ..Default::default() };
         let submit = || e.submit(GenerationRequest { prompt: "rendi il gatto nero".into(), enhance: true, ..Default::default() }, None).unwrap().id;
@@ -3056,12 +2892,6 @@ mod tests {
         let mut cfg = AppConfig::default();
         cfg.sdcpp_dir = dir.path().join("sdcpp");
         cfg.normalize();
-        std::fs::create_dir_all(cfg.engine_dir()).unwrap();
-        std::fs::write(cfg.server_exe(), b"").unwrap();
-        for (_, p, _) in cfg.profile().files() {
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, b"").unwrap();
-        }
         let e = Engine::new(cfg.clone(), dir.path()).unwrap();
         let caps = Capabilities { text_generation: true, ..Default::default() };
         let id = e.submit(GenerationRequest { prompt: "lei sul divano con il gatto".into(), enhance: true, ..Default::default() }, None).unwrap().id;
@@ -3085,12 +2915,6 @@ mod tests {
         let _cfg = use_config_dir(&dir.path().join("cfg"));
         let mut cfg = AppConfig { sdcpp_dir: dir.path().join("sdcpp"), ..AppConfig::default() };
         cfg.normalize();
-        std::fs::create_dir_all(cfg.engine_dir()).unwrap();
-        std::fs::write(cfg.server_exe(), b"").unwrap();
-        for (_, p, _) in cfg.profile().files() {
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, b"").unwrap();
-        }
         let e = Engine::new(cfg, dir.path()).unwrap();
         let caps = Capabilities { text_generation: true, ..Default::default() };
         let submit = || e.submit(GenerationRequest { read_scene: Some("Woman".into()), ..Default::default() }, None).unwrap().id;
@@ -3138,12 +2962,6 @@ mod tests {
             vlm_vision: None,
             prompt_bundle: format!("{}/assets/pup", env!("CARGO_MANIFEST_DIR")),
         });
-        std::fs::create_dir_all(cfg.engine_dir()).unwrap();
-        std::fs::write(cfg.server_exe(), b"").unwrap();
-        for (_, p, _) in cfg.profile().files() {
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, b"").unwrap();
-        }
         let e = Engine::new(cfg.clone(), dir.path()).unwrap();
         let caps = Capabilities {
             text_generation: true,
@@ -3628,12 +3446,6 @@ mod tests {
             let mut cfg = AppConfig::default();
             cfg.sdcpp_dir = dir.path().join("sdcpp");
             cfg.normalize();
-            std::fs::create_dir_all(cfg.engine_dir()).unwrap();
-            std::fs::write(cfg.server_exe(), b"").unwrap();
-            for (_, p, _) in cfg.profile().files() {
-                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-                std::fs::write(p, b"").unwrap();
-            }
             cfg
         };
         let e = Engine::new(cfg.clone(), dir.path()).unwrap();

@@ -27,7 +27,6 @@ use qls_core::{
     error::{AppError, ErrorCode},
     geometry::{ExpansionUnits, Size, aspect_label},
     imaging,
-    modelfile,
     paths,
     planner::{GenerationRequest, InpaintAction, Mode, OutpaintSpec, Quality, UpscaleMethod, UpscaleSpec},
     projects::Project,
@@ -66,8 +65,8 @@ pub fn router(state: Arc<AppState>, lan: bool) -> Router {
     let ctx = AuthCtx { app: state.clone(), lan };
     let api = Router::new()
         .route("/status", get(status))
-        .route("/setup/install", get(install_status))
-        .route("/setup/install/cancel", post(install_cancel))
+        .route("/downloads", get(install_status))
+        .route("/downloads/cancel", post(install_cancel))
         .route("/models/switch", post(models_switch))
         .route("/upscalers", get(list_upscalers))
         .route("/upscalers/{name}/download", post(download_upscaler))
@@ -80,9 +79,6 @@ pub fn router(state: Arc<AppState>, lan: bool) -> Router {
         .route("/segment/predict", post(segment_predict))
         .route("/config", get(get_config).put(put_config))
         .route("/enhancer/defaults", get(enhancer_defaults))
-        .route("/backend/start", post(backend_start))
-        .route("/backend/stop", post(backend_stop))
-        .route("/backend/restart", post(backend_restart))
         .route("/diagnostics", get(diagnostics_json))
         .route("/logs", get(logs))
         .route("/plan", post(plan))
@@ -544,116 +540,82 @@ async fn put_config(State(s): St, Extension(caller): Extension<Caller>, Json(mut
         cfg.keep_computer_settings(&s.engine.config());
     }
     let restart = s.engine.set_config(cfg)?;
-    let st = s.engine.server.status();
-    if restart && st.owned && st.state == qls_core::process::ServerState::Ready && !s.engine.has_pending_work() {
+    if restart {
+        // A changed engine door: drop the old adoption, the next job re-adopts.
         s.engine.server.stop().await;
         s.engine.emit_server();
     }
     Ok(Json(json!({ "saved": true, "backend_restart_needed": restart })))
 }
 
-async fn backend_start(State(s): St) -> ApiResult<Json<Value>> {
-    let cfg = s.engine.config();
-    let engine = s.engine.clone();
-    engine.emit_server();
-    let r = engine.server.ensure_ready(&cfg).await;
-    engine.emit_server();
-    let caps = r?;
-    Ok(Json(json!({ "ready": true, "model": caps.model.name })))
-}
-
-async fn backend_stop(State(s): St) -> Json<Value> {
-    let stopped = s.engine.server.stop().await;
-    s.engine.emit_server();
-    Json(json!({ "stopped": stopped }))
-}
-
-async fn backend_restart(State(s): St) -> ApiResult<Json<Value>> {
-    s.engine.server.stop().await;
-    backend_start(State(s)).await
-}
-
+/// The copyable box report: the engine door, what this box holds, and the service log.
 async fn diagnostics_json(State(s): St) -> ApiResult<Json<Value>> {
     let engine = s.engine.clone();
     let v = tokio::task::spawn_blocking(move || {
         let cfg = engine.config();
         let gpus = diagnostics::query_gpus();
         let srv = engine.server.status();
-        let version = engine.backend_version();
-        let devices = diagnostics::list_devices(&cfg.server_exe());
-        let log = engine.server.log.tail(300);
-        let args = qls_core::process::build_server_args(&cfg, cfg.profile());
+        let log = tail_file(&qls_core::config::data_dir().join("logs").join("service.log"), 300);
+        let report = diagnostics::setup_checks(&cfg, Some(srv.state == qls_core::process::ServerState::Ready));
         let mut text = String::new();
         use std::fmt::Write;
-        let _ = writeln!(text, "Kokon {APP_VERSION} — diagnostics ({})", qls_core::store::now_rfc3339());
-        let _ = writeln!(text, "\n[GPU]");
-        match &gpus {
-            Some(g) => {
-                for x in g {
-                    let _ = writeln!(text, "{} — {} MiB total, {} MiB used, {} MiB free, driver {}{}", x.name, x.memory_total_mib, x.memory_used_mib, x.memory_free_mib, x.driver_version, if x.compute_capability.is_empty() { String::new() } else { format!(", compute capability {}", x.compute_capability) });
+        let _ = writeln!(text, "Kokon {APP_VERSION} — box report ({})", qls_core::store::now_rfc3339());
+        let _ = writeln!(text, "\n[Engine]");
+        match cfg.external_engine() {
+            Some(ee) => {
+                let _ = writeln!(text, "{} via {} — model {}", ee.model, ee.gateway, ee.model_name);
+                let _ = writeln!(text, "State: {:?} (starts on demand at the gateway; the gateway's TTL decides its lifetime)", srv.state);
+                if let Some(e) = &srv.error {
+                    let _ = writeln!(text, "Last error: {} {}", e.message, e.detail.clone().unwrap_or_default());
+                }
+                if let Some(c) = &srv.capabilities {
+                    let _ = writeln!(text, "Model: {} ({})", c.model.name, c.model.path);
+                    let models: Vec<&str> = c.upscalers.iter().filter(|u| u.model).map(|u| u.name.as_str()).collect();
+                    let _ = writeln!(text, "Upscalers on the engine box: {} (image upscale: {})", if models.is_empty() { "none".into() } else { models.join(", ") }, c.upscale);
                 }
             }
             None => {
-                let _ = writeln!(text, "nvidia-smi not available");
+                let _ = writeln!(text, "not configured — this version runs against an external engine");
             }
         }
-        let _ = writeln!(text, "Backend devices: {}", devices.iter().map(|(n, d)| format!("{n} ({d})")).collect::<Vec<_>>().join(", "));
-        let cuda = devices.iter().any(|(n, _)| n.to_ascii_lowercase().starts_with("cuda"));
-        let _ = writeln!(text, "CUDA backend: {}", if cuda { "available" } else { "NOT available" });
-        let _ = writeln!(text, "\n[Inference server]");
-        let _ = writeln!(text, "stable-diffusion.cpp: {}", version.clone().unwrap_or_else(|| "unknown".into()));
-        let rel = std::fs::read_to_string(cfg.engine_dir().join(catalog::ENGINE_MARKER))
-            .map(|s| s.trim().to_string())
-            .unwrap_or_else(|_| "unknown (no Kokon engine marker)".into());
-        let _ = writeln!(text, "Engine release: {} (pinned {})", rel, catalog::engine_tag());
-        let _ = writeln!(text, "State: {:?}, owned: {}, pid: {:?}, port: {}", srv.state, srv.owned, srv.pid, srv.port);
-        if let Some(e) = &srv.error {
-            let _ = writeln!(text, "Last error: {} {}", e.message, e.detail.clone().unwrap_or_default());
+        if let Some(vd) = &cfg.vision_engine {
+            let _ = writeln!(text, "Lab door: {} via {} (on demand, resident)", vd.door, vd.gateway);
         }
-        let _ = writeln!(text, "Launch: sd-server.exe {}", args.join(" "));
-        if let Some(c) = &srv.capabilities {
-            let _ = writeln!(text, "Model: {} ({})", c.model.name, c.model.path);
-            let _ = writeln!(text, "Modes: {:?}; limits {}..{} px; features {}", c.supported_modes, c.limits.min_width, c.limits.max_width, c.features_by_mode);
-            let models: Vec<&str> = c.upscalers.iter().filter(|u| u.model).map(|u| u.name.as_str()).collect();
-            let _ = writeln!(text, "Upscalers: {} (image upscale: {})", if models.is_empty() { "none".into() } else { models.join(", ") }, c.upscale);
+        let _ = writeln!(text, "\n[This box]");
+        match &gpus {
+            Some(g) => {
+                for x in g {
+                    let _ = writeln!(text, "GPU: {} — {} MiB total, {} MiB used, driver {}", x.name, x.memory_total_mib, x.memory_used_mib, x.driver_version);
+                }
+            }
+            None => {
+                let _ = writeln!(text, "GPU: none found");
+            }
         }
-        let _ = writeln!(text, "\n[Configuration]");
-        let _ = writeln!(text, "sdcpp dir: {}", cfg.sdcpp_dir.display());
-        let official = cfg.profile().is_official();
-        let _ = writeln!(text, "Preset: {}, profile: {} ({})", cfg.hardware_preset, cfg.profile().display_name, if official { "official files" } else { "the user's own files, not tested by Kokon" });
-        if cfg.vram_override_mib > 0 {
-            let _ = writeln!(text, "Simulated VRAM for planning: {} MiB", cfg.vram_override_mib);
+        for c in &report.checks {
+            let _ = writeln!(text, "{:16} {} — {}", c.label, if c.ok { "ok" } else { "—" }, c.detail);
         }
-        for (label, p, _) in cfg.profile().files() {
-            let state = match (p.is_file(), official) {
-                (false, _) => "MISSING".to_string(),
-                (true, true) => "ok".to_string(),
-                // Own files: what they are, so a report shows the quantization in use.
-                (true, false) => modelfile::inspect(p).map(|i| format!("ok, {:.2} GB, {}{}", i.size as f64 / 1e9, i.weights, i.problem.map(|e| format!(", {e}")).unwrap_or_default())).unwrap_or_else(|e| e.to_string()),
-            };
-            let _ = writeln!(text, "{label}: {} ({state})", p.display());
-        }
-        let _ = writeln!(text, "Device: {}, text encoder: {:?}, VRAM reserve: {} GiB, flash attention: {}, sage attention: {} (in use: {})", cfg.effective_device(), cfg.text_encoder_placement, cfg.vram_reserve_gib, cfg.flash_attention, cfg.sage_attention, cfg.uses_sage_attention());
-        let _ = writeln!(text, "VAE tile size: {} (engine: {}), upscale tile size: {}", cfg.vae_tile_size, cfg.server_vae_tile_size(), cfg.upscale_tile_size);
-        let up = diagnostics::upscaler_check(&cfg);
-        let model = cfg.upscaler_name().unwrap_or_default();
-        let tile = qls_core::planner::upscale_tile(cfg.upscale_tile_size, cfg.planning_vram_mib(gpus.as_ref().and_then(|g| g.first()).map(|g| g.planning_mib())), &model);
-        let _ = writeln!(text, "Upscaler: {} (tile {tile} px, blend {:.0} %, pre-shrink {})", up.detail, cfg.upscale_blend * 100.0, cfg.upscale_prescale);
-        let _ = writeln!(text, "Ports: server {}, service {}", cfg.server_port, cfg.service_port);
+        let _ = writeln!(text, "Ports: service {} (LAN {})", cfg.service_port, cfg.remote_port);
+        let _ = writeln!(text, "Multi-user: {}", if cfg.multi_user { "on" } else { "off" });
         let _ = writeln!(text, "Output: {}", cfg.output_dir.display());
         let _ = writeln!(text, "Data: {}", qls_core::config::data_dir().display());
-        let _ = writeln!(text, "\n[Server log — last {} lines]", log.len());
+        let _ = writeln!(text, "\n[Service log — last {} lines]", log.len());
         for l in &log {
             let _ = writeln!(text, "{l}");
         }
-        json!({
-            "gpus": gpus, "devices": devices, "cuda_available": cuda, "backend_version": version,
-            "server": srv, "launch_args": args, "config": cfg, "log": log, "text": text,
-        })
+        json!({ "gpus": gpus, "server": srv, "checks": report.checks, "text": text })
     })
     .await
     .map_err(AppError::internal)?;
     Ok(Json(v))
+}
+
+/// The last `n` lines of a file (missing file: no lines).
+fn tail_file(p: &std::path::Path, n: usize) -> Vec<String> {
+    std::fs::read_to_string(p)
+        .map(|t| t.lines().map(str::to_string).skip_while(|_| false).collect::<Vec<_>>())
+        .map(|v| v.into_iter().rev().take(n).rev().collect())
+        .unwrap_or_default()
 }
 
 #[derive(Deserialize)]
@@ -662,7 +624,9 @@ struct LinesQ {
 }
 
 async fn logs(State(s): St, Query(q): Query<LinesQ>) -> Json<Value> {
-    Json(json!({ "lines": s.engine.server.log.tail(q.lines.unwrap_or(200).min(4000)) }))
+    let _ = &s;
+    let n = q.lines.unwrap_or(200).min(4000);
+    Json(json!({ "lines": tail_file(&qls_core::config::data_dir().join("logs").join("service.log"), n) }))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1616,17 +1580,6 @@ fn percent_decode(s: &str) -> String {
 // ---------------------------------------------------------------------------------------
 // The user's own model files (#14)
 // ---------------------------------------------------------------------------------------
-
-/// Saves `cfg`; restarts an idle server of ours when the model changed.
-async fn save_and_restart(s: &AppState, cfg: AppConfig) -> ApiResult<()> {
-    let restart = s.engine.set_config(cfg)?;
-    let st = s.engine.server.status();
-    if restart && st.owned && st.state != qls_core::process::ServerState::Stopped && !s.engine.has_pending_work() {
-        s.engine.server.stop().await;
-        s.engine.emit_server();
-    }
-    Ok(())
-}
 
 async fn models_switch(State(s): St, Json(b): Json<ExternalEngine>) -> ApiResult<Json<Value>> {
     let model_id = b.model.clone();
