@@ -111,3 +111,31 @@ endpoint). A command line, not code.
 None, other than the owner prerequisite: **npm account + the
 D-039-3/3b decision.** (D-039-3b removes the npm prerequisite entirely
 — the task can start without it if the owner prefers.)
+
+## Owner re-visit reminder (2026-11-24 — do this before choosing a design)
+
+The owner asked to be reminded, once the surrounding work (PUP ctx,
+reference cap) was done, to **re-visit the MCP loopback concern: he
+feels something is off in the apollo-vs-atlas loopback story and the
+fix might be "exposing a port or changing the bind to 0.0.0.0" rather
+than the netns-sidecar design above.** Two readings to settle when he
+comes back:
+
+1. **Keep the advertised contract, fix placement (D-039-1 as written):**
+   the sidecar shares the service's network namespace, so 127.0.0.1
+   stays true and nothing new is exposed.
+2. **Change the contract's address source:** the MCP discovers the
+   service through `service.json` in the data dir (which the sidecar
+   already mounts read-only); if that file also carried the service's
+   *reachable* address (it binds 0.0.0.0 in its netns on atlas; the
+   container's network IP is addressable from any container on a
+   shared network), the same client code would dial 127.0.0.1 on
+   apollo and the container IP on atlas — no shared netns, no exposed
+   port (the token door would never leave docker networks). That would
+   bend D-039-6 (it touches `mcp/` and what the service writes) — so
+   it is the owner's call, with his port/bind intuition as the
+   starting point for the conversation.
+
+Whichever is chosen, the standing invariant holds: the service token
+and its door stay out of every published/LAN-visible place; the web
+password is never part of the MCP path.
