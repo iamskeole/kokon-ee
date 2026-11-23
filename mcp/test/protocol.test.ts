@@ -25,7 +25,15 @@ const env = {
 } as Record<string, string>;
 delete env.CLAUDE_PROJECT_DIR;
 fs.mkdirSync(env.QLS_CONFIG_DIR, { recursive: true });
-fs.writeFileSync(path.join(env.QLS_CONFIG_DIR, "config.json"), JSON.stringify({ servicePort: 39181, serverPort: 39180, outputDir: path.join(tmp, "out") }));
+fs.writeFileSync(path.join(env.QLS_CONFIG_DIR, "config.json"), JSON.stringify({
+  servicePort: 39181,
+  serverPort: 39180,
+  outputDir: path.join(tmp, "out"),
+  // The boot guard (task-031 P10): the service box adopts an external engine through the
+  // gateway; a stock config cannot boot. The gateway is absent on purpose — the tests
+  // exercise the service, not the engine (the status tool reports that state).
+  externalEngine: { gateway: "http://127.0.0.1:39991/upstream", model: "kokon-qwen-image-2.1-turbo", modelName: "qwen-image-2.1-turbo-Q4_K_M.gguf", sample: {} },
+}));
 const proj = path.join(tmp, "project");
 fs.mkdirSync(proj);
 // 1x1 PNG
