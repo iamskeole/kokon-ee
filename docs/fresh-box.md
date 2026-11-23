@@ -58,6 +58,10 @@ ml/backends/     llama.cpp/             pinned, pure upstream — one shared
                  stable-diffusion.cpp/  pinned, pure upstream (290148d);
                                         one sd-server build serves both
                                         image families
+                 kokon-vision/          pinned FORK of Acly/vision.cpp
+                                        (branch `vision-server`) — the lab's
+                                        GGUF vision door (§2); the one
+                                        exception to the purity rule (D-037-5)
                  llama-swap/            pinned, pure upstream (v269)
                  hyperqwen-032/         pinned, pure upstream — the vLLM
                                         runtime (a project venv inside)
@@ -129,7 +133,14 @@ state of this deployment uses:
 | `gguf/BFL/flux-3-image-klein-pup/` | the PUP fine-tune: `model-Q8_0.gguf`, `model-Q4_K_M.gguf`, `mmproj-F16.gguf` |
 | `gguf/Qwen/Qwen3-VL-8B-Instruct/` | in-engine conditioner for the qwen engine (`model-Q4_K_M.gguf`, `mmproj-F16.gguf`) |
 | `gguf/Qwen/Qwen3-VL-4B-Instruct/` | in-engine conditioner for the klein engine (`model-Q4_K_M.gguf`, `mmproj-Q8_0.gguf`) |
+| `gguf/Acly/MobileSAM/MobileSAM-F16.gguf` | the lab's click-select door model (~26 MB; served by the `kokon-vision` door, CPU) |
+| `gguf/Acly/BiRefNet-lite/BiRefNet-lite-F16.gguf` | the lab's matte door model (~89 MB; same door) |
 | `gguf/zerofata/G4-MeroMero-v2-26B`, `…-31B` | the creative models (optional for the image stack) |
+
+The Acly pair is the GGUF form of the same two networks the lab's in-process
+fallback uses as ONNX (Acly publishes both exports, and vision.cpp runs the
+GGUFs; §4's ladder explains when each runs). The F16 quants are Acly's own
+public releases — no local conversion, provenance as everywhere else.
 
 The gateway's vision entry, **`qwen3.8-27b-vision`**, adds **no new weights**:
 it is the owner's chat-model checkpoint served with its vision tower enabled
@@ -160,8 +171,11 @@ Downloads: follow each directory's `provenance.md` on the reference host
 
 ## 2. Engines (stock upstream, named slots)
 
-Four pinned upstream checkouts under `backends/`; **none is modified** (the
-purity rule above). The boot scripts in `backends/_scripts/` are the only
+Four pinned upstream checkouts under `backends/` — **none is modified** (the
+purity rule above) — plus one pinned **fork**, `kokon-vision/` (below): the
+lab's vision door is the single exception to the stock-tree rule, and it is
+the project's only custom inference layer in that whole stack (D-037-5). The
+boot scripts in `backends/_scripts/` are the only
 thing between the gateway's models and these trees; **every one of them
 takes its port as `$1`** — the daemon hands it the number `${PORT}` assigned
 at config load (the gateway section), so no script and no config line ever
@@ -215,6 +229,41 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON \
       -DBUILD_SHARED_LIBS=ON -DCMAKE_CUDA_ARCHITECTURES=86
 cmake --build build --config Release -j12 --target llama-server
 ```
+
+**kokon-vision** — the lab's vision door (task-037). The engine is
+`vision-server`, the HTTP server for Acly's **vision.cpp** (MIT; the author
+of the lab's two model exports) built from the project's pinned fork
+(`backends/kokon-vision/`, branch `vision-server`, upstream
+[Acly/vision.cpp#25](https://github.com/Acly/vision.cpp/pull/25) — if it
+merges, pin upstream instead; the binary and the contract are the same).
+The stock library is self-contained ggml (CPU + Vulkan, deliberately no
+CUDA); the fork adds only the server, its JSON layer, and tests. The CPU
+build (the standing variant on a vLLM-resident box — zero VRAM, D-037-12):
+
+```sh
+# verified: reference host (2026-11-22). cmake Release, no CUDA, the ggml
+# backends dynamic (the Vulkan .so loads only with -b gpu).
+git clone https://github.com/iamskeole/vision.cpp backends/kokon-vision
+cd backends/kokon-vision && git checkout vision-server
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF
+cmake --build build --config Release -j12 --target vision-server
+```
+
+`serve-kokon-vision.sh` preflights the two model files and `exec`s
+`build/bin/vision-server -l 127.0.0.1 -p "$1" -b cpu -m
+<…>/MobileSAM-F16.gguf -m <…>/BiRefNet-lite-F16.gguf`. The server loads both
+models **before it opens the listener, so `/health` 200 is the readiness
+gate** (no 1-token probe exists — it serves no `/v1/*`); routes: `POST /sam`
+(point or box → four masks + IoUs) and `POST /birefnet` (image → matte),
+JSON, base64 PNG in/out. Boot is ~0.5 s cold; it idles ~334 MB RAM and
+peaks ~1.5 GB during a matte. The registry entry is **resident**
+(`ttl: 86400`) and a member of **every** set (`& kv`, the sidekick pattern —
+§3), so a lab click never evicts a GPU job and no GPU job evicts it; the
+daemon boots it on the first request after a box restart. The `-b gpu`
+variant (Vulkan) is a documented one-word flip in the boot script for a day
+when vLLM's KV leaves a couple of hundred MiB free — the server's
+per-request budget check turns any overflow into a clean 503, never a
+starvation of the resident LLM.
 
 The PUP sidecar is a plain `llama-server` (OpenAI-compatible, with vision).
 The door is `serve-kokon-pup-flux-image-3-klein.sh` (task-028: renamed from
@@ -314,8 +363,14 @@ above, and one entry per model (`proxy`, `cmd`, `checkEndpoint`, `ttl`,
 | `kokon-pup-qwen-image-2.1-t2i` | llama-server (Qwen PE-T2I PUP door, Q4_K_M, text-only) | 9105 | `qwen-t`/`qwen-f` group |
 | `kokon-qwen-image-2.1-full` | stock sd-server (Qwen-Image 2.1 full) | 9106 | `qwen-f` |
 | `kokon-qwen-image-2.1-turbo` | stock sd-server (Qwen-Image 2.1 Turbo) | 9107 | `qwen-t` |
-| `qwen3.8-27b` | vLLM (text) | 9108 | `vllm` |
-| `qwen3.8-27b-vision` | vLLM (vision tower on; own port, second served name) | 9109 | `vllm` |
+| `kokon-vision` | vision-server (fork; MobileSAM + BiRefNet GGUF, CPU) | 9108 | **every set** (`& kv`) |
+| `qwen3.8-27b` | vLLM (text) | 9109 | `vllm` |
+| `qwen3.8-27b-vision` | vLLM (vision tower on; own port, second served name) | 9110 | `vllm` |
+
+2026-11-23 (task-037 P2): the `kokon-vision` lab door joins the matrix (CPU,
+resident, member of every set — §2's fork + §3's `kv`). It sorts after
+`kokon-qwen-image-2.1-turbo`, so the vLLM pair shifted 9108/9109 →
+9109/9110; the kokon engines and the PUP doors did not move.
 
 2026-11-06: the three kokon ids were renamed to their boot-script names
 (`kokon-turbo` → `kokon-qwen-image-2.1-turbo`, `kokon-full` →
@@ -370,12 +425,16 @@ routing:
           vv: qwen3.8-27b-vision # only the engine, never the running door
           cf: creative-fast
           cs: creative-slow
+          kv: kokon-vision      # the lab's vision door — member of EVERY
+                                 # set (the sidekick pattern): it co-resides
+                                 # with whichever job runs, claims zero
+                                 # VRAM, and is never evicted by any set
         sets:
-          klein:  "k & p"
-          qwen-t: "qt & (p | pt | pi)"
-          qwen-f: "qf & (p | pt | pi)"
-          small:  "cf | cs"
-          vllm:   "v | vv"      # the two vLLM variants never coexist
+          klein:  "k & p & kv"
+          qwen-t: "qt & (p | pt | pi) & kv"
+          qwen-f: "qf & (p | pt | pi) & kv"
+          small:  "(cf | cs) & kv"
+          vllm:   "(v | vv) & kv"   # the two vLLM variants never coexist
 ```
 
 Three rules: a **set** declares which models may co-reside; it never starts
@@ -511,7 +570,7 @@ services:
 Ports: **39152** web UI (password), **39151** token API (host loopback; the
 MCP server reads the token from `/data/service-token` in the container).
 
-The container's `/config/config.json` (schema 13) is the external-engine
+The container's `/config/config.json` (schema 16) is the external-engine
 configuration: the service's `externalEngine` points at the **gateway**
 (`http://127.0.0.1:8081/upstream` — alias, not port) and **presents the box
 key** (`externalEngine.apiKey`; a VLM entrypoint that names no key of its own
@@ -552,33 +611,50 @@ VLM entrypoint and the prompt bundle the VLM applies:
   **ADOPT-NATIVE-ON**: the qwen pipelines name the native doors in `vlm` /
   `vlmVision` (thinking on); rollback is the same flip back to the shared
   BFL door
+- **`visionEngine`** (schema 16, task-037 P3): `{gateway, apiKey, door}` —
+  the lab's vision door as the service sees it: the same gateway base and
+  key as `externalEngine` (it names no separate door), and `door` = the
+  matrix model id (`kokon-vision`). Named and answering → the lab's models
+  run **on the door** (below); named but not answering → a plain error, no
+  fallback; not named at all → the serving box runs the in-process ONNX
+  copies (the single-box mode). Absent or partial in older schemas migrates
+  cleanly (the service upgrades the file to 16 on save).
 - prompt bundles: the committed asset bundles under
   `crates/qls-core/assets/` (`pup`, `pup-qwen`), plus the native bundle in
   the deployment's data dir (`assets/pup-qwen-native/`, schema 14); the
   service copies the repo assets into the container's `/data/assets/` and
   reads them per job, so a dropped-in replacement applies to the next job
 
-0.12 adds two CPU-only ONNX models to the service (zero VRAM, zero engine
-interaction — identical in both modes): the **BiRefNet-lite** quick cut-out
-(224 MB, in-service CPU, `POST /api/v1/matte/download` on first use, lands
-in the data volume's `sdcpp/models/matting/`) and **MobileSAM** (~45 MB,
-the same download, `sdcpp/models/segment/`) — the lab's click-to-select
-model, which the service **runs** for the browser
-(`POST /api/v1/segment/encode|predict`; the UI uses it whenever the service
-has the files, so even a browser that cannot run ONNX gets the lab — the
-in-browser onnxruntime-web copy stays the stock-mode default and the
-fallback when the service has none). The segment model runs **in-process on
-whatever box runs the service** — it is a 45 MB CPU model, not a GPU model,
-so it belongs with the service, not on the accelerator (the split exists
-for the generation engines; the matte model is the same shape: in-process
-on the serving box). There is no other path: the split-box relay that
-task-036 built and proved (a `kokon-sam` gateway door) was removed in
-total on the owner's call of 2026-11-22 — a 45 MB CPU model does not
-justify a second engine — and a box that cannot host the files falls back
-to the in-browser copy; there is no relay.
-Both download on first use, on demand; nothing about them touches the
-engines — the lab's DiT-touching operations (Quality cut-out, Blend,
-Expand, painted-area edits) ride the same sdcpp job API as everything else.
+The lab's two models (click-to-select **MobileSAM**, matte
+**BiRefNet-lite**) run on a **ladder** the service walks per request
+(task-037 P3; `GET /api/v1/segment` and `/api/v1/matte` report where each
+sits — `installed`/`door`/`doorConfigured`):
+
+1. **the door** — if `visionEngine` names a matrix model (`kokon-vision`,
+   §2/§3) and it answers `/health`, both models run there: the stock
+   GGUFs on the accelerator's gateway, on CPU (zero VRAM, never evicts
+   vllm), over the already-configured gateway base + key. A split box with
+   no model files at all runs the whole lab this way.
+2. **in-process on the serving box** — when the door is not named or is
+   down, the service runs its own ONNX copies (BiRefNet-lite 224 MB, the
+   same download as before, lands in the data volume's
+   `sdcpp/models/matting/`; MobileSAM ~45 MB, `sdcpp/models/segment/`) on
+   CPU in the service process: `POST /api/v1/segment/encode|predict`,
+   `POST /api/v1/matte`. A box with neither files nor an answering door
+   downloads its own copy on first use in the same session (the single-box
+   mode) and then runs it in-process.
+3. **a plain error** — a door named but down and no local files: the lab
+   says so ("…engine is not answering (the accelerator's door is down)")
+   instead of failing mysteriously. **There is no fourth rung:** the
+   in-browser onnxruntime-web copy — the stock 0.12 default — was removed
+   from the app in task-037 P3 (D-037-13): the browser is a thin client
+   that sends no image bytes and never runs a model; the box (door or
+   in-process) does. The earlier split-box relay (task-036) is gone from
+   the code — the door *is* its successor, built on stock vision.cpp.
+
+Nothing about the lab's models touches the generation engines — the
+lab's DiT-touching operations (Quality cut-out, Blend, Expand, painted-area
+edits) ride the same sdcpp job API as everything else.
 
 A down sidecar **hard-fails the job** (no silent raw-prompt fallback): the
 VLM is part of the quality contract, not an optional garnish.
@@ -624,6 +700,16 @@ VLM is part of the quality contract, not an optional garnish.
    **same** sidecar pid resident — the journal shows
    `evict=[kokon-flux-image-3-klein]` and
    `evict=[kokon-qwen-image-2.1-turbo]` (the engines only), never the door.
+6. **The lab** (signed-in browser on 39152, never the token): `GET
+   /api/v1/segment` and `/api/v1/matte` each report their rung — a
+   door-configured box: `{"door":true, "doorConfigured":true, …}`; a
+   single box after its first-use download: `{"installed":true,
+   "doorConfigured":false}`. The lab's Select works (a click returns
+   masks — the journal shows the door's `[vision-server] POST /sam → 200`
+   when the door serves it, or the service's `selection predict` line when
+   it does), and the matte (a Fast sticker) returns a PNG. A fresh box
+   with a door but no local files should pass this with zero model bytes
+   in its data volume — the whole lab over the wire.
 ## 6. Operations
 
 - **A config swap stops every loaded model** (a successful reload shuts the

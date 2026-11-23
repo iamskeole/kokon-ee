@@ -144,7 +144,7 @@ without a restart; it is stored as an Argon2id hash in
 
 ```json
 {
-  "schemaVersion": 14,
+  "schemaVersion": 16,
   "servicePort": 39151,
   "setupComplete": true,
   "externalEngine": {
@@ -159,16 +159,26 @@ without a restart; it is stored as an Argon2id hash in
       "apiKey": "<same key>"
     },
     "promptBundle": "pup-qwen"
+  },
+  "visionEngine": {
+    "gateway": "http://<accelerator-IP>:8081/upstream",
+    "apiKey": "<same key>",
+    "door": "kokon-vision"
   }
 }
 ```
 
-(Schema 13 files load as-is and save as 14. Schema 14 adds the optional
-second VLM door `vlmVision` — the image-grounded modes' upsampler; a config
-without it routes every mode to `vlm`, as above.)
+(Schema 14/15 files load as-is and save as 16. Schema 16 adds
+`visionEngine` — the lab's vision door: the same gateway base and key as
+`externalEngine`, named by its matrix model id; the accelerator's
+`kokon-vision` matrix member (fresh-box doc, §2/§3) serves the lab's two
+models, MobileSAM + BiRefNet-lite, on CPU — zero VRAM, a permanent
+co-tenant of every matrix set, so a lab click never disturbs the resident
+vLLM.)
 
 When migrating, copy the accelerator's current values verbatim
-(`model`, `modelName`, `sample`, `promptBundle`, `vlm`, `vlmVision`) and
+(`model`, `modelName`, `sample`, `promptBundle`, `vlm`, `vlmVision`,
+`visionEngine`) and
 change only the
 two `127.0.0.1` addresses to the accelerator's IP. Model ids and
 gguf names as the accelerator's gateway knows them:
@@ -231,26 +241,28 @@ token door stays 127.0.0.1-only, for the MCP).
    → **404** (key accepted, model unknown). Without the key → **401**.
    (A 401 with the key means the key in the config is wrong.)
 4. The lab models: the service's `/api/v1/segment` and `/api/v1/matte`
-   report `installed: true` — checked **from a signed-in browser** (a
+   report their rung — checked **from a signed-in browser** (a
    named session or the password), not with the API token: the LAN
    listener keeps an allowlist of what a browser may call, and a token
    check would pass even where a browser call is refused (11-22:
    the segment routes were missing from it, and the lab read
-   "could not be downloaded" on every real box). They arrive with a
-   migrated data dir; fresh starts download them on first lab use.
-   Where each one runs: **both** stay in-process on **this** box (the
-   service's CPU, on first use) — MobileSAM is a 45 MB CPU model, not a GPU
-   model, so it belongs with the service, not on the accelerator (the split
-   exists for the generation engines). The split-box relay that briefly
-   lived in this tree is gone in total (owner, 2026-11-22: a second engine
-   on the wire for a 45 MB CPU model beat the point of the
-   one-service-plus-stock-engines design) — there is no relay left in the
-   service, and a box without the files falls back to the in-browser copy.
-   The browser only sends clicks
-   and reads back masks, the same either way — a weak or ONNX-less browser
-   gets the lab as a thin client, and the in-browser onnxruntime-web copy
-   stays the last-resort
-   fallback when neither is present.
+   "could not be downloaded" on every real box). **Where each one
+   runs — a ladder the service walks per request (task-037 P3):**
+   first the **`kokon-vision` door** (`visionEngine.door`, answered
+   through the already-configured gateway — `door: true` in the
+   status; this box has no GPU, so the door — stock vision.cpp on the
+   accelerator, CPU, zero VRAM — is the standing path: a split box with
+   no model files at all runs the whole lab this way); then, if the door
+   is down, the **in-process ONNX copies on this box** (`installed:
+   true` — a migrated data dir carries them; a fresh start downloads
+   them on first use in the same session and keeps them); and if neither
+   is available, **a plain error** ("…engine is not answering (the
+   accelerator's door is down)"). **There is no in-browser rung**
+   (owner, 11-23, D-037-13): the browser is a thin client — it sends no
+   image bytes and never runs a model; any failure is this stack's, and
+   it is reported plainly. (The earlier split-box relay that briefly
+   lived in this tree is gone in total; the door is its successor, built
+   on stock vision.cpp instead of a second engine.)
 5. The UI: open `https://<ui-name>` from **another device** on the
    LAN → sign in with the password → the gallery loads.
 6. One real generated image (accelerator up): a short text-to-image
