@@ -36,8 +36,13 @@ to the CPU reference (`[0.619, 0.8813, 0.8677, 0.7937]`); BiRefNet matte
 proven against the live assistant runtime. Owner exposure 62 s.
 (The 21:24 window's 404s — post-mortem below; that lesson shaped
 this window: functional router waits, rename restore, healthy-runtime
-no-op fail.) **P3 (service integration, no in-browser fallback per
-D-037-13) and P4 (docs/handover) remain.**
+no-op fail.) **P3 DONE 11-23 (night)** — the service's ladder (door →
+in-process → plain error) for both models, `visionEngine` in schema 16,
+the browser a thin client (onnxruntime-web gone from the app);
+deployed as `multiuser-51df995` and proven as the full 2×2 ladder
+matrix on the live box (split-box half included — the whole lab runs
+over the wire with zero local model bytes; details in the P3 item
+below), then **P4 (docs/handover) remains.**
 
 ## trigger (fired 2026-11-22): the owner's go/no-go on the plan below —
 raised 2026-11-22 when the owner, digging on their own, found that Acly
@@ -469,6 +474,48 @@ this box.
   SAM becomes viable (the budget check makes any overflow a clean 503, not
   a starvation of the LLM); the door stays backend-agnostic (`-b cpu|gpu`)
   so that flip is a boot-script word.
+- **D-037-21 (P3): the ladder is door-first.** A configured door that
+  answers takes priority over local files (on the split box the door is
+  the intended path with zero local bytes; on the mixed box the door is
+  the box's lab engine; the in-process copy is the escape when the door
+  is down, and the single-box default when no door is named).
+- **D-037-22 (P3): statuses say which door and whether it answers.**
+  `/segment` and `/matte` report `doorConfigured` (named in config) and
+  `door` (answered `/health`) in addition to `installed`/`bytes`, so the
+  browser can distinguish "no door named" (single box — download its own
+  copy, run in-process) from "door named but down" (thin box — say so
+  plainly, never download, never run in-browser).
+- **D-037-23 (P3): the door's `encode` is a no-op.** The door's server
+  runs the encoder itself and caches embeddings per image bytes, so the
+  client sends no embeddings; the first `predict` pays the one-time
+  encoder run, later clicks on the same image hit the cache. In-process
+  `Sam::encode` keeps its own LRU (8) as before.
+- **D-037-24 (P3): the door gets the image at `w`×`h`.** The client
+  resizes with the Triangle filter (the in-process encoder's exact
+  resize) and base64-PNGs it; the door does its own 1024-side resize
+  internally. Masks come back at the size sent, so they are the exact
+  `w`×`h` the in-process path would have produced.
+- **D-037-25 (P3): a box is two clamped corners.** `{x1,y1,x2,y2}` into
+  the door, clamped to `[0, n-1]`, minimum 1 px per side (a zero-area
+  ask grows by one pixel) — the door rejects degenerate boxes, and a box
+  is the stronger prompt, so a box-plus-clicks ask sends the box alone.
+- **D-037-26 (P3): one point = the last positive click.** The door's
+  contract has no negative-click concept; the lab sends the last
+  positive-labeled click (the object) or the first of any. The lab's UI
+  never sends a bare negative ask, so nothing is lost.
+- **D-037-27 (P3): a door matte cannot be cancelled.** `/birefnet` has
+  no run id; a Stop mid-flight lets it finish (~3 s on CPU) rather than
+  kill the door's request.
+- **D-037-28 (P3): door failures are plain and loud.** User-facing: "The
+  selection engine is not answering (the accelerator's door is down)." /
+  "The selection engine failed: 503 …"; raw bodies and contract
+  violations (wrong mask count, non-JSON) ride in the error's `detail`
+  (the log), `server_unavailable` for down/unreachable, `internal` for
+  contract violations, `missing_model` for the single-box not-downloaded
+  state. No retry, no silent fallback.
+- **D-037-29 (P3): `/segment/models/{file}` is gone.** The model bytes
+  never cross to a browser anymore; the route (and its allowlist
+  entries) are removed with the in-browser runtime.
 
 ## acceptance criteria
 
@@ -477,11 +524,43 @@ this box.
       resident and revived; nvidia-smi delta recorded.
 - [ ] P1: per-head parity vs the in-process reference within the D-037-4 bar
       on the standing test set.
-- [ ] P2: `kokon-vision` in the live matrix (window protocol, vllm revived
-      before the marker); the matrix's last-good re-seeded.
-- [ ] P3: a service with no local ONNX files but a configured door runs the
-      whole lab over the wire (the split-box proof, again, with the stock
-      engine); in-process and in-browser paths unchanged and tested.
+- [x] P2: `kokon-vision` in the live matrix (window protocol, vllm revived
+      before the marker); the matrix's last-good re-seeded. **Done 11-23**
+      (65 s window; ml `de12cff`).
+- [x] P3: a service with no local ONNX files but a configured door runs
+      the whole lab over the wire (the split-box proof, again, with the
+      stock engine); in-process unchanged and tested (the in-browser path
+      is **retired** per D-037-13 — no fallback below the ladder). **Done
+      11-23 night** (code `77544ab`→`51df995`: schema 16 `visionEngine`,
+      the `Door` client — 10 tests on the revived fake-door fixture — the
+      door → in-process → plain-error ladder for both models, statuses
+      reporting `door`/`doorConfigured`, `/segment/models/*` out, the
+      browser made a thin client — onnxruntime-web, its wasm hook, the
+      dev-server copy, the download-fallback all gone from the app; a
+      door-down thin box says so plainly, a single box still downloads
+      its own copy in the same session). **Deployed as image
+      `multiuser-51df995` and proven as the full 2×2 ladder matrix** (all
+      through the live gateway, vllm resident throughout, zero VRAM
+      delta): door-up+files → the door (the daemon's journal:
+      `POST /sam → 200 (168 ms)` server-side; point 0.50 s cold /
+      0.26 s warm, box 0.25 s, matte 3.0 s); **door-up + no local files
+      (the split box)** → point 0.28 s with bit-identical IoUs, matte
+      2.78 s — the whole lab runs over the wire with zero local model
+      bytes; door-down+files → the in-process escape (point 0.78 s
+      first / 0.14 s warm; matte 9.3 s first, the 224 MB ORT load);
+      door-down + no files → the plain error ("The selection engine is
+      not answering (the accelerator's door is down)." —
+      `server_unavailable`, no download, no fallback, D-037-13). Parity
+      re-confirmed on the deployed box: door IoUs [0.8161, 0.5809, 0.979,
+      0.8251] vs in-process [0.8284, 0.574, 0.9705, 0.8331] — ≤ 0.015 per
+      head, both picking head 2; the box prompt is all-high
+      ([0.9827, 0.9438, 0.9932, 0.9898]). Matte determinism noted: two
+      door runs differ on 944 / 1,056,768 px (0.089 %, all within one
+      32-value bucket — F16 multithread-CPU jitter, not the bimodal
+      flip); the in-process ORT matte is a valid same-scene matte at a
+      different edge threshold (60 KB vs 82 KB). The deployed 782 KB
+      bundle has **zero** onnxruntime references; the LAN listener's
+      allowlist still carries the lab routes.
 - [ ] P4: docs current; this file closed with the measured numbers.
 
 ## blockers
@@ -500,19 +579,19 @@ this box.
   merges the door pins upstream `Acly/vision.cpp`, if not we pin the fork
   at `26a7529` + our 5 commits (D-037-5’s fallback). Not on P2’s
   critical path.
-- **P2 needs the owner’s question answered (asked 11-23, answered in the
-  session):** is vllm the only co-residency issue on the GPU, or every
-  gateway model? And what does "-b gpu restricted to MobileSAM" mean when
-  the lab needs *two* models (MobileSAM + BiRefNet)? Answer: vllm is the
-  only *resident* big tenant (the assistant runtime, always loaded) —
-  evicting it for a click is what D-037-8 ruled out; every other matrix
-  model (klein/qwen DiTs, MeroMero, Gemma, muse) is evictable by the same
-  set mechanics a qwen job already uses, so they are not co-residency
-  problems, just set-membership questions. On GPU, MobileSAM is the only
-  family that even *fits* beside vllm (160 MB request + ~180 MB weights
-  vs 300–608 MiB free) — "restricted" means the GPU door would
-  load and serve only MobileSAM; the other four (211–1327 MB) would
-  503 or force a vllm eviction, so they stay CPU. The lab’s second
-  model (BiRefNet) therefore cannot ride a vllm-co-resident GPU door; a
-  CPU door carries both (129 ms / 2.75 s, zero VRAM), which is the
-  recommendation. Awaiting the ruling.
+- ~~**P2 co-residency question**~~ **closed by the owner's ruling 11-23**
+  (D-037-12): vllm is the only *resident* big GPU tenant (the assistant
+  runtime, always loaded) — evicting it for a lab click is what D-037-8
+  ruled out; every other matrix model is on-demand/evictable by the same
+  set mechanics a qwen job already uses, so it is not a co-residency
+  problem, just set membership. On GPU, MobileSAM is the only family
+  that even *fits* beside vllm (160 MB request + ~180 MB weights vs
+  300–608 MiB free, knife-edge); a vllm-co-resident GPU door would
+  therefore carry MobileSAM only, and the lab's second model (BiRefNet,
+  1.3 GB) could not ride it — **ruling: “agree on CPU for now.”** The
+  standing door is CPU (both models, zero VRAM, ~334 MB idle, 0.5 s
+  cold); the `-b gpu` flip stays a documented one-word change in the
+  boot script for a day vllm's KV is trimmed by a few hundred MiB (then
+  a MobileSAM-only GPU door is viable, BiRefNet still CPU).
+- **Remaining (not blocking):** the deployed-box proofs (P3), P4, and the
+  PR's fate (D-037-5).
