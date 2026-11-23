@@ -1,5 +1,6 @@
-// Client for the local kokon-service. Finds it via service.json, starts it if needed
-// (the service in turn starts/reuses sd-server), and holds an "mcp" lease while alive.
+// Client for the box's kokon-service. Finds it via service.json, starts the bare binary if
+// needed (the service adopts the engine through the box's gateway; it never spawns one),
+// and holds an "mcp" lease while alive.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -70,9 +71,12 @@ export function findServiceExe(): string | null {
     : [path.join("/Applications", "Kokon.app", "Contents", "MacOS", SERVICE_EXE), path.join(os.homedir(), "Applications", "Kokon.app", "Contents", "MacOS", SERVICE_EXE)];
   const candidates = [
     process.env.QLS_SERVICE_EXE,
-    // Next to kokon-mcp (Windows install folder, Kokon.app/Contents/MacOS)
+    // Next to kokon-mcp
     path.join(path.dirname(process.execPath), SERVICE_EXE),
     ...installed,
+    // The box image and a PATH install
+    "/usr/local/bin/" + SERVICE_EXE,
+    "/usr/bin/" + SERVICE_EXE,
     // Development checkout (mcp/build -> target/...)
     path.resolve(__dirname, "..", "..", "target", "release", SERVICE_EXE),
     path.resolve(__dirname, "..", "..", "target", "debug", SERVICE_EXE),
@@ -105,9 +109,9 @@ export class ServiceClient {
     const exe = findServiceExe();
     if (!exe) {
       throw new ServiceError(
-        `Kokon is not installed (${SERVICE_EXE} not found). This MCP server needs the Kokon desktop app (Windows or macOS).`,
-        "not_installed",
-        `Download Kokon from https://kokon.app, open it once and finish the setup, then try again. If it is installed in an unusual place, set QLS_SERVICE_EXE to the path of ${SERVICE_EXE}.`,
+        `The Kokon service is not running and ${SERVICE_EXE} was not found.`,
+        "service_unavailable",
+        `Start the box (docker compose up -d, or kokon-service --persistent), or set QLS_SERVICE_EXE to the path of ${SERVICE_EXE} if it lives in an unusual place.`,
       );
     }
     // Detached: the service outlives this MCP process and exits on its own when idle.

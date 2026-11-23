@@ -8,7 +8,7 @@ export function helpText(version: string): string {
 MCP server for Kokon EE. It speaks the Model Context Protocol over stdio, so an MCP client
 (Claude Code, Cursor, Claude Desktop...) starts it; running it by hand just waits for input.
 It talks to the running Kokon EE service (the box: docker image + browser UI) through the
-service's own service.json (port + token); against a desktop install of Kokon it starts the
+service's own service.json (port + token); against a bare-binary install it starts the
 local engine on demand instead.
 
 Usage:
@@ -23,7 +23,7 @@ Environment variables:
   QLS_MCP_ALLOWED_DIRS  extra folders the tools may read and write, separated by semicolons
   QLS_SERVICE_EXE       path to kokon-service, if Kokon is installed in an unusual place
   QLS_DATA_DIR          the service's data folder (holds service.json: port + token;
-                        default: the desktop app's KokonData folder)
+                        default: the service's data folder)
   CLAUDE_PROJECT_DIR    project folder the tools may use (set by Claude Code; default: the
                         working directory)
 `;

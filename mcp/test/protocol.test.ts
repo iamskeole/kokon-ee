@@ -8,7 +8,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const root = path.resolve(__dirname, "..", "..");
-// The app version (kept equal in package.json, Cargo.toml and tauri.conf.json at every release).
+// The service version (kept equal in package.json and Cargo.toml).
 const appVersion: string = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
 const serviceExe = process.platform === "win32" ? "kokon-service.exe" : "kokon-service";
 // The most recently built service (debug or release), so a stale build is not tested.

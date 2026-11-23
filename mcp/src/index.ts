@@ -1,5 +1,5 @@
 // kokon-ee-mcp — MCP server (stdio) for Kokon EE. Uses the same local service and
-// generation engine as the desktop app. Works when the app is closed: the service and
+// generation engine as the box's service. Works when the browser UI is closed: the service and
 // the inference server are started on demand. Everything stays on 127.0.0.1.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
