@@ -1,11 +1,10 @@
-# Kokon for NVIDIA GPUs (CUDA): kokon-service without a window, used from a browser.
-# The same Linux build as the .deb/.rpm (Ubuntu 22.04, glibc 2.35). The engine (stable-diffusion.cpp)
-# and the model are downloaded by Kokon's setup into /data, like in the desktop app, so the image
-# stays small; the NVIDIA Container Toolkit provides the driver. Guide: docs/docker.md.
-# Each release publishes it as ghcr.io/gabrielelozupone/kokon (.github/workflows/docker.yml).
+# Kokon service image (Ubuntu 22.04, glibc 2.35): the box's own layer, without a window, used
+# from a browser. All inference lives on stock engines behind the box's gateway, never in this
+# image, so it stays small; libvulkan1 lets the in-process lab models (MobileSAM, BiRefNet) run
+# when the box has a GPU. Docs: docs/fresh-box.md.
 # To build it yourself, from the repository root:
 #
-#   docker build -f docker/Dockerfile -t ghcr.io/gabrielelozupone/kokon:latest .
+#   docker build -f docker/Dockerfile -t kokon-service .
 
 FROM ubuntu:22.04 AS build
 ARG DEBIAN_FRONTEND=noninteractive
