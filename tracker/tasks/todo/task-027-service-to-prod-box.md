@@ -130,7 +130,103 @@ box, one person). A split service/engines deployment is fork territory
 by nature (the external-engine mode *is* the fork) — nothing to
 contribute, all additive on top of stock's own reverse-proxy support.
 
+## Status (2026-11-23, night — the trigger fires; the prod box is atlas)
+
+The owner named the prod box and the door: **atlas** (the stable box),
+served at **`https://imagine.unveilx.com`** behind atlas's nginx, "per
+the openwebui model at chat.unveilx.com". The 11-11 blocker (no ssh
+path to the stable box) is gone — apollo's key auth works
+(`p@atlas.local`). The task is back in `todo/` and is the current one.
+
+**Superseded by what we now know** (from the 11-11/12 record above):
+the **data migration is void** — the dev box's contents are fungible
+(the owner's 11-23 ruling; it was wiped to a pristine install the same
+evening), so atlas starts from zero and nothing ships. The **nvidia
+reservation** item is already handled (the repo's compose has none —
+the service needs no GPU). The image is the **CI-published**
+`ghcr.io/iamskeole/kokon-ee` (task-033, closed the same night — the box
+just pulls, no ghcr credentials anywhere). The image's default command
+is still `kokon-service --persistent --remote`, and `remote.rs` is
+still reverse-proxy-aware (private peer ⇒ XFF believed for the limiter,
+`X-Forwarded-Proto: https` ⇒ `Secure` cookie) — both premises of the
+11-12 record hold in the current tree. There is no origin check on the
+remote door (a route allowlist only), so the `https://imagine.unveilx.com`
+origin is fine, and the UI is same-origin through the proxy (CORS
+irrelevant).
+
+**Recon (read-only, from apollo, 11-23 night):**
+
+- atlas = Ubuntu 24.04.5, 8 cores, 7.7 GB RAM, **no GPU**, 31 GB free on
+  `/`, `~/` ≈ 3 GB. Docker 29.9.2 + Compose 5.6.1, systemd.
+- Conventions: every compose project lives in `~/infra/<name>/` with its
+  compose beside it (`nginx`, `openwebui`, `privacy-stack`, `searxng`,
+  `registry`); `~/infra` is **not** a git repo (deployment = plain files;
+  secrets sit mode-600 beside them, as the dev box's gateway key does).
+- The nginx container (`~/infra/nginx`): conf.d bind-mounted with a
+  **6-hour auto-reload loop** (new blocks land without a manual reload),
+  `letsencrypt/` holds a **wildcard cert for `unveilx.com`** (renewed by
+  the `certbot/dns-cloudflare` sidecar every 12 h) — so
+  `imagine.unveilx.com` is already covered for TLS. The catch-all
+  returns 444 for unknown hosts.
+- `chat.unveilx.com.conf` is the template: 80→443 redirect, the wildcard
+  cert, `client_max_body_size`, `proxy_pass` to the backend, `Host` /
+  `X-Real-IP` / `X-Forwarded-For` / `X-Forwarded-Proto https`, 600 s
+  read/send, `proxy_buffering off` (SSE). OWUI's container is reached
+  by name over a shared docker network; the kokon service is
+  **host-network**, so the proxy target is `127.0.0.1:39152`
+  (loopback ⇒ the service's private-peer trust applies). Ports 39151/
+  39152 are free on atlas (in use: 22, 53, 80, 443, 8080, 9090, 6767,
+  loopback 3000/631/37945).
+- **`imagine.unveilx.com` has no DNS record yet.** apex and chat are
+  orange-cloud (CF-proxied: 104.21.11.11 / 172.67.147.130); atlas's
+  public egress is 84.232.239.80 (the router forwards 80/443). The CF
+  token on the box is zone-scoped and cannot even list zones, so the
+  record (A/AAAA → the router, **proxied**) is a dashboard action, or
+  the owner hands over the zone id / a broader token.
+- **The one-door path is proven from atlas**: apollo's gateway is bound
+  `*:8081`; from atlas, no key → 401, the shared 48-char key (the one
+  OWUI already carries) → clean `model not found` for a bogus id
+  (nothing booted). `apollo.local` mDNS resolves on atlas.
+
+**Execution plan (discussed with the owner, then run):**
+
+1. `~/infra/kokon/` on atlas: the repo's `docker/compose.yaml` (pull the
+   published image), `data/ config/ gallery/` (uid 1000), `.ui-password`
+   mode 600.
+2. `config/config.json` seeded from the dev box's (the 11-23 clean-slate
+   shape): `externalEngine` + `visionEngine` doors → **apollo's gateway**
+   (decision: `apollo.local` vs the IP `192.168.0.202` — the 11-11
+   footgun note says the IP survives reinstalls; `.local` survives IP
+   moves), the same 48-char key. `docker compose pull && up -d`, then
+   `--set-password` once.
+3. Verify on atlas: ping/UI, the engine adopted **across the LAN**, both
+   lab models report `doorConfigured/door` true (100% apollo-side),
+   vllm on apollo untouched.
+4. nginx: `conf.d/imagine.unveilx.com.conf` — the chat block adapted
+   (`proxy_pass http://127.0.0.1:39152`, `client_max_body_size` 64 m
+   per the handover doc, timeouts ≥ 660 s, buffering off, XFF/XFP;
+   no WebSockets — SSE + fetch only).
+5. DNS: `imagine.unveilx.com` A/AAAA → atlas's router, **proxied**
+   (owner's dashboard, or via API if given the zone id).
+6. **The final test, from the outside world**: `https://imagine.unveilx.com`
+   from apollo (i.e. out over the internet and back through CF): UI 200,
+   login, and a full t2i job through the whole chain (CF → atlas nginx
+   → service → apollo gateway → engine), vllm verified resident after.
+7. Records: `docs/service-on-prod-box.md` (the handover becomes the
+   executed reality — fresh start, CI image, wildcard cert, the 127.0.0.1
+   proxy target), the ml repo (the atlas deployment), this file → done.
+
+**Open owner decisions:** (a) gateway address in the config —
+`apollo.local` (proposed; mDNS, self-healing) vs `192.168.0.202` (the
+11-11 note's IP-survives argument); (b) `client_max_body_size` 64 m
+(handover doc) vs 200 m (the box's OWUI habit); (c) who adds the CF DNS
+record (dashboard, or zone id/token for the API); (d) the LAN door
+(39152, password) stays directly reachable on the family LAN alongside
+the https door — assumed yes, that is the remote door's design; (e) MCP
+on atlas (a clone + node, speaking the token port over loopback) —
+optional, later.
+
 ## blockers
 
-None. Parked on the owner's trigger (needs: prod box identity, nginx
-layout, TLS or not).
+None technical. The DNS record needs the owner's CF dashboard (or the
+zone id); everything else is executable from apollo via ssh.

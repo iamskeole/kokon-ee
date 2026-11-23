@@ -44,3 +44,38 @@ needs the one-command path (pull instead of build).
   ghcr is the intended distribution mechanism after that ("the intended
   distribution workflow works for now"; the owner wants the moving parts
   understood before adopting them). This file is the follow-through.
+- **D-033-2 (2026-11-23):** the publisher is the repository's CI (its
+  per-run GITHUB_TOKEN, `permissions: packages: write`), **not** a PAT on
+  any box — no ghcr credential exists on any machine, so a recipient box
+  just `docker pull`s (the package is public, as is the repo). Supersedes
+  the plan's item 1 (a box-held token).
+
+## Done (2026-11-23, night — owner: "can we flag 33 as done?")
+
+The trigger (030/031/032 done) had fired with 032's close; the owner gave
+the word tonight. The resolution deviated from the plan in one way, for
+the better: **no token lives on any machine at all** (D-033-2). The box's
+gh CLI token never carried `packages:write` (verified: its ghcr token
+request gets 403 for push, 200 for pull) — which is why every local push
+failed; the Actions workflow's own token can, and run `45222545666` is
+the proof (green, and it pushed the image).
+
+- **Item 1 (a token):** retired by the design — the publisher is CI.
+- **Item 2 (tag convention):** `multiuser-<short sha>` + `latest` on every
+  push to `main`; `workflow_dispatch` takes any `ref`.
+- **Item 3 (the push):** proven; from then on the boxes pull.
+- **Item 4 (visibility):** public package — the repo is public, the same
+  exposure class this file anticipated ("compiled source"). Verified on
+  the wire: an anonymous token + manifest fetch returns 200, and the dev
+  box pulls with zero docker credentials configured.
+- **Item 5 (docs):** `docs/fresh-box.md` §4 (pull is the primary path;
+  build-from-source stays the verifiable route; the compose example
+  corrected to the live shape — bind mounts, host network, no GPU
+  reservation, the token in `service.json`), the README quickstart, and
+  `docker/compose.yaml` + `docs/docker.md` (both still described the
+  *upstream bundled product* — the chaff cut's last remnants; they now
+  describe the service box).
+
+**First real consumer:** the stable box (atlas) — task-027's prod-box
+half, whose trigger fired the same night (`https://imagine.unveilx.com`
+behind atlas's nginx, the `chat.unveilx.com` model).
