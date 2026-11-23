@@ -283,7 +283,7 @@ export interface StatusResponse {
   gpu: { name: string; vendor: string; unified: boolean; memory_total_mib: number; memory_used_mib: number; memory_free_mib: number; driver_version: string } | null;
   active_job: JobView | null;
   queue: { queued: number; jobs: JobView[] };
-  upscaler?: { model: string; available: boolean };
+  upscaler?: { model: string; available: boolean | null };
   /** The installed engine predates `release` (needed for the upscaler): Setup updates it. */
   engine?: { release: string; update_needed: boolean };
   setup_complete: boolean;
@@ -438,8 +438,9 @@ export interface InstallItem {
   path: string;
 }
 
-/** An upscaler offered in Settings (`GET /upscalers`). */
-export interface UpscalerItem { name: string; label: string; installed: boolean; size: number | null; page: string | null }
+/** An upscaler offered in Settings (`GET /upscalers`). In external mode `installed` is
+ * the engine box's own report: `null` = the engine has not been queried yet. */
+export interface UpscalerItem { name: string; label: string; installed: boolean | null; size: number | null; page: string | null }
 
 export interface InstallStatus {
   running: boolean;

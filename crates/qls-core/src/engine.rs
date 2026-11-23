@@ -248,12 +248,15 @@ struct EnlargeOptions {
 
 /// Planner inputs from the configuration and measured facts.
 pub fn plan_inputs(cfg: &AppConfig, image_sizes: Vec<Size>, mask: Option<(Size, Option<crate::geometry::Rect>, f64)>, vram_total_mib: Option<u64>) -> PlanInputs {
+    // task-038: with an external engine the name stands for the engine box's file (its
+    // capabilities list is the arbiter at run time); otherwise it is this box's file.
+    let upscaler = cfg.upscaler_name();
     PlanInputs {
         image_sizes,
         mask,
         vram_total_mib,
-        upscale_tile: crate::planner::upscale_tile(cfg.upscale_tile_size, vram_total_mib, &cfg.upscaler().map(|u| u.0).unwrap_or_default()),
-        upscaler: cfg.upscaler().map(|u| u.0),
+        upscale_tile: crate::planner::upscale_tile(cfg.upscale_tile_size, vram_total_mib, &upscaler.clone().unwrap_or_default()),
+        upscaler,
         metal: cfg.gpu_backend == crate::config::GpuBackend::Metal,
         vulkan: cfg.gpu_backend == crate::config::GpuBackend::Vulkan,
         server_vae_tiling: cfg.server_vae_tile_size() > 0,
@@ -262,6 +265,27 @@ pub fn plan_inputs(cfg: &AppConfig, image_sizes: Vec<Size>, mask: Option<(Size, 
         hide_uncalibrated: !crate::speed::trust_uncalibrated(cfg),
         unified_memory: false,
     }
+}
+
+/// The note (if any) when an enlargement falls back to Lanczos instead of the ESRGAN model:
+/// the engine's own capabilities are the arbiter (fresh in the job path; for an external
+/// engine they are the engine box's file list), and the wording names the box that must
+/// change (task-038).
+fn enlargement_note(planned: Option<&str>, engine_has_planned: bool, needs_esrgan: bool, wants_esrgan: bool, external: bool) -> Option<&'static str> {
+    if !needs_esrgan {
+        return None;
+    }
+    if planned.is_some() && !engine_has_planned {
+        return Some(if external {
+            "The engine box doesn't have that upscaler (pin it there, see the fresh-box doc); enlarged with Lanczos."
+        } else {
+            "The inference engine cannot run the upscaler (update it in Setup); enlarged with Lanczos."
+        });
+    }
+    if planned.is_none() && wants_esrgan {
+        return Some("The upscaler model is missing (install it in Setup); enlarged with Lanczos.");
+    }
+    None
 }
 
 impl Engine {
@@ -560,6 +584,12 @@ impl Engine {
     /// an external server) only needs it when it cannot run the upscaler.
     pub fn engine_update_needed(&self) -> bool {
         let cfg = self.config();
+        // A split box cannot update its engine box: the accelerator's engine is a pinned
+        // upstream build, and whether it has the upscaler is what the Settings' engine-sourced
+        // list (and the job's notes) say — not a bundled-engine update (task-038).
+        if cfg.external_engine().is_some() {
+            return false;
+        }
         let engines = crate::catalog::engine_downloads(cfg.gpu_backend);
         if engines.iter().all(|d| d.is_present(&cfg.sdcpp_dir)) {
             return false;
@@ -1626,10 +1656,8 @@ impl Engine {
             .unwrap_or_default();
         let esrgan = plan.upscaler.clone().filter(|n| caps.has_upscaler(n, true));
         let needs_esrgan = plan.upscale.is_some() || plan.output.area() as f64 > plan.content.area() as f64 * 1.21;
-        if needs_esrgan && plan.upscaler.is_some() && esrgan.is_none() {
-            self.update(id, |j| j.view.notes.push("The inference engine cannot run the upscaler (update it in Setup); enlarged with Lanczos.".into()));
-        } else if plan.upscaler.is_none() && needs_esrgan && cfg.upscaler_model.trim() != crate::config::LANCZOS {
-            self.update(id, |j| j.view.notes.push("The upscaler model is missing (install it in Setup); enlarged with Lanczos.".into()));
+        if let Some(note) = enlargement_note(plan.upscaler.as_deref(), esrgan.is_some(), needs_esrgan, cfg.upscaler_model.trim() != crate::config::LANCZOS, cfg.external_engine().is_some()) {
+            self.update(id, |j| j.view.notes.push(note.into()));
         }
         let quick_upscale = plan.upscale.is_some();
         let icc = images.first().and_then(|i| i.icc_profile.clone());
@@ -3488,6 +3516,57 @@ mod tests {
         assert_eq!(i.upscaler.as_deref(), Some("4xNomos2_hq_mosr"));
         assert_eq!(i.upscale_tile, 256, "smaller tiles under 14 GB");
         assert!(!i.server_vae_tiling && i.metal);
+    }
+
+    #[test]
+    fn plan_inputs_external_engine_plans_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = AppConfig::default();
+        cfg.sdcpp_dir = dir.path().to_path_buf();
+        cfg.upscaler_model = "4x_NMKD-Superscale-SP_178000_G".into();
+        cfg.external_engine = Some(crate::config::ExternalEngine {
+            gateway: "http://127.0.0.1:8081/upstream".into(),
+            api_key: String::new(),
+            model: "m".into(),
+            model_name: "model.gguf".into(),
+            sample: serde_json::json!({}),
+            vlm: None,
+            vlm_vision: None,
+            prompt_bundle: "pup".into(),
+        });
+        // No local file anywhere: on the split box the name still plans (the engine box
+        // holds the file), and the job's fresh capabilities fetch is the arbiter.
+        let i = plan_inputs(&cfg, vec![], None, Some(16303));
+        assert_eq!(i.upscaler.as_deref(), Some("4x_NMKD-Superscale-SP_178000_G"), "planned by name, no local file");
+        assert_eq!(i.upscale_tile, 128, "the ESRGAN default's tile");
+        cfg.upscaler_model = crate::config::LANCZOS.into();
+        let i = plan_inputs(&cfg, vec![], None, Some(16303));
+        assert_eq!(i.upscaler, None, "a plain resize stays a plain resize");
+    }
+
+    #[test]
+    fn enlargement_notes_name_the_right_box() {
+        // The engine can run it: no note.
+        assert_eq!(enlargement_note(Some("4x_NMKD-Superscale-SP_178000_G"), true, true, true, false), None);
+        // Bundled box, engine too old for the model: an update note.
+        assert_eq!(
+            enlargement_note(Some("4xNomos2_hq_mosr"), false, true, true, false),
+            Some("The inference engine cannot run the upscaler (update it in Setup); enlarged with Lanczos.")
+        );
+        // Split box, the engine box lacks the model: a pin-it-there note (task-038, the
+        // 2026-11-23 job that fell back to Lanczos on this very box).
+        assert_eq!(
+            enlargement_note(Some("4x-UltraSharp"), false, true, true, true),
+            Some("The engine box doesn't have that upscaler (pin it there, see the fresh-box doc); enlarged with Lanczos.")
+        );
+        // Bundled box, file not installed: an install note.
+        assert_eq!(
+            enlargement_note(None, false, true, true, false),
+            Some("The upscaler model is missing (install it in Setup); enlarged with Lanczos.")
+        );
+        // The user chose a plain resize: no note, and no enlargement at all.
+        assert_eq!(enlargement_note(None, false, true, false, false), None);
+        assert_eq!(enlargement_note(Some("x"), false, false, true, false), None);
     }
 
     fn test_record(id: &str, seed: i64, file_path: &str) -> GenerationRecord {

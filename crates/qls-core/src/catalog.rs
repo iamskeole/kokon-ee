@@ -653,6 +653,14 @@ pub fn upscaler_download(name: &str) -> Option<Download> {
     UPSCALER_DOWNLOADS.iter().copied().find(|d| d.dest.rsplit('/').next().and_then(|f| f.rsplit_once('.')).is_some_and(|(stem, _)| stem == name))
 }
 
+/// Whether the engine box reports `name` among its upscaler models (its
+/// `--hires-upscalers-dir`, as its capabilities list it); `None` = the engine has not
+/// been queried yet. The engine box is where the file must live; this box's own copy is
+/// irrelevant to it (task-038).
+pub fn upscaler_on_engine(caps: Option<&crate::sdcpp::Capabilities>, name: &str) -> Option<bool> {
+    caps.map(|c| c.upscalers.iter().any(|u| u.model && u.name == name))
+}
+
 /// Upscaler files Settings offers to delete when they are not the selected model (in the
 /// app's own folder only).
 pub const LEGACY_UPSCALERS: &[&str] = &["models/upscalers/4x-UltraSharp.pth", "models/upscalers/4x_NMKD-Superscale-SP_178000_G.pth"];
@@ -1176,5 +1184,19 @@ mod tests {
             assert_eq!(cfg.server_exe(), join_rel(dir.path(), ENGINE_METAL.provides[0]));
         }
         assert!(manual_download_hint(&ENGINE_VULKAN, dir.path()).contains("engine-vulkan"));
+    }
+
+    #[test]
+    fn upscaler_on_engine_reads_the_engine_caps() {
+        use crate::sdcpp::{CapUpscaler, Capabilities};
+        let mut caps = Capabilities::default();
+        caps.upscalers = vec![
+            CapUpscaler { name: "Lanczos".into(), model: false, image_upscale: false },
+            CapUpscaler { name: "4xNomos2_hq_mosr".into(), model: true, image_upscale: true },
+        ];
+        assert_eq!(upscaler_on_engine(None, "4xNomos2_hq_mosr"), None, "the engine has not been queried");
+        assert_eq!(upscaler_on_engine(Some(&caps), "4xNomos2_hq_mosr"), Some(true), "the engine box has it");
+        assert_eq!(upscaler_on_engine(Some(&caps), "4x-UltraSharp"), Some(false), "the engine box lacks it");
+        assert_eq!(upscaler_on_engine(Some(&caps), "Lanczos"), Some(false), "a built-in filter is not an engine-box model");
     }
 }

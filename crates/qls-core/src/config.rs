@@ -1396,6 +1396,19 @@ impl AppConfig {
     pub fn upscaler_file(&self) -> Option<PathBuf> {
         self.upscaler().map(|(_, p)| p)
     }
+    /// The upscaler name planning assumes. With an external engine the engine box holds the
+    /// file and reports its own list (the job's fresh capabilities fetch is the arbiter), so
+    /// the configured name stands as-is; otherwise it is the name of the local file the
+    /// bundled engine loads (task-038: a split box fell back to Lanczos although the engine
+    /// had the model, because this box's copy was absent, 2026-11-23).
+    pub fn upscaler_name(&self) -> Option<String> {
+        if self.external_engine().is_some() {
+            let n = self.upscaler_model.trim();
+            (!n.is_empty() && n != LANCZOS).then(|| n.to_string())
+        } else {
+            self.upscaler().map(|u| u.0)
+        }
+    }
 
     /// A save from a browser (another device) changes the app's settings, not the computer's:
     /// folders, model files, ports, engine arguments and network access keep their values in
@@ -2609,6 +2622,51 @@ mod tests {
         let old: AppConfig =
             serde_json::from_str(r#"{"serverPort": 41000, "vaeTileSize": 512}"#).unwrap();
         assert_eq!(old.profile().recommended_settings.area_quality, 2048 * 2048);
+    }
+
+    #[test]
+    fn upscaler_name_depends_on_the_engine_box() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = AppConfig::default();
+        c.sdcpp_dir = dir.path().to_path_buf();
+        c.upscaler_model = "4x_NMKD-Superscale-SP_178000_G".into();
+        assert_eq!(
+            c.upscaler_name(),
+            None,
+            "bundled: no local file, nothing to plan with"
+        );
+        // The split box: the engine box holds the file, so the configured name stands
+        // without a local copy (task-038, the 2026-11-23 Lanczos fallback).
+        c.external_engine = Some(ExternalEngine {
+            gateway: "http://127.0.0.1:8081/upstream".into(),
+            api_key: String::new(),
+            model: "m".into(),
+            model_name: "model.gguf".into(),
+            sample: serde_json::json!({}),
+            vlm: None,
+            vlm_vision: None,
+            prompt_bundle: "pup".into(),
+        });
+        assert_eq!(
+            c.upscaler_name().as_deref(),
+            Some("4x_NMKD-Superscale-SP_178000_G"),
+            "external: the name, no local file required"
+        );
+        c.upscaler_model = LANCZOS.into();
+        assert_eq!(c.upscaler_name(), None, "a plain resize is a plain resize");
+        c.external_engine = None;
+        c.upscaler_model = "4x_NMKD-Superscale-SP_178000_G".into();
+        std::fs::create_dir_all(c.upscalers_dir()).unwrap();
+        let ss = c.upscalers_dir().join("4x_NMKD-Superscale-SP_178000_G.pth");
+        std::fs::File::create(&ss)
+            .unwrap()
+            .set_len(crate::catalog::UPSCALER.size)
+            .unwrap();
+        assert_eq!(
+            c.upscaler_name().as_deref(),
+            Some("4x_NMKD-Superscale-SP_178000_G"),
+            "bundled with the file: unchanged"
+        );
     }
 
     #[test]

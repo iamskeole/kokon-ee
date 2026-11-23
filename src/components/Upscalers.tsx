@@ -99,8 +99,9 @@ export function UpscalerCompare() {
  * draft, the Advanced menu to the saved settings. */
 export function UpscalerControls(props: { model: string; blend: number; onModel: (m: string) => void; onBlend: (b: number) => void; onBlendDone?: () => void }) {
   const [items, setItems] = useState<UpscalerItem[] | null>(null);
+  const [ext, setExt] = useState(false);
   const [inst, setInst] = useState<InstallStatus | null>(null);
-  const load = () => api.upscalers().then((r) => setItems(r.items), () => {});
+  const load = () => api.upscalers().then((r) => { setItems(r.items); setExt(r.external === true); }, () => {});
   useEffect(() => {
     load();
     api.installStatus().then((i) => i.running && i.preset?.startsWith("upscaler:") && setInst(i), () => {});
@@ -142,19 +143,31 @@ export function UpscalerControls(props: { model: string; blend: number; onModel:
           {(items ?? []).map((i) => (
             <option key={i.name} value={i.name}>
               {i.label}
-              {i.installed ? "" : ` (download ${formatBytes(i.size ?? 0)})`}
+              {i.installed ? "" : ext ? (i.installed === null ? " (engine state pending)" : " (not on the engine box)") : ` (download ${formatBytes(i.size ?? 0)})`}
             </option>
           ))}
           {items && !items.some((i) => i.name === props.model) && <option value={props.model}>{props.model}</option>}
         </select>
       </label>
       {note && <span className="muted" style={{ marginTop: -8 }}>{note.text}</span>}
-      {sel && !sel.installed && (
+      {sel && !ext && sel.installed === false && (
         <div className="field-row">
           <span className="muted">{downloading ? `Downloading… ${Math.floor(installProgress(inst!.items).frac * 100)}%` : "Not installed yet: until then MoSR is used."}</span>
           <button className="btn" disabled={running} onClick={download}>
             {downloading ? <Loader2 className="spin" size={14} /> : <Download size={14} />} {formatBytes(sel.size ?? 0)}
           </button>
+        </div>
+      )}
+      {/* External mode: the models live on the engine box (task-038); there is nothing to
+          download here, and the list is the engine's own report. */}
+      {sel && ext && sel.installed === false && (
+        <div className="field-row">
+          <span className="muted">Not on the engine box: until it is pinned there (the fresh-box doc names the folder), enlargements fall back to Lanczos.</span>
+        </div>
+      )}
+      {sel && ext && sel.installed === null && (
+        <div className="field-row">
+          <span className="muted">The engine's upscaler list is pending: it will report with the first job.</span>
         </div>
       )}
       {props.model !== "lanczos" && (

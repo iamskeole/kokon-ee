@@ -361,7 +361,14 @@ function UpscaleMenu(props: { source: string; size: Size; original?: Size | null
   const up = useStore((s) => s.status?.upscaler);
   // The engine running now can't upscale (an old one, before the update): Lanczos.
   const noEsrgan = useStore((s) => s.status?.server?.upscale === false);
-  const via = up?.available && !noEsrgan ? upscalerLabel(up.model) : "Lanczos";
+  // External mode: `available` is the engine box's report (null = not queried yet).
+  const via = noEsrgan
+    ? "Lanczos"
+    : up?.available === true
+      ? upscalerLabel(up.model)
+      : up?.available === null
+        ? "the engine's upscaler (Lanczos until it answers)"
+        : "Lanczos";
   const [customW, setCustomW] = useState(Math.min(MAX_UPSCALE_SIDE, w * 2));
   const targets = upscaleTargets(w, h, props.original);
   const custom = sizeForWidth(w, h, customW);

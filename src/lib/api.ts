@@ -135,7 +135,7 @@ export const api = {
   newImageModel: () => call<InstallStatus>("/models/dit", { method: "POST" }),
   /** Runs the engine on another card (index in `hardware().gpus`); needs the engine installed. */
   setGpu: (gpu: number) => call<{ saved: boolean }>("/setup/gpu", { method: "POST", body: json({ gpu }) }),
-  upscalers: () => call<{ selected: string; active: string | null; items: UpscalerItem[] }>("/upscalers"),
+  upscalers: () => call<{ selected: string; active: string | null; external?: boolean; items: UpscalerItem[] }>("/upscalers"),
   /** Progress in `installStatus` (preset "upscaler:<name>"). */
   downloadUpscaler: (name: string) => call<InstallStatus>(`/upscalers/${encodeURIComponent(name)}/download`, { method: "POST" }),
   /** The click-to-select model (MobileSAM): where the box runs it — its own files

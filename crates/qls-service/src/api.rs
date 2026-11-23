@@ -270,6 +270,14 @@ async fn status(State(s): St) -> Json<Value> {
     let cfg = s.engine.config();
     let e = s.engine.clone();
     let engine_update = tokio::task::spawn_blocking(move || e.engine_update_needed()).await.unwrap_or(false);
+    // task-038: with an external engine the upscaler lives on the engine box; `available`
+    // is its last reported list (null = the engine has not been queried yet), never this
+    // box's copies.
+    let upscaler_available = match cfg.upscaler_name() {
+        None => Some(false), // a plain resize needs no model
+        Some(name) if cfg.external_engine().is_some() => catalog::upscaler_on_engine(srv.capabilities.as_ref(), &name),
+        Some(_) => Some(cfg.upscaler_file().is_some()),
+    };
     Json(json!({
         "service": { "version": APP_VERSION, "pid": std::process::id(), "uptime_s": s.started.elapsed().as_secs() },
         "server": {
@@ -289,7 +297,7 @@ async fn status(State(s): St) -> Json<Value> {
                 srv.capabilities.as_ref().map(|c| c.text_generation)
             },
         },
-        "upscaler": { "model": cfg.upscaler().map(|u| u.0).unwrap_or_else(|| cfg.upscaler_model.clone()), "available": cfg.upscaler_file().is_some() },
+        "upscaler": { "model": cfg.upscaler_name().unwrap_or_else(|| cfg.upscaler_model.clone()), "available": upscaler_available },
         "engine": { "release": catalog::engine_tag(), "update_needed": engine_update },
         "profile": { "id": cfg.profile().id, "display_name": cfg.profile().display_name, "source": cfg.profile().source },
         "gpu": gpu,
@@ -480,22 +488,39 @@ async fn install_start(State(s): St, Json(b): Json<InstallBody>) -> ApiResult<Js
 }
 
 /// The upscalers Settings offers, with whether each is installed and what it takes to get it.
+/// `installed` is `null` in external mode when the engine has not been queried yet; its
+/// list (not this box's files) is the source of truth (task-038).
 async fn list_upscalers(State(s): St) -> Json<Value> {
     let cfg = s.engine.config();
     let active = cfg.upscaler().map(|u| u.0);
+    let external = cfg.external_engine().is_some();
+    let caps = s.engine.server.status().capabilities;
     let items: Vec<Value> = qls_core::config::UPSCALER_CHOICES
         .iter()
         .map(|(name, label)| {
             let d = catalog::upscaler_download(name);
-            let installed = d.is_none_or(|d| d.is_present(&cfg.sdcpp_dir));
+            let installed = if d.is_none() {
+                Some(true) // the built-in filters: nothing to install
+            } else if external {
+                catalog::upscaler_on_engine(caps.as_ref(), name)
+            } else {
+                Some(d.is_some_and(|d| d.is_present(&cfg.sdcpp_dir)))
+            };
             json!({ "name": name, "label": label, "installed": installed, "size": d.map(|d| d.size), "page": d.map(|d| d.page) })
         })
         .collect();
-    Json(json!({ "selected": cfg.upscaler_model, "active": active, "items": items }))
+    Json(json!({ "selected": cfg.upscaler_model, "active": active, "external": external, "items": items }))
 }
 
-/// Downloads one upscaler model (progress in `/setup/install`).
+/// Downloads one upscaler model (progress in `/setup/install`). External mode has no
+/// write path to the engine box: the models are pinned there (fresh-box doc).
 async fn download_upscaler(State(s): St, AxPath(name): AxPath<String>) -> ApiResult<Json<Value>> {
+    if s.engine.config().external_engine().is_some() {
+        return Err(ApiError(AppError::new(
+            ErrorCode::Unsupported,
+            "This box runs its engine elsewhere: upscaler models are pinned on the engine box (see the fresh-box doc), so there is nothing to download here.",
+        )));
+    }
     let d = catalog::upscaler_download(&name).ok_or_else(|| AppError::invalid(format!("Unknown upscaler {name}.")))?;
     let dir = s.engine.config().sdcpp_dir;
     s.engine.installer.start(dir, &format!("upscaler:{name}"), vec![d], Box::new(|_| {}))?;
@@ -879,7 +904,7 @@ async fn diagnostics_json(State(s): St) -> ApiResult<Json<Value>> {
         let _ = writeln!(text, "Device: {}, text encoder: {:?}, VRAM reserve: {} GiB, flash attention: {}, sage attention: {} (in use: {})", cfg.effective_device(), cfg.text_encoder_placement, cfg.vram_reserve_gib, cfg.flash_attention, cfg.sage_attention, cfg.uses_sage_attention());
         let _ = writeln!(text, "VAE tile size: {} (engine: {}), upscale tile size: {}", cfg.vae_tile_size, cfg.server_vae_tile_size(), cfg.upscale_tile_size);
         let up = diagnostics::upscaler_check(&cfg);
-        let model = cfg.upscaler().map(|u| u.0).unwrap_or_default();
+        let model = cfg.upscaler_name().unwrap_or_default();
         let tile = qls_core::planner::upscale_tile(cfg.upscale_tile_size, cfg.planning_vram_mib(gpus.as_ref().and_then(|g| g.first()).map(|g| g.planning_mib())), &model);
         let _ = writeln!(text, "Upscaler: {} (tile {tile} px, blend {:.0} %, pre-shrink {})", up.detail, cfg.upscale_blend * 100.0, cfg.upscale_prescale);
         let _ = writeln!(text, "Ports: server {}, service {}", cfg.server_port, cfg.service_port);

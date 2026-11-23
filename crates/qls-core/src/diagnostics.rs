@@ -523,6 +523,16 @@ pub fn upscaler_check(cfg: &AppConfig) -> Check {
             detail: "Lanczos (plain resize, no model)".into(),
         };
     }
+    // Split box: the model lives on the engine box (its pinned upscalers folder); this
+    // box keeps no copy and has nothing to install (task-038).
+    if cfg.external_engine().is_some() {
+        return Check {
+            id: "upscaler",
+            label,
+            ok: true,
+            detail: format!("{chosen} — on the engine box (Settings lists the engine's own report; this box keeps no copy)."),
+        };
+    }
     match cfg.upscaler() {
         Some((name, p)) => {
             let size = std::fs::metadata(&p)
@@ -557,6 +567,16 @@ pub fn upscaler_check(cfg: &AppConfig) -> Check {
 
 /// Whether the installed engine is the catalog's release (needed for the upscaler).
 pub fn engine_release_check(cfg: &AppConfig) -> Check {
+    // A split box's engine is a pinned stock build on the accelerator (fresh-box doc):
+    // there is no bundled release to check on this box (task-031 removes this machinery).
+    if cfg.external_engine().is_some() {
+        return Check {
+            id: "engine_release",
+            label: "Engine release".into(),
+            ok: true,
+            detail: "stock build on the engine box (pinned; the fresh-box doc names it)".into(),
+        };
+    }
     let engines: Vec<_> = crate::catalog::engine_downloads(cfg.gpu_backend)
         .into_iter()
         .filter(|d| d.engine_tag.is_some())
