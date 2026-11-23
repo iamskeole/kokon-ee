@@ -36,8 +36,10 @@ Updated: 2026-11-23, night (**the dev box proven from a clean slate (owner's cal
   projects create-edit-tombstone / the one-version `projects.json` export tracking from
   empty / wrong password 401; vllm 200 and the `kokon-vision` door 200-with-key
   (401-without — the keyed door behaves) throughout. Named accounts had to be recreated
-  (they lived in the wiped auth store); the lab's in-process models lazy-download on
-  first use, the door being the standing path. Left running, pristine: image
+  (they lived in the wiped auth store); the lab runs 100% through the `kokon-vision`
+  door (both models report door-configured/door-up/*not-installed* — the box stores no
+  lab bytes, as settled); in-process is only the single-box product path (no door
+  configured) or a mixed box's escape when it holds the files too. Left running, pristine: image
   `multiuser-1b6d3ef`, recorded in the ml repo with the UI password beside the compose
   file like the gateway key.
 - **task-038 done (night of 11-23, from the owner's two-box questions) —
