@@ -1,6 +1,6 @@
 # task-037 — the lab's models as stock GGUF doors (vision.cpp)
 
-## status: **doing** — GO received 2026-11-22. **P1 complete 2026-11-22 (night):**
+## status: **DONE 2026-11-23 (late night)** — GO received 2026-11-22; P1 11-22 night, PR submitted 11-23, P2 door live 11-23, P3 + P4 11-23 night. **P1 complete 2026-11-22 (night):**
 fork at `backends/kokon-vision/` (**5 commits** on upstream `26a7529`,
 branch `vision-server` pushed to the fork) — `vision-server` (all five
 families, 4 SAM heads, embed cache, 100-continue) + `util/json.h` +
@@ -39,10 +39,13 @@ this window: functional router waits, rename restore, healthy-runtime
 no-op fail.) **P3 DONE 11-23 (night)** — the service's ladder (door →
 in-process → plain error) for both models, `visionEngine` in schema 16,
 the browser a thin client (onnxruntime-web gone from the app);
-deployed as `multiuser-51df995` and proven as the full 2×2 ladder
-matrix on the live box (split-box half included — the whole lab runs
-over the wire with zero local model bytes; details in the P3 item
-below), then **P4 (docs/handover) remains.**
+deployed (final image `multiuser-6e5a0cf`) and proven as the full
+2×2 ladder matrix on the live box (split-box half included — the
+whole lab runs over the wire with zero local model bytes; details in
+the P3 item below), **P4 (docs/handover) done the same night — the
+task's work is complete.** The only open thread is the PR's fate
+(D-037-5: pin upstream if it merges, else the fork stays pinned) —
+a watch item, not work.
 
 ## trigger (fired 2026-11-22): the owner's go/no-go on the plan below —
 raised 2026-11-22 when the owner, digging on their own, found that Acly
@@ -519,11 +522,15 @@ this box.
 
 ## acceptance criteria
 
-- [ ] P1: the door boots from a script on `${PORT}`, answers `/health`, and
+- [x] P1: the door boots from a script on `${PORT}`, answers `/health`, and
       runs both GGUFs (point, multi-point, box, matte) on apollo with vllm
-      resident and revived; nvidia-smi delta recorded.
-- [ ] P1: per-head parity vs the in-process reference within the D-037-4 bar
-      on the standing test set.
+      resident and revived; nvidia-smi delta recorded. **Done 11-22 night**
+      (boot 0.52 s; 0 MiB VRAM delta, vllm untouched; bench file has the
+      full matrix).
+- [x] P1: per-head parity vs the in-process reference within the D-037-4 bar
+      on the standing test set. **Done 11-22 night** (server's lantern IoUs
+      bit-identical to the stock CLI v0.3.0; ≤ 0.057 from the in-process
+      reference per head, same head picked — D-037-4).
 - [x] P2: `kokon-vision` in the live matrix (window protocol, vllm revived
       before the marker); the matrix's last-good re-seeded. **Done 11-23**
       (65 s window; ml `de12cff`).
@@ -561,7 +568,29 @@ this box.
       different edge threshold (60 KB vs 82 KB). The deployed 782 KB
       bundle has **zero** onnxruntime references; the LAN listener's
       allowlist still carries the lab routes.
-- [ ] P4: docs current; this file closed with the measured numbers.
+- [x] P4: docs current; this file closed with the measured numbers.
+      **Done 11-23 (late)**: `docs/fresh-box.md` (the `kokon-vision` fork
+      as the one non-pure checkout + the vision-server build/door section,
+      the two Acly GGUFs in the models table, the door row in the
+      port-allocation table with the vLLM pair's 9108/9109 → 9109/9110
+      shift, `kv` in the matrix block — member of every set, the sidekick
+      pattern —, `visionEngine` in the config section as schema 16, the
+      lab paragraph rewritten as the ladder with the in-browser rung
+      named as retired, and a lab item in the verification checklist);
+      `docs/service-on-prod-box.md` (the config seed carries `visionEngine`
+      and the migration copy list; checklist item 4 is the ladder with the
+      door as the standing path on the thin prod box). Two P3 omissions
+      found and fixed while closing (committed as addenda, the image
+      rebuilt as `multiuser-6e5a0cf` and redeployed): `51df995` removed
+      onnxruntime-web from `package.json` but not the lockfile (the image
+      still installed it — now gone, zero onnxruntime in the image's
+      node_modules), and `09989fe` called `matting::birefnet_installed`
+      without committing the function (the committed tree didn't compile;
+      the working tree — what all the proofs ran on — had it). Final state
+      on the dev box: image `multiuser-6e5a0cf`, both lab statuses
+      `{door:true, doorConfigured:true, installed:true}`, a click 0.26 s
+      (door) with bit-identical IoUs, vllm healthy, local files present as
+      the door-down escape.
 
 ## blockers
 
@@ -593,5 +622,9 @@ this box.
   cold); the `-b gpu` flip stays a documented one-word change in the
   boot script for a day vllm's KV is trimmed by a few hundred MiB (then
   a MobileSAM-only GPU door is viable, BiRefNet still CPU).
-- **Remaining (not blocking):** the deployed-box proofs (P3), P4, and the
-  PR's fate (D-037-5).
+- ~~**Remaining**~~ **the task is complete (P1–P4 all done, 11-23
+  late night).** The only open thread is the PR's fate (D-037-5): if
+  [Acly/vision.cpp#25](https://github.com/Acly/vision.cpp/pull/25)
+  merges, re-pin the boot script to upstream; if it doesn't, the fork
+  (`26a7529` + 5 commits) stays the pin. Either way nothing here
+  changes — the contract is identical.
