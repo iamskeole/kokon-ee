@@ -154,3 +154,46 @@ follow-through.
   owner's own question) names D-RB as the revisit condition. Queued
   last of the four: it needs both the independence (029) and the
   constraint's retirement (031).
+- 2026-11-23, night (**DONE** — all six ACs met; record below): the list
+  moves to `gallery.db` (user_version 2 → 3) as `projects` + `project_items`
+  (D-032-2). `projects.rs` keeps its home: the `Project`/`Meta`/`Item`/`Change`
+  types and the pure `merge()` are untouched (D-032-3); `ProjectStore` is now
+  the DB-backed store — one transaction per mutation: read the rows into
+  values, run the pure merge, write the rows back. All 15 tests of the old
+  file store move over and pass (the merge spec, tombstones, the named-title
+  rule, the per-user D-MU13 suite, the forward-compatible fields). Schema
+  17 → 18 (task-031 took 17): the migration marks the move, and the
+  one-version file export (D-032-1) is on exactly while the config's schema
+  is 18 — a rollback to the previous image reads `projects.json` as it
+  always has (exact old shape; the `owner` key stays out of single-user
+  files), the pre-import bytes are snapshotted to `projects.json.pre-db`.
+  The wire shape to clients is byte-identical (the `Project` type is
+  unchanged); the module comment records that the byte-identity constraint
+  — and with it the parallel `owner` side-map — is gone.
+  **The proofs:** (1) harness — `run_multiuser_test.sh` grew a 6.5 section
+  (79/79 now): a seeded file goes in before boot, the boot imports it, the
+  snapshot exists, an API edit lands in the database and the export follows
+  it, the single-user shape holds, the proof project tombstones itself.
+  (2) The live box (the AC's test fixture): the deploy to
+  `multiuser-797bb6a` imported the as-found file — 21 projects / 367 items /
+  10 owner entries / 1 tombstone — with an **identical before/after
+  fingerprint of every project's meta + item keys + owners** (sha256
+  `6fe12061ec2ee0bd`), the `imported 21 projects and 1 tombstones` line in
+  the service log, the `.pre-db` snapshot present, `gallery.db.post-032`
+  copied beside it, the engine re-adopted (`kokon-1013-1814814`, not
+  owned), both doors up, vllm probe 200. (3) One gap the suite run
+  surfaced and this task fixed along the way: the **MCP protocol test**
+  wrote a stock config, which the task-031 P10 boot guard refuses — the
+  test config now names an external engine (the gateway absent on purpose);
+  mcp back to 35+3sk. **Suites:** qls-core **385** (383 + the import-once
+  + the export-shape tests), service **20**, UI **242**, mcp **35+3sk**,
+  multi-user harness **79** (the 6.5 section: 8 new assertions). The
+  single-user harness's 4 failures (the mock-gateway load-timing, sections
+  2 and 6) were verified **identical on clean HEAD** — a pre-existing box
+  flake, not this change (its projects-adjacent assertions all pass).
+  **Commits:** `bbea473` (the store + schema + the decisions), `b7c863d`
+  (the harness), `797bb6a` (the docs), `ae430f1` (the MCP test). **Box
+  state:** the dev box runs `multiuser-797bb6a`; rollback staged per the
+  house convention — the previous image `multiuser-46df905` on the box +
+  `projects.json.pre-db` (the file as it was before the import) +
+  `gallery.db.post-032` (the verified post-import database).
