@@ -2,7 +2,6 @@
 // the first paint; this module stores the choice and keeps the native title bar in step.
 import { useEffect } from "react";
 import { native } from "./native";
-import { inBrowser } from "./platform";
 
 export type ThemeChoice = "system" | "light" | "dark";
 
@@ -50,7 +49,6 @@ const tintChanged = () => tintListeners.forEach((f) => f());
  * iOS before 26) and components/StatusTint (iOS 26+). */
 export function useBlackStatusBar() {
   useEffect(() => {
-    if (!inBrowser) return;
     setStatusBar("#000");
     blackScreens++;
     tintChanged();

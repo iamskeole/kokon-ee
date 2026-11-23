@@ -2,7 +2,7 @@ import { ArrowLeft, Check, FolderOpen, Heart, Loader2, Maximize2, Search, Trash2
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, urls } from "../lib/api";
 import { native } from "../lib/native";
-import { inBrowser, isNarrow } from "../lib/platform";
+import { isNarrow } from "../lib/platform";
 import { forgetGeneration, openGeneration, setState, toastError, useStore } from "../lib/store";
 import { MODE_LABEL, neighbourAfterRemoval, previewIndex } from "../lib/logic";
 import type { GenerationRecord } from "../lib/types";
@@ -226,11 +226,7 @@ export function Gallery() {
             ))}
           </select>
         )}
-        {!inBrowser && (
-          <IconButton title="Open the images folder" onClick={() => api.config().then((c) => native.openFolder(c.outputDir)).catch(toastError)}>
-            <FolderOpen size={17} />
-          </IconButton>
-        )}
+
         <span className="spacer" />
         {items.length > 0 && (
           <button className={`btn ${selecting ? "primary" : ""}`} onClick={() => setPicked(selecting ? null : new Set())} title={selecting ? "Stop selecting (Esc)" : "Select several images to delete them at once (or Ctrl/⌘-click)"}>
@@ -381,7 +377,7 @@ function Preview(props: {
         <SwipeNav nav={nav} pageKey={g.id}>
           <div className="preview-img" onDoubleClick={() => setFull(true)}>
             {/* A phone shows the screen-sized preview here (full screen loads more when zoomed). */}
-            <DevelopImg src={inBrowser && isNarrow() ? urls.genPreview(g.id) : urls.gen(g.id)} placeholder={urls.genThumb(g.id)} alt={g.prompt} />
+            <DevelopImg src={isNarrow() ? urls.genPreview(g.id) : urls.gen(g.id)} placeholder={urls.genThumb(g.id)} alt={g.prompt} />
           </div>
         </SwipeNav>
         <NavArrows nav={nav} visible={active} />

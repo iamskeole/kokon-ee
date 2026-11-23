@@ -3,11 +3,10 @@
 // buttons. Its own file so the launch video (marketing/video) shows the same bar.
 import { CircleHelp, CirclePlay, EyeOff, Keyboard, Lightbulb, PanelLeft, Redo2, Settings, SquarePen, Undo2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { api } from "../lib/api";
 import { native } from "../lib/native";
 import { haptic } from "../lib/haptics";
 import { isNarrow, shortcut } from "../lib/platform";
-import { getState, newProject, redoVersion, refreshStatus, setPrivateMode, setState, toastError, undoKey, undoVersion, useStore } from "../lib/store";
+import { getState, newProject, redoVersion, setPrivateMode, setState, toastError, undoKey, undoVersion, useStore } from "../lib/store";
 import { SilkSpin } from "./Cocoon";
 import { ProjectTitle, Wordmark } from "./Sidebar";
 import { VIDEOS } from "../lib/videos";
@@ -53,7 +52,6 @@ export function StatusIndicator({ quiet = false }: { quiet?: boolean }) {
       title={title}
       onClick={() => {
         if (server.state === "error") setState({ overlay: "settings" });
-        else if (server.state === "stopped" && connected && !external) api.startBackend().then(refreshStatus, toastError);
       }}
     >
       {cls === "dot busy" || (cls === "dot ready" && busy) ? <SilkSpin size={18} /> : <span className={cls} />}

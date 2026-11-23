@@ -2,7 +2,7 @@ import { Star, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, configure, setSignedOutHandler } from "./lib/api";
 import { native } from "./lib/native";
-import { inBrowser, isNarrow, useNarrow } from "./lib/platform";
+import { isNarrow, useNarrow } from "./lib/platform";
 import {
   addExampleProjects, closeStarPrompt, loadProjects, dismissToast, getState, initStarPrompt, redoVersion, refreshLoras, refreshStatus, selectItem, setState, startEvents, startTour, submitComposer, toastError, toastInfo, undoVersion, useStore,
 } from "./lib/store";
@@ -139,15 +139,13 @@ export default function App() {
         const conn = await native.connect();
         if (cancelled) return;
         configure(conn.baseUrl, conn.token);
-        if (inBrowser) {
-          // Another device: sign in first. A session that ends later (new password) reloads the page.
-          if (!(await api.session()).signed_in) {
-            if (!cancelled) setBoot("login");
-            return;
-          }
-          setSignedOutHandler(() => location.reload());
-          startBrowserHeartbeat();
+        // Sign in first (multi-user box). A session that ends later (new password) reloads the page.
+        if (!(await api.session()).signed_in) {
+          if (!cancelled) setBoot("login");
+          return;
         }
+        setSignedOutHandler(() => location.reload());
+        startBrowserHeartbeat();
         // The project list (shared by every device) before anything adds to it.
         await loadProjects().catch(() => {});
         startEvents();
@@ -180,7 +178,6 @@ export default function App() {
 
   // Browser: files dropped from this device are uploaded.
   useEffect(() => {
-    if (!inBrowser) return;
     const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
     const over = (e: DragEvent) => {
       if (!hasFiles(e)) return;
@@ -294,7 +291,7 @@ export default function App() {
           <BootSplash />
         ) : (
           <div className="failed">
-            <strong>{inBrowser ? "Could not reach Kokon" : "Could not start the local service"}</strong>
+            <strong>Could not reach Kokon</strong>
             <span style={{ whiteSpace: "pre-line" }}>{boot}</span>
             <button className="btn" onClick={() => location.reload()}>
               Try again

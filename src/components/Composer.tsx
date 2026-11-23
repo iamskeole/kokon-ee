@@ -4,7 +4,7 @@ import { api, urls } from "../lib/api";
 import { activeLoras, activeOverrides, aspectLabel, buildRequest, composing, editing, enhancerApplies, expansionPixels, formatDuration, hasOutpaint, imageName, MAX_LORAS, modelRequest, modelSupportsBoxes, moveRef, needsPrompt, parseRatio, toggleLora, type Ref, typedWords, wantsPromptReview, withActionVerb } from "../lib/logic";
 import { native } from "../lib/native";
 import { haptic } from "../lib/haptics";
-import { inBrowser, useNarrow } from "../lib/platform";
+import { useNarrow } from "../lib/platform";
 import {
   addAsReference, addInputs, openEditor, cancelPromptReview, editShownImage, enhancerAvailable, focusPrompt, getState, itemSource, openSettings, refreshStatus, selectedItem, sessionLabels, setProjectLoras, setState, startNewImage, submitComposer, toastError, undoEnhancedPrompt, updateComposer, useStore, type SessionItem,
 } from "../lib/store";
@@ -277,7 +277,7 @@ function AddImage() {
     const s = itemSource(i);
     return s && !used.has(s);
   });
-  const browse = async () => (inBrowser ? uploadFiles(await native.pickImageFiles()) : importPaths(await native.pickImages()));
+  const browse = async () => uploadFiles(await native.pickImageFiles());
   // In a project, images added while not editing are references for a new image.
   const asReference = refs.length > 0 || create || session.length > 0;
   const title = asReference ? "Add a reference image" : "Add an image to edit";

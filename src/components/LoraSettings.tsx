@@ -1,10 +1,9 @@
-import { CircleAlert, Plus, Trash2 } from "lucide-react";
+import { CircleAlert, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { formatBytes, MAX_LORAS } from "../lib/logic";
 import { native } from "../lib/native";
-import { inBrowser } from "../lib/platform";
-import { refreshLoras, toastError, toastInfo, useStore } from "../lib/store";
+import { refreshLoras, toastError, useStore } from "../lib/store";
 import type { LoraItem } from "../lib/types";
 import { Switch } from "./ui";
 
@@ -99,24 +98,9 @@ function LoraRow({ l }: { l: LoraItem }) {
 /** Settings → LoRA: the user's own LoRA files. */
 export function LoraSettings() {
   const loras = useStore((s) => s.loras);
-  const [busy, setBusy] = useState(false);
   useEffect(() => {
     refreshLoras();
   }, []);
-  const add = async () => {
-    const path = await native.pickFile(["safetensors"], undefined, "LoRA");
-    if (!path) return;
-    setBusy(true);
-    try {
-      const l = await api.addLora(path);
-      toastInfo(l.warning ? `Loaded "${l.name}", with a warning` : `Loaded "${l.name}"`);
-    } catch (e) {
-      toastError(e);
-    } finally {
-      setBusy(false);
-      refreshLoras();
-    }
-  };
   return (
     <>
       <div className="setting-card">
@@ -127,11 +111,7 @@ export function LoraSettings() {
             LoRA button next to the prompt, up to {MAX_LORAS} at a time.
           </span>
         </div>
-        {!inBrowser && (
-          <button className="btn primary" disabled={busy} onClick={add}>
-            <Plus size={15} /> {busy ? "Checking…" : "Load a LoRA…"}
-          </button>
-        )}
+
       </div>
       <span className="muted">
         Beta: tested on Windows with an NVIDIA card. It should work the same on Mac and Linux, but it hasn't been tested there yet: please tell us how it goes on GitHub.

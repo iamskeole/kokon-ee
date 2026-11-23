@@ -4,7 +4,6 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, configure, setSignedOutHandler, subscribe, urls } from "./api";
-import { inBrowser } from "./platform";
 
 function reply(status: number, body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
@@ -13,8 +12,6 @@ function reply(status: number, body: unknown) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("api in a browser", () => {
-  it("runs as a browser in tests", () => expect(inBrowser).toBe(true));
-
   it("loads images and events without a token", () => {
     configure("/api/v1", "");
     expect(urls.gen("abc")).toBe("/api/v1/gallery/abc/image");

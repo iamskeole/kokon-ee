@@ -1,5 +1,5 @@
 import {
-  Brush, Check, ClipboardPaste, Combine, Copy, Download, Ellipsis, Expand, FolderOpen, Heart, ImageUpscale, Images, Info, Layers, Loader2, MousePointerClick, Palette, Pencil, RefreshCw, RotateCcw, SlidersHorizontal, Square, TextCursorInput, Trash2, Wand2, WandSparkles, X,
+  Brush, Check, ClipboardPaste, Combine, Copy, Download, Ellipsis, Expand, Heart, ImageUpscale, Images, Info, Layers, Loader2, MousePointerClick, Palette, Pencil, RefreshCw, RotateCcw, SlidersHorizontal, Square, TextCursorInput, Trash2, Wand2, WandSparkles, X,
 } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, urls } from "../lib/api";
@@ -23,7 +23,7 @@ import { docId, type LayerDoc } from "../lib/layerDoc";
 import { LutBar, LutButton, LutOverlay } from "./Lut";
 import { IconButton, Popover, useFit } from "./ui";
 import { Fullscreen, FullscreenButton, isTyping, ZoomImage, type ViewerNav } from "./Viewer";
-import { fileManager, inBrowser, shortcut, useNarrow } from "../lib/platform";
+import { shortcut, useNarrow } from "../lib/platform";
 import { PhoneActions, PhoneEmpty, Swipe } from "./PhoneStage";
 
 export const MODE_ICON: Record<Mode | "lut" | "layers", React.ReactNode> = {
@@ -461,7 +461,7 @@ function MoreLikeThisButton({ g }: { g: GenerationRecord }) {
   );
 }
 
-function MoreMenu({ item, path }: { item: SessionItem; path: string | null }) {
+function MoreMenu({ item }: { item: SessionItem }) {
   const g = item.gen;
   return (
     <Popover
@@ -490,14 +490,6 @@ function MoreMenu({ item, path }: { item: SessionItem; path: string | null }) {
               <span>Reuse prompt and settings</span>
             </button>
           )}
-          {path && !inBrowser && (
-            <button className="opt" onClick={() => (close(), native.reveal(path).catch(toastError))}>
-              <span className="check">
-                <FolderOpen size={15} />
-              </span>
-              <span>Show in {fileManager}</span>
-            </button>
-          )}
           <button className="opt" onClick={() => (close(), removeSessionItem(item.key))}>
             <span className="check">
               <Trash2 size={15} />
@@ -517,7 +509,6 @@ export function sourceSize(g: GenerationRecord): Size | null {
 
 function GenActions({ item, g, showOriginal, onLut }: { item: SessionItem; g: GenerationRecord; showOriginal: boolean; onLut: (lut: LutEntry) => void }) {
   // Save, copy and "show in folder" act on the image on screen: the result or its pre-upscale original.
-  const shownPath = (showOriginal && g.pipeline?.original_path) || g.file_path;
   const original = sourceSize(g);
   const [fav, setFav] = useState(g.favorite);
   return (
@@ -560,22 +551,11 @@ function GenActions({ item, g, showOriginal, onLut }: { item: SessionItem; g: Ge
         <Heart size={17} fill={fav ? "currentColor" : "none"} />
       </IconButton>
       <IconButton
-        title={inBrowser ? (showOriginal ? "Download the original (before upscaling)" : "Download") : showOriginal ? "Save the original (before upscaling) as…" : "Save as…"}
+        title={showOriginal ? "Download the original (before upscaling)" : "Download"}
         onClick={async () => {
           const name = g.file_path.split(/[\\/]/).pop() ?? "image.png";
-          if (inBrowser) {
-            // Onto this device, as the file Kokon saved.
-            native.download(showOriginal ? urls.genOriginal(g.id) : urls.gen(g.id), showOriginal ? name.replace(/(\.\w+)?$/, "-original.png") : name);
-            return;
-          }
-          const path = await native.saveAs(showOriginal ? name.replace(/(\.\w+)?$/, "-original.png") : name);
-          if (!path) return;
-          try {
-            const r = await api.exportGeneration(g.id, path, showOriginal);
-            toastInfo(`Saved ${r.path.split(/[\\/]/).pop()}`);
-          } catch (e) {
-            toastError(e);
-          }
+          // Onto this device, as the file Kokon saved.
+          native.download(showOriginal ? urls.genOriginal(g.id) : urls.gen(g.id), showOriginal ? name.replace(/(\.\w+)?$/, "-original.png") : name);
         }}
       >
         <Download size={17} />
@@ -585,8 +565,7 @@ function GenActions({ item, g, showOriginal, onLut }: { item: SessionItem; g: Ge
           title={showOriginal ? "Copy the original (before upscaling)" : "Copy image"}
           onClick={async () => {
             try {
-              if (inBrowser) await native.copyImageUrl(showOriginal ? urls.genOriginal(g.id) : urls.gen(g.id));
-              else await native.copyImage(shownPath);
+              await native.copyImageUrl(showOriginal ? urls.genOriginal(g.id) : urls.gen(g.id));
               toastInfo("Image copied");
             } catch (e) {
               toastError(e);
@@ -606,7 +585,7 @@ function GenActions({ item, g, showOriginal, onLut }: { item: SessionItem; g: Ge
       >
         {() => <InfoPanel g={g} />}
       </Popover>
-      <MoreMenu item={item} path={shownPath} />
+      <MoreMenu item={item} />
     </div>
   );
 }
@@ -618,7 +597,7 @@ function InputActions({ item, onLut }: { item: SessionItem; onLut: (lut: LutEntr
       <UpscaleButton source={`input:${input.id}`} size={{ width: input.width, height: input.height }} />
       <LutButton onPick={onLut} />
       <span className="sep" />
-      <MoreMenu item={item} path={input.original_path ?? input.path} />
+      <MoreMenu item={item} />
     </div>
   );
 }

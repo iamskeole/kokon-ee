@@ -1,14 +1,12 @@
-import { Activity, Copy, Cpu, FolderOpen, HardDrive, Heart, Layers, MonitorSmartphone, RefreshCw, RotateCcw, Settings2, Users, X } from "lucide-react";
+import { Activity, Copy, Cpu, HardDrive, Heart, Layers, RefreshCw, RotateCcw, Settings2, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { AiMarkingCard } from "./AiCheck";
 import { People } from "./People";
 import { native } from "../lib/native";
-import { inBrowser } from "../lib/platform";
 import { getState, refreshStatus, setState, startTour, toastError, toastInfo, useStore } from "../lib/store";
 import { setThemeChoice, themeChoice, type ThemeChoice } from "../lib/theme";
 import { LoraSettings } from "./LoraSettings";
-import { RemoteAccess } from "./RemoteAccess";
 import { UpscalerControls } from "./Upscalers";
 import { WHATS_NEW_VERSION } from "./WhatsNew";
 import type { AppConfig, TextEncoderPlacement } from "../lib/types";
@@ -61,40 +59,17 @@ function GitHubMark() {
   );
 }
 
-type Tab = "general" | "models" | "lora" | "performance" | "devices" | "people" | "diagnostics";
-const TABS: Tab[] = ["general", "models", "lora", "performance", "devices", "people", "diagnostics"];
+type Tab = "general" | "models" | "lora" | "performance" | "people" | "diagnostics";
+const TABS: Tab[] = ["general", "models", "lora", "performance", "people", "diagnostics"];
 
 /** Browser: what the computer running Kokon has set (only its desktop app changes folders and files). */
-function PathField(props: { label: string; value: string; onChange: (v: string) => void; folder?: boolean; extensions?: string[]; open?: boolean }) {
-  if (inBrowser) {
-    return (
-      <div className="field">
-        <span>{props.label}</span>
-        <span className="muted">{props.value || "—"} (on the computer running Kokon)</span>
-      </div>
-    );
-  }
+/** The service box's folders: read-only in the browser — the box's own settings file owns them. */
+function PathField(props: { label: string; value: string }) {
   return (
-    <label className="field">
+    <div className="field">
       <span>{props.label}</span>
-      <div className="path-row">
-        <input className="input" type="text" value={props.value} onChange={(e) => props.onChange(e.target.value)} spellCheck={false} />
-        <button
-          className="btn"
-          onClick={async () => {
-            const p = props.folder ? await native.pickFolder(props.value) : await native.pickFile(props.extensions ?? ["gguf", "safetensors"], props.value);
-            if (p) props.onChange(p);
-          }}
-        >
-          Browse
-        </button>
-        {props.open && (
-          <button className="btn" title="Open this folder" onClick={() => native.openFolder(props.value).catch(toastError)}>
-            <FolderOpen size={14} /> Open
-          </button>
-        )}
-      </div>
-    </label>
+      <span className="muted">{props.value || "—"} (on the computer running Kokon)</span>
+    </div>
   );
 }
 
@@ -127,7 +102,6 @@ function EnhancerPrompt(props: { label: string; help: string; value: string; bui
 
 function Diagnostics() {
   const [text, setText] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const load = async () => {
     setText(null);
     try {
@@ -151,30 +125,6 @@ function Diagnostics() {
         <button className="btn" onClick={load}>
           <RefreshCw size={14} /> Refresh
         </button>
-        <button
-          className="btn"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await api.restartBackend();
-              toastInfo("Inference server restarted");
-              load();
-            } catch (e) {
-              toastError(e);
-            } finally {
-              setBusy(false);
-              refreshStatus();
-            }
-          }}
-        >
-          <RotateCcw size={14} /> {busy ? "Restarting…" : "Restart server"}
-        </button>
-        {!inBrowser && (
-          <button className="btn" onClick={async () => native.openFolder(await native.dataFolder().then((d) => `${d}${d.includes("\\") ? "\\" : "/"}logs`)).catch(toastError)}>
-            <FolderOpen size={14} /> Logs
-          </button>
-        )}
       </div>
       <pre className="diag">{text ?? "Collecting…"}</pre>
     </>
@@ -269,8 +219,6 @@ export function Settings() {
     ["models", "Models", <HardDrive size={16} key="m" />],
     ["lora", "LoRA (beta)", <Layers size={16} key="l" />],
     ["performance", "Performance", <Cpu size={16} key="p" />],
-    // Only the computer running Kokon decides who else can use it.
-    ...(inBrowser ? [] : ([["devices", "Other devices", <MonitorSmartphone size={16} key="o" />]] as [Tab, string, React.ReactNode][])),
     // Named accounts: shown where a password is set and the viewer is not one of the
     // accounts themselves (D-MU11); named accounts get today's settings, without it.
     ...(who && !who.user && who.password_set ? ([["people", "People", <Users size={16} key="pe" />]] as [Tab, string, React.ReactNode][]) : []),
@@ -287,7 +235,7 @@ export function Settings() {
             </button>
           ))}
           <span style={{ flex: 1 }} />
-          {tab !== "diagnostics" && tab !== "lora" && tab !== "devices" && tab !== "people" && (
+          {tab !== "diagnostics" && tab !== "lora" && tab !== "people" && (
             <button className="btn primary nav-save" style={{ justifyContent: "center" }} disabled={!dirty} onClick={save}>
               Save
             </button>
@@ -306,7 +254,8 @@ export function Settings() {
               <RepoCard />
               <SupportCard />
               <AiMarkingCard />
-              <PathField label="Save images to" value={cfg.outputDir} folder open onChange={(v) => set({ outputDir: v })} />
+              <PathField label="Save images to" value={cfg.outputDir} />
+              <PathField label="stable-diffusion.cpp folder" value={cfg.sdcppDir} />
               <div className="field-row">
                 <span>A folder for each project</span>
                 <Switch on={!!cfg.projectFolders} onChange={(v) => set({ projectFolders: v })} />
@@ -326,29 +275,11 @@ export function Settings() {
                 <span className="muted">System follows your computer's light or dark mode. Applies at once.</span>
               </div>
               <div className="field-row">
-                <span>Keep inference server running after closing the app</span>
-                <Switch on={cfg.keepServerRunning} onChange={(v) => set({ keepServerRunning: v })} />
+                <span>Kokon {appVersion} on the computer running it.</span>
+                <button className="btn" onClick={() => api.logout().then(() => location.reload(), toastError)}>
+                  Sign out
+                </button>
               </div>
-              <span className="muted" style={{ marginTop: -10 }}>Keeps the model loaded so the next start is instant.</span>
-              {/* External engine (D-030-2): the gateway's TTL is the authority on the engine's
-                  lifetime, so this control would be a lie — hidden while that pipeline is active. */}
-              {!cfg.externalEngine && (
-                <>
-                  <label className="field-row">
-                    <span>Free the graphics card after idle minutes</span>
-                    <input className="input" type="number" min={0} max={1440} style={{ width: 90 }} value={cfg.idleUnloadMinutes} onChange={(e) => set({ idleUnloadMinutes: Math.max(0, Number(e.target.value) || 0) })} />
-                  </label>
-                  <span className="muted" style={{ marginTop: -10 }}>When nothing is being made for this long, the model leaves the graphics card's memory, even with Kokon open, so other programs can use it. The next image loads it again first. 0 keeps it loaded.</span>
-                </>
-              )}
-              {inBrowser ? (
-                <div className="field-row">
-                  <span>Kokon {appVersion} on the computer running it. It updates there.</span>
-                  <button className="btn" onClick={() => api.logout().then(() => location.reload(), toastError)}>
-                    Sign out
-                  </button>
-                </div>
-              ) : null}
               <div className="field-row">
                 <span>What's new in Kokon {WHATS_NEW_VERSION}</span>
                 <button className="btn" onClick={() => leave(() => setState({ overlay: "whats-new" }))}>
@@ -407,7 +338,6 @@ export function Settings() {
             </>
           )}
 
-          {tab === "devices" && <RemoteAccess />}
           {tab === "people" && <People />}
 
           {tab === "models" && (
@@ -443,7 +373,7 @@ export function Settings() {
                   ) : null}
                 </div>
               )}
-              <PathField label="stable-diffusion.cpp folder" value={cfg.sdcppDir} folder onChange={(v) => set({ sdcppDir: v })} />
+              <PathField label="stable-diffusion.cpp folder" value={cfg.sdcppDir} />
               <UpscalerControls
                 model={cfg.upscalerModel}
                 blend={cfg.upscaleBlend}
@@ -572,30 +502,17 @@ export function Settings() {
                     <input className="input" type="number" min={0} max={196608} step={1024} style={{ width: 100 }} value={cfg.vramOverrideMib} onChange={(e) => set({ vramOverrideMib: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
                   </label>
                   <span className="muted" style={{ marginTop: -10 }}>
-                    Plans image sizes as if the card had this much memory (e.g. 12288 to test a 12 GB card). Combine with the VRAM ballast script in scripts/dev so the memory is really unavailable.
+                    Plans image sizes as if the card had this much memory (e.g. 12288 to test a 12 GB card).
                   </span>
                 </>
               )}
-              {!inBrowser && (
-              <>
-              <label className="field-row">
-                <span>Inference server port</span>
-                <input className="input" type="number" min={1024} max={65535} style={{ width: 100 }} value={cfg.serverPort} onChange={(e) => set({ serverPort: Number(e.target.value) || cfg.serverPort })} />
-              </label>
-              <label className="field">
-                <span>Extra server arguments</span>
-                <input className="input" type="text" spellCheck={false} placeholder="e.g. --vae-conv-direct" value={cfg.extraServerArgs.join(" ")} onChange={(e) => set({ extraServerArgs: e.target.value.split(/\s+/).filter(Boolean) })} />
-              </label>
-              </>
-              )}
-              {!inBrowser && <span className="muted">The server always listens on 127.0.0.1 only.</span>}
             </>
           )}
 
           {tab === "lora" && <LoraSettings />}
           {tab === "diagnostics" && <Diagnostics />}
           {/* On a phone Save sits at the foot of the page (the tabs scroll sideways). */}
-          {tab !== "diagnostics" && tab !== "lora" && tab !== "devices" && tab !== "people" && (
+          {tab !== "diagnostics" && tab !== "lora" && tab !== "people" && (
             <div className="modal-save">
               <button className="btn primary" disabled={!dirty} onClick={save}>
                 Save

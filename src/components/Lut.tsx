@@ -1,24 +1,12 @@
-import { Eye, FolderOpen, Loader2, Palette, X } from "lucide-react";
+import { Eye, Loader2, Palette, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
 import { lutLabel } from "../lib/logic";
-import { native } from "../lib/native";
-import { inBrowser } from "../lib/platform";
 import { toastError } from "../lib/store";
+import { api } from "../lib/api";
 import type { LutEntry } from "../lib/types";
 import { Popover } from "./ui";
 
-/** Asks for a .cube file and adds it to Kokon's LUT list. */
-async function openCubeFile(): Promise<LutEntry | null> {
-  const path = await native.pickFile(["cube", "CUBE"], undefined, "LUT");
-  if (!path) return null;
-  try {
-    return await api.importLut(path);
-  } catch (e) {
-    toastError(e);
-    return null;
-  }
-}
+
 
 function LutList({ current, onPick, close }: { current?: string; onPick: (lut: LutEntry) => void; close: () => void }) {
   const [items, setItems] = useState<LutEntry[] | null>(null);
@@ -61,21 +49,7 @@ function LutList({ current, onPick, close }: { current?: string; onPick: (lut: L
           {row(e)}
         </div>
       ))}
-      {!inBrowser && (
-        <button
-          className="opt"
-          onClick={async () => {
-            close();
-            const e = await openCubeFile();
-            if (e) onPick(e);
-          }}
-        >
-          <span className="check">
-            <FolderOpen size={15} />
-          </span>
-          <span>Open a .cube file…</span>
-        </button>
-      )}
+
     </div>
   );
 }

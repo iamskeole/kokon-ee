@@ -5,7 +5,7 @@
 // every project is kept as ids in `projects` (persisted) and re-loaded from the service when
 // opened again.
 
-import { inBrowser, isNarrow } from "./platform";
+import { isNarrow } from "./platform";
 import { useSyncExternalStore } from "react";
 import { markFresh } from "../components/Cocoon";
 import { api, ApiError, setPrivateInputs, subscribe, urls } from "./api";
@@ -547,21 +547,6 @@ export function dismissToast(id: string) {
 
 let unsub: (() => void) | null = null;
 
-/** After Setup or What's new: the model loads in the background so the first image starts at once. */
-export async function afterStartScreens() {
-  let external = false;
-  try {
-    const cfg = await api.config();
-    external = !!cfg.externalEngine;
-  } catch {
-    // It can wait for the next start; the model still loads.
-  }
-  // An externally managed engine is never preloaded on visit: it loads on the first request
-  // (or when the user asks for it), through the gateway.
-  if (external) return;
-  api.startBackend().then(refreshStatus, () => refreshStatus());
-}
-
 export async function refreshStatus() {
   try {
     const st = await api.status();
@@ -575,7 +560,7 @@ export async function refreshStatus() {
       }
     }
     setState({ status: st, server: { state: st.server.state, owned: st.server.owned, error: st.server.error, model: st.server.model ?? null } });
-    if (inBrowser) reloadIfOutdated(st.service.version);
+    reloadIfOutdated(st.service.version);
     return st;
   } catch {
     return null;
@@ -845,7 +830,6 @@ let preloading: HTMLImageElement | null = null;
 /** The image the stage loads, drawn at `w`×`h` CSS px: in a browser the preview when it fits,
  * else (and always in the desktop app) the full image. */
 export function stageImage(source: string, w: number, h: number): string {
-  if (!inBrowser) return urls.source(source);
   if (w > 0 && h > 0) stageFits = stageFitsPreview(w, h, window.devicePixelRatio || 1);
   return stageFits ? urls.sourcePreview(source) : urls.source(source);
 }
@@ -853,7 +837,7 @@ export function stageImage(source: string, w: number, h: number): string {
 /** A project is being opened: its selected version's preview starts loading now, alongside
  * its records, instead of after them (a browser only). */
 function preloadStage(data: ProjectData, selectKey?: string) {
-  if (!inBrowser || !stageFits) return;
+  if (!stageFits) return;
   const it = data.items.find((i) => i.key === selectKey) ?? data.items.find((i) => i.key === data.selected) ?? data.items.findLast((i) => i.kind !== "job");
   const src = it && storedSource(it);
   if (!src) return;

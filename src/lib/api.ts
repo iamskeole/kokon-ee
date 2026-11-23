@@ -3,7 +3,6 @@
 // In a browser (another device) there is no token: the session cookie signs requests in, and
 // every change carries the CSRF header the service asks for.
 
-import { inBrowser } from "./platform";
 import type { ProjectData } from "./store";
 import type {
 
@@ -54,7 +53,6 @@ export function setSignedOutHandler(f: () => void) {
 }
 
 function authHeaders(method: string | undefined): Record<string, string> {
-  if (!inBrowser) return { Authorization: `Bearer ${token}` };
   return method && method !== "GET" ? { "x-kokon-csrf": "1" } : {};
 }
 
@@ -67,12 +65,12 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
     });
   } catch (e) {
     if (init.signal?.aborted) throw new Stopped();
-    throw new ApiError({ code: "server_unavailable", message: inBrowser ? "Kokon is not reachable." : "The local service is not reachable.", detail: String(e) }, 0);
+    throw new ApiError({ code: "server_unavailable", message: "Kokon is not reachable.", detail: String(e) }, 0);
   }
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
-    if (inBrowser && data?.error?.code === "login_required" && !path.startsWith("/auth/")) onSignedOut();
+    if (data?.error?.code === "login_required" && !path.startsWith("/auth/")) onSignedOut();
     throw new ApiError(data?.error ?? { code: "internal", message: `HTTP ${res.status}` }, res.status);
   }
   return data as T;
@@ -151,7 +149,7 @@ export const api = {
       res = await fetch(base + "/matte", { method: "POST", headers: { ...authHeaders("POST"), "Content-Type": "application/json" }, body: json({ image, run }), signal });
     } catch (e) {
       if (signal?.aborted) throw new Stopped();
-      throw new ApiError({ code: "server_unavailable", message: inBrowser ? "Kokon is not reachable." : "The local service is not reachable.", detail: String(e) }, 0);
+      throw new ApiError({ code: "server_unavailable", message: "Kokon is not reachable.", detail: String(e) }, 0);
     }
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -161,15 +159,12 @@ export const api = {
   },
   /** Stops the quick cut-out `run` in the service (running, or as soon as it starts). */
   cancelMatte: (run: string) => call<{ stopped: boolean }>("/matte/cancel", { method: "POST", body: json({ run }) }),
-  installStatus: () => call<InstallStatus>("/setup/install"),
-  cancelInstall: () => call<InstallStatus>("/setup/install/cancel", { method: "POST" }),
+  installStatus: () => call<InstallStatus>("/downloads"),
+  cancelInstall: () => call<InstallStatus>("/downloads/cancel", { method: "POST" }),
   config: () => call<AppConfig>("/config"),
   /** The prompt enhancer's built-in instructions. */
   enhancerDefaults: () => call<{ t2i: string; edit: string; compose: string; max_chars: number }>("/enhancer/defaults"),
   saveConfig: (c: AppConfig) => call<{ saved: boolean; backend_restart_needed: boolean }>("/config", { method: "PUT", body: json(c) }),
-  startBackend: () => call<{ ready: boolean }>("/backend/start", { method: "POST" }),
-  stopBackend: () => call<{ stopped: boolean }>("/backend/stop", { method: "POST" }),
-  restartBackend: () => call<{ ready: boolean }>("/backend/restart", { method: "POST" }),
   /** Switch the externally managed engine to another model (the gateway loads it in the background). */
   switchModel: (e: ExternalEngine) => call<{ requested: boolean }>("/models/switch", { method: "POST", body: json(e) }),
   diagnostics: () => call<{ text: string }>("/diagnostics"),
@@ -302,16 +297,15 @@ export function subscribe(onEvent: (e: ServiceEvent) => void, onState?: (connect
       retry = window.setTimeout(open, 1500);
       // An EventSource never says why it failed: a browser whose session ended (new password, a
       // restart that didn't keep it) goes to the sign-in now, not at the next heartbeat.
-      if (inBrowser)
-        api.session().then(
-          (s) => {
-            if (s.signed_in || closed) return;
-            closed = true;
-            window.clearTimeout(retry);
-            onSignedOut();
-          },
-          () => {},
-        );
+      api.session().then(
+        (s) => {
+          if (s.signed_in || closed) return;
+          closed = true;
+          window.clearTimeout(retry);
+          onSignedOut();
+        },
+        () => {},
+      );
     };
   };
   open();

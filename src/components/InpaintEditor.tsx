@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, urls } from "../lib/api";
 import { area, dilate, fromLogits, maskOrder, samSelection } from "../lib/layers";
 import { withActionVerb } from "../lib/logic";
-import { inBrowser, shortcut } from "../lib/platform";
+import { shortcut } from "../lib/platform";
 import { loadSegmenter, type SamResult, type ServiceSegmenter } from "../lib/sam";
 import { MARK_COLOURS, marksPrompt, type MarkColour } from "../lib/sceneEdit";
 import { closeEditor, focusPrompt, getState, toastError, toastInfo, updateComposer, useStore } from "../lib/store";
@@ -100,7 +100,7 @@ export function InpaintEditor() {
   // In a browser the picture is drawn flat (ZoomPan `flat`: no image-sized layer, which cost an
   // iPhone ~300 MB on a 4K image) and is the preview until the zoom needs the full image; the
   // mask keeps its own resolution either way, and strokes map through the canvas's on-screen box.
-  const preview = ref0 && inBrowser ? urls.sourcePreview(ref0.source) : undefined;
+  const preview = ref0 ? urls.sourcePreview(ref0.source) : undefined;
 
   const isPanningActive = spacePressed || tool === "pan";
   const erase = tool === "eraser";
@@ -522,8 +522,8 @@ export function InpaintEditor() {
           enableToggleZoom={false}
           enablePan={isPanningActive}
           className="inpaint-zoom-viewport"
-          minimapSrc={ref0 && inBrowser ? urls.sourceThumb(ref0.source) : src}
-          flat={inBrowser}
+          minimapSrc={ref0 ? urls.sourceThumb(ref0.source) : src}
+          flat
         >
           {({ transform, isPanning, flat, wantsFull }) => {
             // Content px per screen px: the box is laid out at its drawn size when flat.

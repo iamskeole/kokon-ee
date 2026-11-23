@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { urls } from "../lib/api";
 import { diffPixels, type CompareBase, type CompareMode } from "../lib/logic";
 import { haptic } from "../lib/haptics";
-import { inBrowser, isNarrow, useNarrow } from "../lib/platform";
+import { isNarrow, useNarrow } from "../lib/platform";
 import { setState, stageImage, useStore } from "../lib/store";
 import type { GenerationRecord } from "../lib/types";
 import { DevelopImg } from "./Develop";
@@ -53,10 +53,9 @@ export function CompareFrame({ g, base, fullscreen = false, maskSrc, onFullscree
   // (`wantsFull`, then the full images stay). The original loads the first time a view shows
   // it, then stays; Changes always compares the previews (its map is 1024 px). The desktop app
   // loads both at full size at once.
-  const beforeWanted = useRef(!inBrowser);
+  const beforeWanted = useRef(false);
   if (mode !== "off" || holding) beforeWanted.current = true;
   const images = (wantsFull: boolean) => {
-    if (!inBrowser) return { after: urls.gen(g.id), before: urls.input(base.inputId), diff: [urls.gen(g.id), urls.input(base.inputId)] };
     const pick = (source: string) => (fullscreen ? (wantsFull ? urls.source(source) : urls.sourcePreview(source)) : stageImage(source, box.w, box.h));
     return { after: pick(`gen:${g.id}`), before: beforeWanted.current ? pick(`input:${base.inputId}`) : undefined, diff: [urls.genPreview(g.id), urls.inputPreview(base.inputId)] };
   };
@@ -188,7 +187,7 @@ export function CompareFrame({ g, base, fullscreen = false, maskSrc, onFullscree
   if (fullscreen)
     return (
       <div className="viewer-frame">
-        <ZoomPan contentSize={contentSize} resetKey={g.id} enableToggleZoom={false} flat={inBrowser} minimapSrc={inBrowser ? urls.genThumb(g.id) : urls.gen(g.id)}>
+        <ZoomPan contentSize={contentSize} resetKey={g.id} enableToggleZoom={false} flat minimapSrc={urls.genThumb(g.id)}>
           {({ transform, isZoomed, flat, wantsFull }) => frame(transform.scale, isZoomed, flat, wantsFull)}
         </ZoomPan>
       </div>

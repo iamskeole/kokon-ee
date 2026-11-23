@@ -25,8 +25,3 @@ export function useNarrow(): boolean {
     isNarrow,
   );
 }
-
-/** The UI runs in a browser, served by the box service. The Tauri desktop shell is gone (task-031).
- * Kept as a constant: the branches that read it take the browser side, and they compile.
- * */
-export const inBrowser = true;

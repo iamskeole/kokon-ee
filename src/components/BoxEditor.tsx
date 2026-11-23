@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Crosshair, Square, Trash2, Undo2, X } from "lucide-react";
 import { urls } from "../lib/api";
-import { inBrowser } from "../lib/platform";
 import { focusPrompt, setState, updateComposer, useStore } from "../lib/store";
 import { isTyping } from "./Viewer";
 import { IconButton } from "./ui";
@@ -26,7 +25,6 @@ const contains = (r: BoxRect, x: number, y: number) => x >= r.x1 && x <= r.x2 &&
 const clone = (r: BoxRow): BoxRow => ({ ...r, src: r.src ? { ...r.src } : null, tgt: r.tgt ? { ...r.tgt } : null });
 
 export function BoxEditor() {
-  const inBrowserHere = inBrowser;
   const setStateHere = setState;
   const updateComposerHere = updateComposer;
   const composer = useStore((s) => s.composer);
@@ -300,7 +298,7 @@ export function BoxEditor() {
         </button>
         {refs.map((r, i) => (
           <button key={r.key} className={`box-tab ${tab === i ? "on" : ""}`} onClick={() => switchTab(i)} title={`Boxes on image ${i + 1}`}>
-            <img src={inBrowserHere ? urls.sourcePreview(r.source) : urls.source(r.source)} alt="" />
+            <img src={urls.sourcePreview(r.source)} alt="" />
             <span>{i + 1}</span>
           </button>
         ))}
@@ -312,7 +310,7 @@ export function BoxEditor() {
           resetKey={`box-${tab === null ? "new" : tab}`}
           enableToggleZoom={false}
           enablePan
-          flat={inBrowser}
+          flat
           minimapSrc={preview ?? undefined}
         >
           {({ flat }) => (
