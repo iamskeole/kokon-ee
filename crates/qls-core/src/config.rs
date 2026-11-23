@@ -248,35 +248,27 @@ pub struct ModelProfile {
 
 impl Default for ModelProfile {
     fn default() -> Self {
-        Self::official(
-            &default_sdcpp_dir(),
-            crate::catalog::preset(crate::catalog::DEFAULT_PRESET).unwrap(),
-        )
+        Self::official(&default_sdcpp_dir())
     }
 }
 
 impl ModelProfile {
-    /// The official weights a hardware preset downloads (GGUF of Qwen/Qwen-Image-2.1-Turbo,
-    /// Qwen's own Qwen3-VL GGUF, the 2.1 VAE).
-    pub fn official(sdcpp_dir: &Path, preset: &crate::catalog::Preset) -> Self {
-        use crate::catalog::{VISION_PROJECTOR, official_dit, official_vae};
-        let diffusion = official_dit(preset, sdcpp_dir);
-        let quant = diffusion
-            .dest
-            .rsplit('-')
-            .next()
-            .unwrap_or("")
-            .trim_end_matches(".gguf");
+    /// The official Qwen-Image 2.1 Turbo weights (the layout a pinned engine box uses):
+    /// unsloth's Q4_K_M GGUF, Qwen's own Qwen3-VL GGUF, the texture-fix 2.1 VAE.
+    /// Dormant on a split box (the engine box's own files decide); it feeds the local
+    /// server's arguments when the service runs one itself.
+    pub fn official(sdcpp_dir: &Path) -> Self {
+        let join = |f: &str| crate::catalog::join_rel(sdcpp_dir, f);
         Self {
             id: OFFICIAL_PROFILE_ID.into(),
-            display_name: format!("Qwen-Image 2.1 Turbo {quant} (official)"),
+            display_name: "Qwen-Image 2.1 Turbo Q4_K_M (official)".into(),
             model: QWEN_IMAGE_21.into(),
             source: ProfileSource::Official,
             scan_dir: None,
-            diffusion_model: diffusion.path(sdcpp_dir),
-            vae: official_vae(sdcpp_dir).path(sdcpp_dir),
-            text_encoder: preset.text_encoder.path(sdcpp_dir),
-            vision_projector: Some(VISION_PROJECTOR.path(sdcpp_dir)),
+            diffusion_model: join("models/qwen21/qwen-image-2.1-turbo-Q4_K_M.gguf"),
+            vae: join("models/qwen21/texture_fix_vae_for_qwen_image_2.1_bf16.safetensors"),
+            text_encoder: join("models/qwen21/Qwen3VL-8B-Instruct-Q4_K_M.gguf"),
+            vision_projector: Some(join("models/qwen21/mmproj-Qwen3VL-8B-Instruct-F16.gguf")),
             backend_args: vec![],
             recommended_settings: RecommendedSettings::default(),
             capabilities: ProfileCapabilities::default(),
@@ -615,10 +607,7 @@ impl Default for AppConfig {
         let sdcpp = default_sdcpp_dir();
         Self {
             schema_version: SCHEMA_VERSION,
-            profiles: vec![ModelProfile::official(
-                &sdcpp,
-                crate::catalog::preset(crate::catalog::DEFAULT_PRESET).unwrap(),
-            )],
+            profiles: vec![ModelProfile::official(&sdcpp)],
             active_profile: OFFICIAL_PROFILE_ID.into(),
             sdcpp_dir: sdcpp,
             gpu_backend: GpuBackend::default(),
@@ -647,7 +636,7 @@ impl Default for AppConfig {
             keep_server_running: false,
             idle_unload_minutes: 10,
             setup_complete: false,
-            hardware_preset: crate::catalog::DEFAULT_PRESET.into(),
+            hardware_preset: "16gb".into(),
             vram_override_mib: 0,
             enhancer_t2i_prompt: String::new(),
             enhancer_edit_prompt: String::new(),
@@ -812,7 +801,7 @@ impl AppConfig {
                 Ok(mut c) => {
                     if c.profiles.is_empty() {
                         c.profiles
-                            .push(ModelProfile::official(&c.sdcpp_dir, c.preset()));
+                            .push(ModelProfile::official(&c.sdcpp_dir));
                         c.active_profile = OFFICIAL_PROFILE_ID.into();
                     }
                     if c.schema_version < 8 {
@@ -826,12 +815,10 @@ impl AppConfig {
                     }
                     if c.schema_version < 7 {
                         // Turbo only (2026-10-09): the official profile moves from the base
-                        // Qwen-Image 2.1 weights to the preset's Turbo model, and every profile
-                        // gets the new presets (the old step/CFG settings no longer exist).
-                        let preset = c.preset();
+                        // Qwen-Image 2.1 weights to the Turbo model.
                         for p in &mut c.profiles {
                             if p.id == OFFICIAL_PROFILE_ID {
-                                let official = ModelProfile::official(&c.sdcpp_dir, preset);
+                                let official = ModelProfile::official(&c.sdcpp_dir);
                                 p.display_name = official.display_name;
                                 p.diffusion_model = official.diffusion_model;
                             }
@@ -857,7 +844,7 @@ impl AppConfig {
                         && c.hardware_preset == "8gb"
                         && c.vram_reserve_gib == 1.0
                     {
-                        c.vram_reserve_gib = c.preset().vram_reserve_gib;
+                        c.vram_reserve_gib = 1.5;
                     }
                     // Idle unload now also applies with a window open: the old default (15) moves
                     // to the new one; a value set by hand stays.
@@ -1097,7 +1084,7 @@ impl AppConfig {
                 p.model = QWEN_IMAGE_21.into();
             }
         }
-        let mut official = ModelProfile::official(&self.sdcpp_dir, self.preset());
+        let mut official = ModelProfile::official(&self.sdcpp_dir);
         match self
             .profiles
             .iter_mut()
@@ -1120,7 +1107,7 @@ impl AppConfig {
     /// (Settings → Models, or config.json by hand). When those files are all there, they move
     /// to the user profile (active if the official one was), so presets can't overwrite them.
     fn keep_hand_edited_paths(&mut self) {
-        let canonical = ModelProfile::official(&self.sdcpp_dir, self.preset());
+        let canonical = ModelProfile::official(&self.sdcpp_dir);
         let Some(p) = self.profiles.iter().find(|p| p.id == OFFICIAL_PROFILE_ID) else {
             return;
         };
@@ -1145,66 +1132,6 @@ impl AppConfig {
         if self.active_profile == OFFICIAL_PROFILE_ID {
             self.active_profile = USER_PROFILE_ID.into();
         }
-    }
-
-    /// Saves the user's own files as the user profile and makes it active. Tuning of an
-    /// earlier user profile is kept.
-    pub fn set_user_files(&mut self, mut profile: ModelProfile) {
-        profile.id = USER_PROFILE_ID.into();
-        profile.source = ProfileSource::User;
-        if let Some(old) = self.user_profile() {
-            profile.recommended_settings = old.recommended_settings.clone();
-            profile.backend_args = old.backend_args.clone();
-        }
-        self.profiles.retain(|p| p.id != USER_PROFILE_ID);
-        self.profiles.push(profile);
-        self.active_profile = USER_PROFILE_ID.into();
-    }
-
-    /// The active model uses the texture-fix VAE (#21).
-    pub fn uses_improved_vae(&self) -> bool {
-        self.profile()
-            .vae
-            .file_name()
-            .is_some_and(|n| n.eq_ignore_ascii_case(crate::catalog::VAE.file_name()))
-    }
-
-    /// Makes the active model use the texture-fix VAE in the app's folder, once downloaded. The
-    /// official files switch by themselves (`catalog::official_vae`); the user's own profile
-    /// points to it instead of their VAE, which stays where it is.
-    pub fn use_improved_vae(&mut self) {
-        let vae = crate::catalog::VAE.path(&self.sdcpp_dir);
-        let active = self.active_profile.clone();
-        if let Some(p) = self
-            .profiles
-            .iter_mut()
-            .find(|p| p.id == active && !p.is_official())
-        {
-            p.vae = vae;
-        }
-        self.normalize();
-    }
-
-    /// Makes the active model use the Q4_K_M image model in the app's folder, once downloaded.
-    /// The official files switch by themselves (`catalog::official_dit`); the user's own profile
-    /// points to it instead of their file, which stays where it is.
-    pub fn use_new_dit(&mut self) {
-        let dit = crate::catalog::TURBO_Q4_K_M.path(&self.sdcpp_dir);
-        let active = self.active_profile.clone();
-        if let Some(p) = self
-            .profiles
-            .iter_mut()
-            .find(|p| p.id == active && !p.is_official())
-        {
-            p.diffusion_model = dit;
-        }
-        self.normalize();
-    }
-
-    /// Makes the official files the active model (they may still need downloading).
-    pub fn use_official(&mut self) {
-        self.normalize();
-        self.active_profile = OFFICIAL_PROFILE_ID.into();
     }
 
     /// Model files of the active profile that are not there (label, path).
@@ -1261,21 +1188,6 @@ impl AppConfig {
                 relocate(v, old, new);
             }
         }
-    }
-
-    pub fn preset(&self) -> &'static crate::catalog::Preset {
-        crate::catalog::preset(&self.hardware_preset)
-            .unwrap_or_else(|| crate::catalog::preset(crate::catalog::DEFAULT_PRESET).unwrap())
-    }
-
-    /// Uses `preset`'s runtime settings, and its files for the official profile (tuning kept).
-    /// The active profile stays: a preset never replaces the user's own files. Setup also calls
-    /// [`Self::use_official`] when it installs the official files.
-    pub fn apply_preset(&mut self, preset: &crate::catalog::Preset) {
-        self.hardware_preset = preset.id.into();
-        self.text_encoder_placement = preset.text_encoder_placement;
-        self.vram_reserve_gib = preset.vram_reserve_gib;
-        self.normalize();
     }
 
     /// VRAM the planner should assume: the override when set, otherwise the detected size.
@@ -1483,10 +1395,14 @@ impl AppConfig {
 /// vision projector together). Smaller files give nothing back: the budgets stay as measured
 /// (with the Q4_K; the default Q4_K_M counts its extra ~140 MiB).
 fn extra_weights_mib(diffusion: u64, text_encoder: u64, unified: bool) -> u64 {
-    use crate::catalog::{TEXT_ENCODER_Q4_K_M, TURBO_Q4_K, VISION_PROJECTOR};
-    let mut extra = diffusion.saturating_sub(TURBO_Q4_K.size);
+    // The reference sizes of the official files the estimate was measured against
+    // (0.12 catalog): Q4_K 4_050_916_384, Q4_K_M 4_199_565_120, TE Q4_K_M 5_027_784_800,
+    // vision projector 1_159_029_824.
+    const Q4_K: u64 = 4_050_916_384;
+    const TE: u64 = 5_027_784_800 + 1_159_029_824;
+    let mut extra = diffusion.saturating_sub(Q4_K);
     if unified {
-        extra += text_encoder.saturating_sub(TEXT_ENCODER_Q4_K_M.size + VISION_PROJECTOR.size);
+        extra += text_encoder.saturating_sub(TE);
     }
     extra >> 20
 }
@@ -1592,7 +1508,7 @@ mod tests {
             .find(|p| p.id == OFFICIAL_PROFILE_ID)
             .unwrap();
         assert!(
-            off.same_files(&ModelProfile::official(&sd, c.preset())) && off.is_official(),
+            off.same_files(&ModelProfile::official(&sd)) && off.is_official(),
             "the official profile is official again"
         );
         c.save_to(&path).unwrap();
@@ -1612,64 +1528,8 @@ mod tests {
         );
         assert!(
             c.profile()
-                .same_files(&ModelProfile::official(&sd, c.preset()))
+                .same_files(&ModelProfile::official(&sd))
         );
-    }
-
-    #[test]
-    fn presets_never_replace_the_users_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut c = AppConfig {
-            sdcpp_dir: dir.path().join("sd"),
-            ..AppConfig::default()
-        };
-        c.normalize();
-        let mut mine = own_files(dir.path());
-        mine.scan_dir = Some(dir.path().join("ComfyUI"));
-        c.set_user_files(mine.clone());
-        c.profiles
-            .iter_mut()
-            .find(|p| p.id == USER_PROFILE_ID)
-            .unwrap()
-            .recommended_settings
-            .area_fast = 768 * 768;
-        c.apply_preset(crate::catalog::preset("32gb").unwrap());
-        assert_eq!(c.active_profile, USER_PROFILE_ID);
-        assert_eq!(
-            (c.profile().text_encoder.clone(), c.hardware_preset.as_str()),
-            (mine.text_encoder.clone(), "32gb")
-        );
-        let off = c
-            .profiles
-            .iter()
-            .find(|p| p.id == OFFICIAL_PROFILE_ID)
-            .unwrap();
-        assert!(
-            off.text_encoder.ends_with("Qwen3VL-8B-Instruct-Q8_0.gguf"),
-            "the official profile follows the preset"
-        );
-        // Choosing files again keeps the tuning; switching to the official files keeps them.
-        c.set_user_files(own_files(dir.path()));
-        assert_eq!(c.profile().recommended_settings.area_fast, 768 * 768);
-        assert_eq!(c.profiles.len(), 2);
-        c.use_official();
-        assert_eq!(c.active_profile, OFFICIAL_PROFILE_ID);
-        assert!(
-            c.user_profile().is_some(),
-            "the user's profile is never deleted"
-        );
-        // The official files follow the folder.
-        c.sdcpp_dir = dir.path().join("elsewhere");
-        c.normalize();
-        assert!(
-            c.profile()
-                .diffusion_model
-                .starts_with(dir.path().join("elsewhere"))
-        );
-        // An active profile that is gone falls back to the official one.
-        c.active_profile = "nope".into();
-        c.normalize();
-        assert_eq!(c.active_profile, OFFICIAL_PROFILE_ID);
     }
 
     #[test]
@@ -1690,7 +1550,8 @@ mod tests {
         std::fs::create_dir_all(c.engine_dir()).unwrap();
         std::fs::write(c.server_exe(), b"").unwrap();
         let mine = own_files(dir.path());
-        c.set_user_files(mine.clone());
+        c.profiles.push(mine.clone());
+        c.active_profile = USER_PROFILE_ID.into();
         assert_eq!(c.missing_files().len(), 3);
         let e = c.missing_files_error().unwrap();
         assert_eq!(e.code, ErrorCode::MissingModel);
@@ -1706,24 +1567,23 @@ mod tests {
 
     #[test]
     fn larger_own_files_take_planning_memory() {
-        use crate::catalog::{TEXT_ENCODER_Q8_0, TURBO_Q4_K};
-        assert_eq!(extra_weights_mib(TURBO_Q4_K.size, 0, false), 0);
+            assert_eq!(extra_weights_mib(4_050_916_384, 0, false), 0);
         assert_eq!(
-            extra_weights_mib(TURBO_Q4_K.size / 2, 0, false),
+            extra_weights_mib(4_050_916_384 / 2, 0, false),
             0,
             "smaller files give nothing back"
         );
         assert_eq!(
-            extra_weights_mib(TURBO_Q4_K.size + (6 << 30), 0, false),
+            extra_weights_mib(4_050_916_384 + (6 << 30), 0, false),
             6 * 1024
         );
         assert_eq!(
-            extra_weights_mib(0, TEXT_ENCODER_Q8_0.size, false),
+            extra_weights_mib(0, 8_709_519_456, false),
             0,
             "the text encoder sits in system RAM"
         );
         assert!(
-            extra_weights_mib(0, TEXT_ENCODER_Q8_0.size, true) > 2000,
+            extra_weights_mib(0, 8_709_519_456, true) > 2000,
             "unified memory: it shares the GPU's memory"
         );
         // The official profile is what the budgets were measured with.
@@ -1886,7 +1746,7 @@ mod tests {
         let (old, new) = (base.path().join("QwenLocalStudio"), d.clone());
         let mut c = AppConfig::default();
         c.sdcpp_dir = old.join("sdcpp");
-        c.apply_preset(crate::catalog::preset("16gb").unwrap());
+        c.normalize();
         c.profiles.push(ModelProfile {
             id: "mine".into(),
             diffusion_model: PathBuf::from(r"C:\AI\sdcpp\x.gguf"),
@@ -1902,30 +1762,6 @@ mod tests {
     }
 
     #[test]
-    fn presets_switch_weights_and_keep_tuning() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut c = AppConfig {
-            sdcpp_dir: dir.path().to_path_buf(),
-            ..AppConfig::default()
-        };
-        c.profiles[0].recommended_settings.area_fast = 768 * 768;
-        c.apply_preset(crate::catalog::preset("32gb").unwrap());
-        let p = c.profile();
-        assert!(
-            p.diffusion_model
-                .ends_with("qwen-image-2.1-turbo-Q4_K_M.gguf"),
-            "4-bit Turbo on every preset"
-        );
-        assert!(p.text_encoder.ends_with("Qwen3VL-8B-Instruct-Q8_0.gguf"));
-        assert_eq!(p.display_name, "Qwen-Image 2.1 Turbo Q4_K_M (official)");
-        assert_eq!(p.recommended_settings.area_fast, 768 * 768);
-        assert_eq!((c.hardware_preset.as_str(), c.profiles.len()), ("32gb", 1));
-        c.vram_override_mib = 12_288;
-        assert_eq!(c.planning_vram_mib(Some(16303)), Some(12_288));
-        assert!(c.validate().is_ok());
-        c.vram_override_mib = 100;
-        assert!(c.validate().is_err());
-    }
 
     #[test]
     fn schema_8_migration() {
@@ -2362,7 +2198,7 @@ mod tests {
             model: "q35".into(),
             api_key: String::new(),
         };
-        let mut stock = AppConfig::default();
+        let stock = AppConfig::default();
         assert!(!stock.external_enhancer_configured());
 
         let mut ext = stock.clone();
@@ -2621,37 +2457,6 @@ mod tests {
     }
 
     #[test]
-    fn eight_gb_preset_reserves_more_vram() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.json");
-        let load = |json: &str| {
-            std::fs::write(&path, json).unwrap();
-            AppConfig::load_from(&path).vram_reserve_gib
-        };
-        assert_eq!(
-            load(r#"{"schemaVersion": 9, "hardwarePreset": "8gb", "vramReserveGib": 1.0}"#),
-            1.5
-        );
-        assert_eq!(
-            load(r#"{"schemaVersion": 9, "hardwarePreset": "8gb", "vramReserveGib": 2.0}"#),
-            2.0,
-            "set by hand"
-        );
-        assert_eq!(
-            load(r#"{"schemaVersion": 9, "hardwarePreset": "16gb", "vramReserveGib": 1.0}"#),
-            1.0
-        );
-        assert_eq!(
-            load(r#"{"schemaVersion": 10, "hardwarePreset": "8gb", "vramReserveGib": 1.0}"#),
-            1.0,
-            "chosen after the migration"
-        );
-        let mut c = AppConfig::default();
-        c.apply_preset(crate::catalog::preset("8gb").unwrap());
-        assert_eq!(c.vram_reserve_gib, 1.5);
-        c.apply_preset(crate::catalog::preset("12gb").unwrap());
-        assert_eq!(c.vram_reserve_gib, 1.0);
-    }
 
     #[test]
     fn roundtrip_and_partial_files() {

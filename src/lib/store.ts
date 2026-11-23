@@ -71,10 +71,6 @@ export interface State {
   compareUpscalers: boolean;
   toasts: Toast[];
   galleryVersion: number;
-  /** Benchmark this Mac: null until Settings asks the service. */
-  needsSetup: boolean;
-  /** Setup opens on "Use models I already have" or on the official download (Settings → Models). */
-  setupMode: "own" | "official" | null;
   /** Before/after view for results made from another image; kept while switching results. */
   compare: CompareMode;
   /** Flicker period in ms. */
@@ -468,8 +464,6 @@ let state: State = {
   compareUpscalers: false,
   toasts: [],
   galleryVersion: 0,
-  needsSetup: false,
-  setupMode: null,
   compare: "off",
   flickerMs: 500,
   privateMode: false,
@@ -530,9 +524,6 @@ export function toastError(e: unknown) {
 }
 
 /** Opens Setup (also over a finished setup): to fix missing model files, or to choose own files. */
-export function openModelSetup(mode: "own" | "official" | null = null) {
-  setState({ overlay: null, needsSetup: true, setupMode: mode });
-}
 
 /** The engine or a model file is missing (drive not connected, moved, deleted). */
 export const isMissingModel = (e: unknown) => (e instanceof ApiError ? e.body.code : (e as AppErrorBody | null)?.code) === "missing_model";
@@ -671,12 +662,7 @@ export function freshFailure(prev: JobView | undefined, job: JobView): boolean {
 }
 
 function onJob(job: JobView) {
-  // A model file went missing between submitting and starting: Setup shows what and how to fix
-  // it (only for a job that just failed, not old ones listed again after reconnecting).
   const prev = getState().jobs[job.id];
-  if (job.status === "failed" && prev?.status !== "failed" && isMissingModel(job.error) && job.finished_at && Date.now() - Date.parse(job.finished_at) < 60_000) {
-    openModelSetup();
-  }
   // Results replacing a version in progress of the open project hatch out of the cocoon when
   // first shown (marked before the state change renders them).
   if (job.status === "done" && prev?.status !== "done" && getState().session.some((i) => i.jobId === job.id && i.kind === "job")) {
@@ -770,7 +756,7 @@ function countImageMade() {
     return;
   }
   const s = getState();
-  if (!starPromptDue(made, s.overlay !== null || s.tour !== null || s.needsSetup)) return;
+  if (!starPromptDue(made, s.overlay !== null || s.tour !== null)) return;
   starSeen = true;
   setState({ starPrompt: true });
   api
@@ -1248,8 +1234,6 @@ export async function submitRequest(req: GenerationRequest): Promise<string | nu
     setState((s) => ({ jobs: { ...s.jobs, [job.id]: job }, session: [...s.session, item], selected: item.key, redo: [] }));
     return job.id;
   } catch (e) {
-    // The prompt and images stay in the composer: once the files are back, Generate again.
-    if (isMissingModel(e)) openModelSetup();
     toastError(e);
     return null;
   }
@@ -1299,7 +1283,6 @@ async function startPromptReview() {
     const job = await api.submit(req);
     setState((st) => ({ jobs: { ...st.jobs, [job.id]: job }, review: { jobId: job.id, prompt: st.composer.prompt } }));
   } catch (e) {
-    if (isMissingModel(e)) openModelSetup();
     toastError(e);
   }
 }

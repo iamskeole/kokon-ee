@@ -7,7 +7,7 @@ import { api } from "../lib/api";
 import { native } from "../lib/native";
 import { haptic } from "../lib/haptics";
 import { isNarrow, shortcut } from "../lib/platform";
-import { getState, isMissingModel, newProject, openModelSetup, redoVersion, refreshStatus, setPrivateMode, setState, toastError, undoKey, undoVersion, useStore } from "../lib/store";
+import { getState, newProject, redoVersion, refreshStatus, setPrivateMode, setState, toastError, undoKey, undoVersion, useStore } from "../lib/store";
 import { SilkSpin } from "./Cocoon";
 import { ProjectTitle, Wordmark } from "./Sidebar";
 import { VIDEOS } from "../lib/videos";
@@ -36,7 +36,7 @@ export function StatusIndicator({ quiet = false }: { quiet?: boolean }) {
       case "error":
         cls = "dot error";
         text = server.error?.message ?? "Inference server error";
-        title = isMissingModel(server.error) && !external ? "Find or download the missing file" : "Open Diagnostics";
+        title = "Open Diagnostics";
         break;
       default:
         text = external ? "No model loaded" : "Model not loaded";
@@ -52,8 +52,7 @@ export function StatusIndicator({ quiet = false }: { quiet?: boolean }) {
       className="status"
       title={title}
       onClick={() => {
-        if (server.state === "error" && isMissingModel(server.error) && !external) openModelSetup();
-        else if (server.state === "error") setState({ overlay: "settings" });
+        if (server.state === "error") setState({ overlay: "settings" });
         else if (server.state === "stopped" && connected && !external) api.startBackend().then(refreshStatus, toastError);
       }}
     >
@@ -136,13 +135,12 @@ export function HelpMenu() {
 }
 export function TopBar() {
   const overlay = useStore((s) => s.overlay);
-  const needsSetup = useStore((s) => s.needsSetup);
   const sidebar = useStore((s) => s.sidebar);
   return (
     <div className="topbar">
       <div className="brand">
-        {(!sidebar || needsSetup) && <Wordmark />}
-        {!sidebar && !needsSetup && (
+        {!sidebar && <Wordmark />}
+        {!sidebar && (
           <>
             <IconButton title="Show sidebar" onClick={() => setState({ sidebar: true })}>
               <PanelLeft size={18} />
@@ -152,15 +150,15 @@ export function TopBar() {
             </IconButton>
           </>
         )}
-        {overlay === "gallery" ? <span className="project-title">All images</span> : !needsSetup && <ProjectTitle />}
+        {overlay === "gallery" ? <span className="project-title">All images</span> : <ProjectTitle />}
       </div>
       <div className="toolbar">
-        {!needsSetup && <HistoryButtons />}
+        <HistoryButtons />
         <StatusIndicator />
-        {!needsSetup && <PrivateToggle />}
+        <PrivateToggle />
         <HelpMenu />
         {/* Settings lives at the foot of the sidebar; here only while the sidebar is hidden. */}
-        {(!sidebar || needsSetup) && (
+        {!sidebar && (
           <IconButton title="Settings" onClick={() => setState({ overlay: "settings" })}>
             <Settings size={18} />
           </IconButton>

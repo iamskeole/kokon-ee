@@ -14,14 +14,14 @@ import { BoxEditor } from "./components/BoxEditor";
 import { InpaintEditor } from "./components/InpaintEditor";
 import { LayersEditor } from "./components/LayersEditor";
 import { Settings as SettingsDialog } from "./components/Settings";
-import { Setup } from "./components/Setup";
 import { Sidebar } from "./components/Sidebar";
 import { Stage } from "./components/Stage";
 import { Tour } from "./components/Tour";
 import { PromptTips } from "./components/PromptTips";
 import { Shortcuts } from "./components/Shortcuts";
 import { AiCheck } from "./components/AiCheck";
-import { WhatsNew, whatsNewDue } from "./components/WhatsNew";
+import { WHATS_NEW_VERSION, WhatsNew } from "./components/WhatsNew";
+import { whatsNewDue } from "./lib/logic";
 import { UpscalerCompare } from "./components/Upscalers";
 import { KokonMark, Welcome } from "./components/Welcome";
 import { PhoneApp } from "./components/PhoneApp";
@@ -113,7 +113,6 @@ function startBrowserHeartbeat() {
 
 export default function App() {
   const overlay = useStore((s) => s.overlay);
-  const needsSetup = useStore((s) => s.needsSetup);
   const compareUpscalers = useStore((s) => s.compareUpscalers);
   const sidebar = useStore((s) => s.sidebar);
   const editing = useStore((s) => s.composer.refs.length > 0 && s.session.length > 0);
@@ -124,7 +123,7 @@ export default function App() {
   const narrow = useNarrow();
   // First launch: the tour starts once the main window is free (after welcome and setup).
   const tourPending = useRef(false);
-  const tourDue = boot === "ok" && !needsSetup && !overlay;
+  const tourDue = boot === "ok" && !overlay;
   useEffect(() => {
     if (!tourDue || !tourPending.current) return;
     tourPending.current = false;
@@ -153,7 +152,7 @@ export default function App() {
         await loadProjects().catch(() => {});
         startEvents();
         const cfg = await api.config();
-        const st = await refreshStatus();
+        await refreshStatus();
         refreshLoras();
         // First launch: the welcome screen, once (Settings → General shows it again).
         const ui = (cfg.ui ?? {}) as Record<string, unknown>;
@@ -164,10 +163,9 @@ export default function App() {
           tourPending.current = true;
           addExampleProjects().catch(() => {});
         }
-        // After an app update: what's new, with the engine and model downloads the release offers
-        // (they can be postponed there). Closing it goes on with afterStartScreens.
-        const whatsNew = cfg.setupComplete && whatsNewDue(ui, st?.engine);
-        setState({ needsSetup: !cfg.setupComplete, ...(!welcomeSeen ? { overlay: "welcome" } : whatsNew ? { overlay: "whats-new" } : {}) });
+        // After an app update: what's new in this release.
+        const whatsNew = whatsNewDue(ui, WHATS_NEW_VERSION);
+        setState(!welcomeSeen ? { overlay: "welcome" } : whatsNew ? { overlay: "whats-new" } : {});
         setBoot("ok");
         // An externally managed engine: visiting the UI must not put a model on the GPU.
         if (cfg.externalEngine) setState({ external: cfg.externalEngine, models: cfg.models ?? [] });
@@ -321,7 +319,7 @@ export default function App() {
   );
 
   // A phone: its own layout (components/PhoneApp.tsx); setup keeps the usual one.
-  if (narrow && !needsSetup) {
+  if (narrow) {
     return (
       <div className="app phone">
         <PhoneApp />
@@ -333,11 +331,11 @@ export default function App() {
 
   return (
     <div className="app">
-      {sidebar && !needsSetup && <Sidebar />}
+      {sidebar && <Sidebar />}
       <div className="workspace">
         <TopBar />
         <div className="main">
-          {needsSetup ? <Setup /> : <Stage />}
+          <Stage />
           {overlay === "gallery" && <Gallery />}
           {overlay === "inpaint" && <InpaintEditor />}
           {overlay === "boxes" && <BoxEditor />}
@@ -345,7 +343,7 @@ export default function App() {
           {overlay === "layers" && <LayersEditor />}
           {dragging && <div className="drop-hint">{editing ? "Drop to add as a reference image" : "Drop an image to start editing it"}</div>}
         </div>
-        {!needsSetup && overlay !== "inpaint" && overlay !== "expand" && overlay !== "gallery" && <Composer />}
+        {overlay !== "inpaint" && overlay !== "expand" && overlay !== "gallery" && <Composer />}
       </div>
       {dialogs}
       <Tour />

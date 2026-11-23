@@ -305,12 +305,6 @@ async fn a_browser_gets_the_ui_api_but_no_paths_on_the_server() {
             "/api/v1/inputs/import",
             json!({ "path": "/etc/passwd" }),
         ),
-        ("POST", "/api/v1/models/scan", json!({ "dir": "/" })),
-        (
-            "POST",
-            "/api/v1/models/inspect",
-            json!({ "path": "/etc/shadow" }),
-        ),
         (
             "POST",
             "/api/v1/gallery/x/export",

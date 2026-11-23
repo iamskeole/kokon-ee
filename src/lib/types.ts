@@ -289,8 +289,6 @@ export interface StatusResponse {
   setup_complete: boolean;
 }
 
-export interface Check { id: string; label: string; ok: boolean; detail: string }
-export interface SetupReport { ready: boolean; checks: Check[]; devices: [string, string][]; backend_version: string | null }
 
 export type TextEncoderPlacement = "ram" | "gpu" | "cpu" | "auto" | "disk";
 
@@ -447,101 +445,6 @@ export interface InstallStatus {
   sdcpp_dir: string | null;
   items: InstallItem[];
   bytes_per_sec: number;
-}
-
-export interface HardwarePreset {
-  id: string;
-  label: string;
-  summary: string;
-  verified: boolean;
-  min_vram_mib: number;
-  files: InstallItem[];
-  download_bytes: number;
-  disk_bytes: number;
-}
-
-export type ModelRole = "diffusion" | "vae" | "text_encoder" | "vision_projector";
-
-/** What a model file is (read from its header). */
-export interface ModelFileInfo {
-  path: string;
-  size: number;
-  role: ModelRole | null;
-  /** Usable with Qwen-Image 2.1 in this role. */
-  compatible: boolean;
-  /** A text encoder with the vision weights (no projector needed). */
-  has_vision: boolean;
-  /** Main weight type, e.g. "Q4_K", "BF16", "INT8". */
-  weights: string;
-  official: boolean;
-  problem: string | null;
-  /** Usable, but probably not what the user wants (e.g. the base model instead of Turbo). */
-  warning?: string | null;
-}
-
-export interface ModelScan {
-  dir: string;
-  files: ModelFileInfo[];
-  picks: Record<"diffusion" | "vae" | "text_encoder" | "vision_projector", string | null>;
-  /** Missing files of the active profile found under the same name (moved). */
-  moved: Partial<Record<ModelRole, string>>;
-}
-
-/** A file the user chose, or an official file to download into a folder. */
-export type ModelSlot = { path: string } | { download: string };
-
-/** The active model's files and what is missing (`GET /models`). */
-export interface ModelsStatus {
-  active: { id: string; display_name: string; source: ProfileSource; model: string };
-  slots: { role: ModelRole | null; label: string; path: string; exists: boolean; info: ModelFileInfo | null }[];
-  missing: { label: string; path: string }[];
-  /** Missing files Setup can download (official ones). */
-  downloadable: string[];
-  engine_installed: boolean;
-  /** Folder the active files were found in (none for the official files). */
-  scan_dir: string | null;
-  /** Folder of the user's own files. */
-  user_scan_dir: string | null;
-  has_user_profile: boolean;
-  /** Every file of the user's own profile is there. */
-  user_installed: boolean;
-  official_installed: boolean;
-  default_download_dir: string;
-  /** The texture-fix VAE (#21): in use, or what switching to it downloads. */
-  vae: { improved: boolean; download_bytes: number; page: string };
-  /** The Q4_K_M image model (0.11.1): "official" for the official files still on the Q4_K, "own" for own files that are
-   * that Q4_K (a suggestion only), null otherwise; and what switching downloads. */
-  dit: { update: "official" | "own" | null; download_bytes: number; page: string };
-}
-
-export interface HardwareReport {
-  /** Source of the active profile. */
-  active_source: ProfileSource;
-  /** What the user's own-files profile still needs (engine, upscalers, official pieces). */
-  user_files: { files: InstallItem[]; download_bytes: number; disk_bytes: number } | null;
-  /** The card the presets are sized for (`gpu_index` in `gpus`). */
-  gpu: StatusResponse["gpu"];
-  gpus: { name: string; memory_total_mib: number }[];
-  gpu_index: number;
-  /** Card the engine runs on now. */
-  gpu_in_use: number;
-  nvidia: boolean;
-  vendor: string | null;
-  /** Engine the presets' file lists are for. */
-  backend: GpuBackend;
-  recommended_backend: GpuBackend;
-  /** Engine in use now. */
-  current_backend: GpuBackend;
-  vram_mib: number | null;
-  vram_simulated: boolean;
-  ram_total_mib: number;
-  recommended: string;
-  current: string;
-  presets: HardwarePreset[];
-  sdcpp_dir: string;
-  default_sdcpp_dir: string;
-  free_bytes: number | null;
-  issues_url: string;
 }
 
 /** Events the service pushes (the /events stream). */

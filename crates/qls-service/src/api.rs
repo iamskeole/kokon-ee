@@ -21,13 +21,13 @@ use futures_util::stream::Stream;
 use base64::Engine as _;
 use qls_core::{
     catalog,
-    config::{AppConfig, ExternalEngine, GpuBackend, OFFICIAL_PROFILE_ID, USER_PROFILE_ID},
+    config::{AppConfig, ExternalEngine},
     diagnostics,
     engine::{APP_VERSION, JobView, LoraPatch},
     error::{AppError, ErrorCode},
     geometry::{ExpansionUnits, Size, aspect_label},
-    imaging, installer,
-    modelfile::{self, FileInfo, Role, Slot},
+    imaging,
+    modelfile,
     paths,
     planner::{GenerationRequest, InpaintAction, Mode, OutpaintSpec, Quality, UpscaleMethod, UpscaleSpec},
     projects::Project,
@@ -66,19 +66,8 @@ pub fn router(state: Arc<AppState>, lan: bool) -> Router {
     let ctx = AuthCtx { app: state.clone(), lan };
     let api = Router::new()
         .route("/status", get(status))
-        .route("/setup", get(setup))
-        .route("/setup/hardware", get(setup_hardware))
-        .route("/setup/install", get(install_status).post(install_start))
+        .route("/setup/install", get(install_status))
         .route("/setup/install/cancel", post(install_cancel))
-        .route("/setup/gpu", post(setup_gpu))
-        .route("/setup/legacy-upscalers", get(legacy_upscalers).delete(remove_legacy_upscalers))
-        .route("/models", get(models_status))
-        .route("/models/scan", post(models_scan))
-        .route("/models/inspect", post(models_inspect))
-        .route("/models/user", post(models_set_user))
-        .route("/models/use", post(models_use))
-        .route("/models/vae", post(models_improve_vae))
-        .route("/models/dit", post(models_new_dit))
         .route("/models/switch", post(models_switch))
         .route("/upscalers", get(list_upscalers))
         .route("/upscalers/{name}/download", post(download_upscaler))
@@ -266,7 +255,6 @@ async fn status(State(s): St) -> Json<Value> {
     let jobs = s.engine.jobs();
     let queued = jobs.iter().filter(|j| j.status == qls_core::engine::JobStatus::Queued).count();
     let cfg = s.engine.config();
-    let e = s.engine.clone();
     // The engine is a pinned stock build (the fresh-box doc names it): there is no in-app update.
     let engine_update = false;
     // task-038: with an external engine the upscaler lives on the engine box; `available`
@@ -306,187 +294,6 @@ async fn status(State(s): St) -> Json<Value> {
     }))
 }
 
-async fn setup(State(s): St) -> ApiResult<Json<Value>> {
-    let e = s.engine.clone();
-    let _ = tokio::task::spawn_blocking(move || {
-        e.place_bundled_upscaler();
-        e.place_bundled_watermark();
-    })
-    .await;
-    let cfg = s.engine.config();
-    let srv_ok = s.engine.server.status().state == qls_core::process::ServerState::Ready;
-    let e = s.engine.clone();
-    let report = tokio::task::spawn_blocking(move || diagnostics::setup_checks_with(&cfg, Some(srv_ok), e.devices(), e.backend_version())).await.map_err(AppError::internal)?;
-    Ok(Json(serde_json::to_value(report).unwrap()))
-}
-
-/// What the setup wizard shows: the GPU, the recommended preset and, per preset, which files
-/// are installed in the configured folder and how much is left to download.
-#[derive(Deserialize)]
-struct HardwareQ {
-    /// Engine to list the downloads for; default: the configured one.
-    backend: Option<GpuBackend>,
-    /// Card (index in `gpus`) to size the presets for; default: the one in use.
-    gpu: Option<usize>,
-}
-
-async fn setup_hardware(State(s): St, Query(q): Query<HardwareQ>) -> ApiResult<Json<Value>> {
-    let engine = s.engine.clone();
-    let v = tokio::task::spawn_blocking(move || {
-        let cfg = engine.config();
-        let cards = engine.gpus();
-        let in_use = engine.gpu_index();
-        let card = q.gpu.filter(|&i| i < cards.len()).unwrap_or(in_use);
-        let gpu = cards.get(card).cloned();
-        let detected = gpu.as_ref().map(|g| g.planning_mib());
-        let vram = cfg.planning_vram_mib(detected);
-        let mut sys = sysinfo::System::new();
-        sys.refresh_memory();
-        let dir = cfg.sdcpp_dir.clone();
-        let vendor = gpu.as_ref().map(|g| g.vendor.clone());
-        let recommended_backend = vendor.as_deref().map(GpuBackend::for_vendor).unwrap_or_default();
-        let backend = q.backend.unwrap_or(if cfg.setup_complete { cfg.gpu_backend } else { recommended_backend });
-        let unified = gpu.as_ref().is_some_and(|g| g.unified);
-        let presets: Vec<Value> = catalog::PRESETS
-            .iter()
-            .filter(|p| p.offered(unified))
-            .map(|p| {
-                let files = catalog::downloads_for(p, backend, &dir);
-                let (download, disk) = installer::space_needed(&dir, &files);
-                json!({
-                    "id": p.id, "label": if unified { p.unified_label } else { p.label }, "summary": if unified { p.unified_summary } else { p.summary }, "verified": p.verified, "min_vram_mib": p.min_vram_mib,
-                    "files": installer::preview(&dir, &files), "download_bytes": download, "disk_bytes": disk,
-                })
-            })
-            .collect();
-        // The user's own files: what their profile still needs (engine, upscalers, official
-        // pieces they chose to download).
-        let user_files = cfg.user_profile().map(|u| {
-            let files = catalog::downloads_for_profile(u, backend);
-            let (download, disk) = installer::space_needed(&dir, &files);
-            json!({ "files": installer::preview(&dir, &files), "download_bytes": download, "disk_bytes": disk })
-        });
-        json!({
-            "active_source": cfg.profile().source,
-            "user_files": user_files,
-            "gpu": gpu,
-            "gpus": cards.iter().map(|c| json!({ "name": c.name, "memory_total_mib": c.memory_total_mib })).collect::<Vec<_>>(),
-            "gpu_index": card,
-            "gpu_in_use": in_use,
-            "nvidia": vendor.as_deref() == Some("nvidia"),
-            "vendor": vendor,
-            "backend": backend,
-            "recommended_backend": recommended_backend,
-            "vram_mib": vram,
-            "vram_simulated": cfg.vram_override_mib > 0,
-            "ram_total_mib": sys.total_memory() / (1024 * 1024),
-            "recommended": catalog::recommended_preset(vram, unified).id,
-            "current": cfg.hardware_preset,
-            "current_backend": cfg.gpu_backend,
-            "presets": presets,
-            "sdcpp_dir": dir,
-            "default_sdcpp_dir": qls_core::config::default_sdcpp_dir(),
-            "free_bytes": installer::free_space(&dir),
-            "issues_url": catalog::ISSUES_URL,
-        })
-    })
-    .await
-    .map_err(AppError::internal)?;
-    Ok(Json(v))
-}
-
-#[derive(Deserialize)]
-struct InstallBody {
-    preset: String,
-    /// Engine to install; default: the configured one.
-    backend: Option<GpuBackend>,
-    /// Make the preset active when done (false: an engine update keeps the current settings).
-    #[serde(default = "yes")]
-    apply: bool,
-    /// Card (index in `/setup/hardware` `gpus`) to run on once the engine is installed.
-    gpu: Option<usize>,
-    /// Which files: "official" (the preset's, made active when done) or "user" (the engine
-    /// and what the user's own profile still needs). Default: "official" when `apply`, else
-    /// the active profile's (an engine update never downloads models a user doesn't use).
-    target: Option<String>,
-}
-
-fn yes() -> bool {
-    true
-}
-
-/// Starts downloading a preset into the configured folder. When every file is installed the
-/// preset's runtime settings apply, and for the official files their profile becomes active.
-async fn install_start(State(s): St, Json(b): Json<InstallBody>) -> ApiResult<Json<Value>> {
-    let preset = catalog::preset(&b.preset).ok_or_else(|| AppError::invalid(format!("Unknown preset {}.", b.preset)))?;
-    let cfg = s.engine.config();
-    let backend = b.backend.unwrap_or(cfg.gpu_backend);
-    let user = match b.target.as_deref() {
-        Some("user") => true,
-        Some("official") => false,
-        None => !b.apply && !cfg.profile().is_official(),
-        Some(t) => return Err(AppError::invalid(format!("Unknown install target {t}.")).into()),
-    };
-    let downloads = if user {
-        let u = cfg.user_profile().ok_or_else(|| AppError::invalid("Choose your model files first."))?;
-        catalog::downloads_for_profile(u, backend)
-    } else {
-        catalog::downloads_for(preset, backend, &cfg.sdcpp_dir)
-    };
-    // A running server keeps its DLLs open; the engine zip may need to replace them.
-    let st = s.engine.server.status();
-    if st.owned && st.state != qls_core::process::ServerState::Stopped {
-        if s.engine.has_pending_work() {
-            return Err(AppError::new(ErrorCode::QueueFull, "Wait for the current images to finish, then install.").into());
-        }
-        s.engine.server.stop().await;
-        s.engine.emit_server();
-    }
-    let engine = s.engine.clone();
-    // Below ~8 GiB of planning memory (a 16 GB Mac) only streaming weights from disk fits.
-    let small_unified = s.engine.gpu().is_some_and(|g| g.unified && g.planning_mib() < 8 * 1024);
-    let apply = b.apply;
-    let card = b.gpu;
-    let on_finish = Box::new(move |complete: bool| {
-        if !complete || !apply {
-            return;
-        }
-        let mut c = engine.config();
-        c.apply_preset(preset);
-        if !user {
-            c.use_official();
-        }
-        c.gpu_backend = backend;
-        if backend == GpuBackend::Metal && small_unified {
-            c.text_encoder_placement = qls_core::config::TextEncoderPlacement::Disk;
-        }
-        if let Err(e) = engine.set_config(c) {
-            tracing::error!("could not save the installed preset: {}", e.message);
-        }
-        // The engine can name its devices only now that it is installed.
-        if let Some(i) = card {
-            match engine.use_card(i) {
-                Ok(Some(_)) => {}
-                Ok(None) => tracing::warn!("the engine does not list card {i}; keeping device {}", engine.config().device),
-                Err(e) => tracing::error!("could not save the chosen GPU: {}", e.message),
-            }
-        }
-    });
-    // The bundled upscaler first, so it is not downloaded again.
-    let e = s.engine.clone();
-    let _ = tokio::task::spawn_blocking(move || {
-        e.place_bundled_upscaler();
-        e.place_bundled_watermark();
-    })
-    .await;
-    let label = if user { format!("user:{}", preset.id) } else { preset.id.to_string() };
-    s.engine.installer.start(cfg.sdcpp_dir.clone(), &label, downloads, on_finish)?;
-    Ok(Json(serde_json::to_value(s.engine.installer.status()).unwrap()))
-}
-
-/// The upscalers Settings offers, with whether each is installed and what it takes to get it.
-/// `installed` is `null` in external mode when the engine has not been queried yet; its
-/// list (not this box's files) is the source of truth (task-038).
 async fn list_upscalers(State(s): St) -> Json<Value> {
     let cfg = s.engine.config();
     let active = cfg.upscaler().map(|u| u.0);
@@ -713,49 +520,6 @@ async fn matte_cancel(Json(b): Json<MatteCancelBody>) -> Json<Value> {
     Json(json!({ "stopped": running }))
 }
 
-/// Upscaler models of earlier versions in the app's own folder (Settings offers to delete
-/// them; files elsewhere are never touched).
-#[derive(Deserialize)]
-struct KeepQ {
-    /// Another model to keep besides the saved one (an unsaved choice in Settings).
-    keep: Option<String>,
-}
-
-async fn legacy_upscalers(State(s): St, Query(q): Query<KeepQ>) -> Json<Value> {
-    let cfg = s.engine.config();
-    let files = installer::legacy_upscalers(&cfg.sdcpp_dir, &[cfg.upscaler_model.trim(), q.keep.as_deref().unwrap_or("")]);
-    let bytes: u64 = files.iter().map(|(_, n)| n).sum();
-    Json(json!({ "files": files.iter().map(|(p, _)| p).collect::<Vec<_>>(), "bytes": bytes }))
-}
-
-async fn remove_legacy_upscalers(State(s): St, Query(q): Query<KeepQ>) -> ApiResult<Json<Value>> {
-    let cfg = s.engine.config();
-    let keep = q.keep.unwrap_or_default();
-    let freed = tokio::task::spawn_blocking(move || installer::remove_legacy_upscalers(&cfg.sdcpp_dir, &[cfg.upscaler_model.trim(), keep.as_str()])).await.map_err(AppError::internal)??;
-    Ok(Json(json!({ "freed_bytes": freed })))
-}
-
-#[derive(Deserialize)]
-struct GpuBody {
-    /// Index in `/setup/hardware` `gpus`.
-    gpu: usize,
-}
-
-/// Runs the engine on another card (setup's GPU picker).
-async fn setup_gpu(State(s): St, Json(b): Json<GpuBody>) -> ApiResult<Json<Value>> {
-    let e = s.engine.clone();
-    let r = tokio::task::spawn_blocking(move || e.use_card(b.gpu)).await.map_err(AppError::internal)??;
-    let Some(restart) = r else {
-        return Err(AppError::invalid("The engine does not see this graphics card. Pick it in Settings → Performance → GPU device.").into());
-    };
-    let st = s.engine.server.status();
-    if restart && st.owned && st.state != qls_core::process::ServerState::Stopped && !s.engine.has_pending_work() {
-        s.engine.server.stop().await;
-        s.engine.emit_server();
-    }
-    Ok(Json(json!({ "saved": true })))
-}
-
 async fn install_status(State(s): St) -> Json<Value> {
     Json(serde_json::to_value(s.engine.installer.status()).unwrap())
 }
@@ -838,12 +602,10 @@ async fn diagnostics_json(State(s): St) -> ApiResult<Json<Value>> {
         let _ = writeln!(text, "CUDA backend: {}", if cuda { "available" } else { "NOT available" });
         let _ = writeln!(text, "\n[Inference server]");
         let _ = writeln!(text, "stable-diffusion.cpp: {}", version.clone().unwrap_or_else(|| "unknown".into()));
-        let tags: Vec<String> = catalog::engine_downloads(cfg.gpu_backend)
-            .iter()
-            .filter(|d| d.engine_tag.is_some())
-            .map(|d| d.installed_tag(&cfg.sdcpp_dir).unwrap_or_else(|| "none".into()))
-            .collect();
-        let _ = writeln!(text, "Engine release: {} (expected {})", tags.join(", "), catalog::engine_tag());
+        let rel = std::fs::read_to_string(cfg.engine_dir().join(catalog::ENGINE_MARKER))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| "unknown (no Kokon engine marker)".into());
+        let _ = writeln!(text, "Engine release: {} (pinned {})", rel, catalog::engine_tag());
         let _ = writeln!(text, "State: {:?}, owned: {}, pid: {:?}, port: {}", srv.state, srv.owned, srv.pid, srv.port);
         if let Some(e) = &srv.error {
             let _ = writeln!(text, "Last error: {} {}", e.message, e.detail.clone().unwrap_or_default());
@@ -1866,233 +1628,6 @@ async fn save_and_restart(s: &AppState, cfg: AppConfig) -> ApiResult<()> {
     Ok(())
 }
 
-/// Downloads the texture-fix VAE (#21) into the app's folder and makes the active model use
-/// it (progress in `/setup/install`). The server holds the old file open, so it restarts once
-/// idle; then the original VAE in the app's folder is deleted if no profile uses it. The user's
-/// own VAE is never deleted.
-async fn models_improve_vae(State(s): St) -> ApiResult<Json<Value>> {
-    let dir = s.engine.config().sdcpp_dir;
-    let engine = s.engine.clone();
-    let on_finish = Box::new(move |complete: bool| {
-        if !complete {
-            return;
-        }
-        let mut c = engine.config();
-        c.use_improved_vae();
-        let restart = match engine.set_config(c) {
-            Ok(r) => r,
-            Err(e) => return tracing::error!("could not switch to the new VAE: {}", e.message),
-        };
-        tracing::info!("switched to the texture-fix VAE");
-        tokio::spawn(async move {
-            if restart {
-                while engine.has_pending_work() {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-                let st = engine.server.status();
-                if st.owned && st.state != qls_core::process::ServerState::Stopped {
-                    engine.server.stop().await;
-                    engine.emit_server();
-                }
-            }
-            let e = engine.clone();
-            let _ = tokio::task::spawn_blocking(move || e.remove_unused_original_vae()).await;
-        });
-    });
-    s.engine.installer.start(dir, "vae", vec![catalog::VAE], on_finish)?;
-    Ok(Json(serde_json::to_value(s.engine.installer.status()).unwrap()))
-}
-
-/// Downloads the Q4_K_M image model into the app's folder and makes the active model use it
-/// (progress in `/setup/install`), like [`models_improve_vae`]: the server restarts once idle,
-/// then the Q4_K in the app's folder is deleted if no profile uses it. The user's own files are
-/// never deleted.
-async fn models_new_dit(State(s): St) -> ApiResult<Json<Value>> {
-    let dir = s.engine.config().sdcpp_dir;
-    let engine = s.engine.clone();
-    let on_finish = Box::new(move |complete: bool| {
-        if !complete {
-            return;
-        }
-        let mut c = engine.config();
-        c.use_new_dit();
-        let restart = match engine.set_config(c) {
-            Ok(r) => r,
-            Err(e) => return tracing::error!("could not switch to the Q4_K_M image model: {}", e.message),
-        };
-        tracing::info!("switched to the Q4_K_M image model");
-        tokio::spawn(async move {
-            if restart {
-                while engine.has_pending_work() {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-                let st = engine.server.status();
-                if st.owned && st.state != qls_core::process::ServerState::Stopped {
-                    engine.server.stop().await;
-                    engine.emit_server();
-                }
-            }
-            let e = engine.clone();
-            let _ = tokio::task::spawn_blocking(move || e.remove_unused_old_dit()).await;
-        });
-    });
-    s.engine.installer.start(dir, "dit", vec![catalog::TURBO_Q4_K_M], on_finish)?;
-    Ok(Json(serde_json::to_value(s.engine.installer.status()).unwrap()))
-}
-
-fn role_of(label: &str) -> Option<Role> {
-    Role::ALL.into_iter().find(|r| r.label() == label)
-}
-
-/// The active model: its files (what each is, whether it is there), what is missing and what
-/// can be done about it. Setup shows this when a file is missing.
-async fn models_status(State(s): St) -> ApiResult<Json<Value>> {
-    let cfg = s.engine.config();
-    let v = tokio::task::spawn_blocking(move || {
-        let p = cfg.profile();
-        let slots: Vec<Value> = p
-            .files()
-            .into_iter()
-            .map(|(label, path, _)| {
-                let exists = path.is_file();
-                // Own files only: the official ones are known (and their headers are big).
-                let info = (exists && !p.is_official()).then(|| modelfile::inspect(path).ok()).flatten();
-                json!({ "role": role_of(label), "label": label, "path": path, "exists": exists, "info": info })
-            })
-            .collect();
-        let downloadable: Vec<&str> = catalog::profile_model_downloads(p).iter().map(|d| d.label).collect();
-        let official_installed = cfg.profiles.iter().find(|q| q.id == OFFICIAL_PROFILE_ID).is_some_and(|q| q.files().iter().all(|(_, f, _)| f.is_file()));
-        json!({
-            "active": { "id": p.id, "display_name": p.display_name, "source": p.source, "model": p.model },
-            "slots": slots,
-            "missing": cfg.missing_files().iter().map(|(l, f)| json!({ "label": l, "path": f })).collect::<Vec<_>>(),
-            "downloadable": downloadable,
-            "engine_installed": cfg.server_exe().is_file(),
-            // The folder the active files were found in (none for the official ones), and the
-            // one of the user's own files (offered to switch back to them).
-            "scan_dir": p.scan_dir,
-            "user_scan_dir": cfg.user_profile().and_then(|u| u.scan_dir.clone()),
-            "has_user_profile": cfg.user_profile().is_some(),
-            "user_installed": cfg.user_profile().is_some_and(|u| u.files().iter().all(|(_, f, _)| f.is_file())),
-            "official_installed": official_installed,
-            "default_download_dir": catalog::join_rel(&cfg.sdcpp_dir, catalog::MODEL_SUBDIR),
-            // The texture-fix VAE (#21): in use, or what switching to it downloads.
-            "vae": {
-                "improved": cfg.uses_improved_vae(),
-                "download_bytes": if catalog::VAE.is_present(&cfg.sdcpp_dir) { 0 } else { catalog::VAE.size },
-                "page": catalog::VAE.page,
-            },
-            // The Q4_K_M image model (0.11.1): what is offered, and what switching downloads.
-            "dit": {
-                "update": catalog::dit_update(&cfg),
-                "download_bytes": if catalog::TURBO_Q4_K_M.is_present(&cfg.sdcpp_dir) { 0 } else { catalog::TURBO_Q4_K_M.size },
-                "page": catalog::TURBO_Q4_K_M.page,
-            },
-        })
-    })
-    .await
-    .map_err(AppError::internal)?;
-    Ok(Json(v))
-}
-
-#[derive(Deserialize)]
-struct ScanBody {
-    dir: PathBuf,
-}
-
-/// Every model file in a folder (sub-folders included), the suggested file for each role, and
-/// files with the same name as missing ones of the active profile (moved within the folder).
-async fn models_scan(State(s): St, Json(b): Json<ScanBody>) -> ApiResult<Json<Value>> {
-    if !b.dir.is_dir() {
-        return Err(AppError::invalid(format!("{} is not a folder.", b.dir.display())).into());
-    }
-    let engine = s.engine.clone();
-    let v = tokio::task::spawn_blocking(move || {
-        let cfg = engine.config();
-        let files = modelfile::scan(&b.dir);
-        let vram = cfg.planning_vram_mib(engine.gpu().map(|g| g.planning_mib()));
-        let picks = modelfile::best(&files, vram);
-        let mut moved = serde_json::Map::new();
-        for (label, path) in cfg.missing_files() {
-            let name = path.file_name().map(|n| n.to_ascii_lowercase());
-            let role = role_of(label);
-            if let Some(f) = files.iter().find(|f| f.compatible && f.role == role && f.path.file_name().map(|n| n.to_ascii_lowercase()) == name) {
-                moved.insert(serde_json::to_value(role).unwrap().as_str().unwrap_or_default().to_string(), json!(f.path));
-            }
-        }
-        json!({ "dir": b.dir, "files": files, "picks": picks, "moved": moved })
-    })
-    .await
-    .map_err(AppError::internal)?;
-    Ok(Json(v))
-}
-
-#[derive(Deserialize)]
-struct InspectBody {
-    path: PathBuf,
-}
-
-async fn models_inspect(Json(b): Json<InspectBody>) -> ApiResult<Json<FileInfo>> {
-    let p = b.path.clone();
-    let info = tokio::task::spawn_blocking(move || modelfile::inspect(&p)).await.map_err(AppError::internal)?.map_err(|e| AppError::io("read", &b.path, e))?;
-    Ok(Json(info))
-}
-
-#[derive(Deserialize)]
-struct UserFilesBody {
-    diffusion_model: Slot,
-    vae: Slot,
-    text_encoder: Slot,
-    /// None: not needed (the text encoder carries the vision weights).
-    vision_projector: Option<Slot>,
-    scan_dir: Option<PathBuf>,
-}
-
-/// Saves the user's own files (checked) as the active profile. Official pieces to download are
-/// then fetched by `/setup/install` with target "user", together with the engine.
-async fn models_set_user(State(s): St, Json(b): Json<UserFilesBody>) -> ApiResult<Json<Value>> {
-    let engine = s.engine.clone();
-    let cfg = tokio::task::spawn_blocking(move || -> Result<AppConfig, AppError> {
-        let mut cfg = engine.config();
-        let p = modelfile::user_profile(&b.diffusion_model, &b.vae, &b.text_encoder, b.vision_projector.as_ref(), b.scan_dir, cfg.preset())?;
-        cfg.set_user_files(p);
-        Ok(cfg)
-    })
-    .await
-    .map_err(AppError::internal)??;
-    save_and_restart(&s, cfg).await?;
-    models_status(State(s)).await
-}
-
-#[derive(Deserialize)]
-struct UseBody {
-    /// "official" or "user".
-    profile: String,
-}
-
-/// Switches between the official files and the user's own (both stay saved).
-async fn models_use(State(s): St, Json(b): Json<UseBody>) -> ApiResult<Json<Value>> {
-    let mut cfg = s.engine.config();
-    match b.profile.as_str() {
-        "official" => cfg.use_official(),
-        "user" if cfg.user_profile().is_some() => cfg.active_profile = USER_PROFILE_ID.into(),
-        "user" => return Err(AppError::invalid("Choose your model files first.").into()),
-        other => return Err(AppError::invalid(format!("Unknown profile {other}.")).into()),
-    }
-    save_and_restart(&s, cfg).await?;
-    models_status(State(s)).await
-}
-
-/// Switch which model of the external engine this UI will use (config `externalEngine`):
-/// the body carries the model id, the diffusion file name it must report and any per-
-/// request sample overrides.
-///
-/// Only the config is saved here; the engine is left alone. The gateway is first touched
-/// when work needs the model — the next generation (or an explicit start) runs the probe,
-/// which evicts the gateway's current tenant and waits out the load. Switching therefore
-/// never touches the GPU, so picking a model cannot evict whatever the gateway is serving.
-/// Only available when the service runs with an external engine configured — the config
-/// file is the entry point into that mode, this endpoint only changes the active model within it.
 async fn models_switch(State(s): St, Json(b): Json<ExternalEngine>) -> ApiResult<Json<Value>> {
     let model_id = b.model.clone();
     let mut cfg = s.engine.config();

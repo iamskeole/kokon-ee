@@ -10,8 +10,8 @@ import replace from "../assets/showcase/replace.jpg";
 import restyle from "../assets/showcase/restyle.jpg";
 import text from "../assets/showcase/text.jpg";
 import { api } from "../lib/api";
+import { setState, toastError } from "../lib/store";
 import { WHATS_NEW_VERSION } from "./WhatsNew";
-import { setState, toastError, useStore } from "../lib/store";
 
 /** The Kokon mark in the current text color (light and dark themes). */
 export function KokonMark({ size = 40 }: { size?: number }) {
@@ -40,7 +40,6 @@ const PROMISES = [
 
 /** First launch (and Settings → General → Show welcome screen): what Kokon is and why it is private. */
 export function Welcome() {
-  const needsSetup = useStore((s) => s.needsSetup);
   const close = () => {
     setState({ overlay: null });
     void markSeen();
@@ -69,7 +68,7 @@ export function Welcome() {
           ))}
         </div>
         <button className="btn primary big" onClick={close}>
-          {needsSetup ? "Set up Kokon" : "Start creating"}
+          "Start creating"
         </button>
         <span className="muted welcome-foot">You can open this again from Settings → General.</span>
       </div>

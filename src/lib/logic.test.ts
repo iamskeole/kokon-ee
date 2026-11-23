@@ -3,13 +3,11 @@ import {
   cutoutText,
   downloadIsFor,
   jobStepText,
-  modelChoiceUi,
-  modelOfferDue,
   whatsNewDue,
   dayGroup, isGenericName, placeInCanvas, projectTitle, typedWords, withActionVerb,
   activeLoras, activeOverrides, buildRequest, enhancerApplies, composing, editing, reviewRequest, wantsPromptReview, toggleLora, MAX_LORAS, jobPercent, compareBase, composerFromRecord, diffPixels, emptyComposer, expansionPixels, expansionPreset, jobLabel, jobSecondsLeft, lutInfo, moveRef, needsPrompt, normalizeQuality, persistentAdvanced, pipelineSummary,
   planPipeline, remainingSeconds, sizeForWidth, timeAgo, upscaleRequest, upscaleTargets, versionLabels, type JobClock, type Ref,
-  neighbourAfterRemoval, pageOutdated, previewIndex, starPromptDue, STAR_PROMPT_AFTER, formatBytes, formatDuration, installItemShort, installItemText, installProgress, installStep, installTimeLeft, timelineLinks, undoTarget, aspectLabel, parseRatio, sizeForRatio, sizeForLongSide, expandToRatio, expandToSize, arcLayout,
+  neighbourAfterRemoval, pageOutdated, previewIndex, starPromptDue, STAR_PROMPT_AFTER, formatBytes, formatDuration, installProgress, timelineLinks, undoTarget, aspectLabel, parseRatio, sizeForRatio, sizeForLongSide, expandToRatio, expandToSize, arcLayout,
   goneVersions, moreLikeThisRequest, MORE_LIKE_THIS, PREVIEW_SIDE, stageFitsPreview, viewerWantsFull,
   modelRequest, entryForModel, entryForGeneration, boxRows, movedBox, appendBoxTable, splitBoxTable, modelSupportsBoxes, modelSupportsInpaint, type BoxRow,
 } from "./logic";
@@ -481,22 +479,6 @@ describe("setup wizard", () => {
     expect(p).toEqual({ received: 50, total: 200, frac: 0.25 });
     expect(installProgress([item({ state: "present" })]).frac).toBe(1);
   });
-  it("summarizes the progress panel", () => {
-    expect(installItemShort(item({ state: "downloading", received: 2_099_782_512 }))).toBe("50%");
-    expect(installItemShort(item({ state: "cancelled", received: 4_000_000_000 }))).toBe("Paused · 200 MB left");
-    expect(installItemShort(item({ state: "present" }))).toBe("Installed");
-    expect(installStep([item({ state: "done" }), item({ label: "VAE", state: "verifying" })])).toBe("Checking VAE");
-    expect(installStep([item({ state: "pending" })])).toBeNull();
-    expect(installTimeLeft(12e9, 100e6)).toBe("about 2 min left");
-    expect(installTimeLeft(1e9, 100e6)).toBe("less than a minute left");
-    expect(installTimeLeft(1e9, 0)).toBeNull();
-  });
-  it("describes each file state", () => {
-    expect(installItemText(item({ state: "downloading", received: 1e9 }), 50e6)).toBe("1.0 GB of 4.2 GB · 50 MB/s · 1m 4s left");
-    expect(installItemText(item({}), 0)).toBe("To download · 4.2 GB");
-    expect(installItemText(item({ state: "failed", error: "HTTP 404" }), 0)).toBe("HTTP 404");
-    expect(installItemText(item({ state: "cancelled", received: 2e9 }), 0)).toContain("continues where it stopped");
-  });
 });
 
 describe("undo between versions", () => {
@@ -708,36 +690,10 @@ describe("opening a project in a browser", () => {
 
 
 describe("whatsNewDue", () => {
-  const engine = (update_needed: boolean) => ({ release: "r2", update_needed });
   it("once per release after an update, never on a new install", () => {
-    expect(whatsNewDue({ welcomeSeen: true, whatsNewSeen: "0.11.0" }, engine(false), "0.11.1")).toBe(true);
-    expect(whatsNewDue({ welcomeSeen: true, whatsNewSeen: "0.11.1" }, engine(false), "0.11.1")).toBe(false);
-    expect(whatsNewDue({}, engine(true), "0.11.1")).toBe(false);
-  });
-  it("again while a needed engine update was not postponed", () => {
-    expect(whatsNewDue({ welcomeSeen: true, whatsNewSeen: "0.11.1" }, engine(true), "0.11.1")).toBe(true);
-    expect(whatsNewDue({ welcomeSeen: true, whatsNewSeen: "0.11.1", engineUpdateSkipped: "r2" }, engine(true), "0.11.1")).toBe(false);
-  });
-});
-
-describe("modelOfferDue", () => {
-  const dit = (update: "official" | "own" | null) => ({ update, download_bytes: 4_199_565_120, page: "" });
-  it("offers the Q4_K_M to the official files on the Q4_K until accepted, Later waiting for the next release", () => {
-    expect(modelOfferDue(dit("official"), {}, "0.11.1")).toBe(true);
-    const later = modelChoiceUi("later", "0.11.1");
-    expect(modelOfferDue(dit("official"), later, "0.11.1")).toBe(false);
-    expect(modelOfferDue(dit("official"), later, "0.12.0")).toBe(true);
-    expect(modelOfferDue(dit(null), {}, "0.11.1")).toBe(false);
-    expect(modelOfferDue(undefined, {}, "0.11.1")).toBe(false);
-  });
-  it("own files: a suggestion only when they are the old Q4_K; keeping them is final", () => {
-    expect(modelOfferDue(dit("own"), {}, "0.11.1")).toBe(true);
-    const keep = modelChoiceUi("keep", "0.11.1");
-    expect(modelOfferDue(dit("own"), keep, "0.11.1")).toBe(false);
-    expect(modelOfferDue(dit("own"), keep, "0.12.0")).toBe(false);
-    expect(modelOfferDue(dit("own"), modelChoiceUi("later", "0.11.1"), "0.12.0")).toBe(true);
-    // Already the Q4_K_M, or another file of theirs: the service reports nothing to offer.
-    expect(modelOfferDue(dit(null), {}, "0.11.1")).toBe(false);
+    expect(whatsNewDue({ welcomeSeen: true, whatsNewSeen: "0.11.0" }, "0.11.1")).toBe(true);
+    expect(whatsNewDue({ welcomeSeen: true, whatsNewSeen: "0.11.1" }, "0.11.1")).toBe(false);
+    expect(whatsNewDue({}, "0.11.1")).toBe(false);
   });
 });
 

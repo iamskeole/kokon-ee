@@ -402,8 +402,6 @@ impl Engine {
         }
         *g = new;
         drop(g);
-        self.place_bundled_upscaler();
-        self.place_bundled_watermark();
         Ok(restart)
     }
 
@@ -528,50 +526,6 @@ impl Engine {
                 rec.notes.push("The invisible AI watermark could not be added (its model is missing or failed); the file's metadata still marks it as made with AI.".into());
                 Cow::Borrowed(img)
             }
-        }
-    }
-
-    /// Copies the AI watermark's models (TrustMark P) from the app's bundle when they are missing.
-    pub fn place_bundled_watermark(&self) {
-        let Some(bundle) = crate::installer::bundle_dir() else { return };
-        let dir = self.config().sdcpp_dir;
-        for d in crate::watermark::TRUSTMARK_P {
-            match crate::installer::install_bundled(&d, &dir, &bundle) {
-                Ok(true) => tracing::info!("bundled {} copied into {}", d.file_name(), dir.display()),
-                Ok(false) => {}
-                Err(e) => tracing::warn!("could not copy the bundled {} into {}: {e}", d.file_name(), dir.display()),
-            }
-        }
-    }
-
-    pub fn place_bundled_upscaler(&self) {
-        let Some(bundle) = crate::installer::bundle_dir() else { return };
-        let dir = self.config().sdcpp_dir;
-        match crate::installer::install_bundled(&crate::catalog::UPSCALER, &dir, &bundle) {
-            Ok(true) => tracing::info!("bundled upscaler copied into {}", dir.display()),
-            Ok(false) => {}
-            Err(e) => tracing::warn!("could not copy the bundled upscaler into {}: {e}", dir.display()),
-        }
-    }
-
-    /// Deletes the original VAE from the app's folder once the texture fix replaced it and no
-    /// profile uses it (after the update, and at start in case a busy server held it open).
-    pub fn remove_unused_original_vae(&self) {
-        let Some(old) = crate::catalog::unused_original_vae(&self.config()) else { return };
-        match std::fs::remove_file(&old) {
-            Ok(()) => tracing::info!("deleted the original VAE {} (replaced by the texture fix)", old.display()),
-            Err(e) => tracing::warn!("could not delete the original VAE {} yet: {e}", old.display()),
-        }
-    }
-
-    /// Deletes the Q4_K image model from the app's folder once the Q4_K_M replaced it and no
-    /// profile uses it (after the update, and at start in case a busy server held it open).
-    /// Files outside the app's folder are never deleted.
-    pub fn remove_unused_old_dit(&self) {
-        let Some(old) = crate::catalog::unused_old_dit(&self.config()) else { return };
-        match std::fs::remove_file(&old) {
-            Ok(()) => tracing::info!("deleted the Q4_K image model {} (replaced by the Q4_K_M)", old.display()),
-            Err(e) => tracing::warn!("could not delete the Q4_K image model {} yet: {e}", old.display()),
         }
     }
 
@@ -728,20 +682,6 @@ impl Engine {
     pub fn gpu(&self) -> Option<GpuInfo> {
         let i = self.gpu_index();
         self.gpus().into_iter().nth(i)
-    }
-
-    /// Runs the engine on card `card` of `gpus()`: Some(whether the server must restart), or
-    /// None if the engine can't list its devices yet (not installed) or doesn't see that card.
-    pub fn use_card(&self, card: usize) -> AppResult<Option<bool>> {
-        let mut cfg = self.config();
-        let Some(dev) = crate::diagnostics::device_for_card(&self.devices(), &self.gpus(), card, cfg.gpu_backend.device_prefix()) else {
-            return Ok(None);
-        };
-        if cfg.effective_device() == dev {
-            return Ok(Some(false));
-        }
-        cfg.device = dev;
-        self.set_config(cfg).map(Some)
     }
 
     pub fn backend_version(&self) -> Option<String> {

@@ -818,81 +818,6 @@ pub fn space_needed(dir: &Path, downloads: &[Download]) -> (u64, u64) {
     (download, disk)
 }
 
-/// Folder of the model files shipped inside the app (Tauri resources): next to the
-/// executables on Windows, `Contents/Resources` on a Mac, `/usr/lib/Kokon` for the Linux
-/// packages (executables in `/usr/bin`). `QLS_BUNDLE_DIR` overrides it.
-pub fn bundle_dir() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("QLS_BUNDLE_DIR") {
-        return Some(PathBuf::from(p));
-    }
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    let lib = dir.join("..").join("lib");
-    [
-        dir.join("bundled"),
-        dir.join("..").join("Resources").join("bundled"),
-        lib.join("Kokon").join("bundled"),
-        lib.join("kokon").join("bundled"),
-    ]
-    .into_iter()
-    .find(|p| p.is_dir())
-}
-
-/// Copies `d` from the app's bundle into the stable-diffusion.cpp folder when it is missing
-/// there, checking its hash. Ok(true) when it was copied.
-pub fn install_bundled(d: &Download, dir: &Path, bundle: &Path) -> std::io::Result<bool> {
-    let name = d.dest.rsplit('/').next().unwrap_or(d.dest);
-    let src = bundle.join(name);
-    if d.is_zip() || d.is_present(dir) || !std::fs::metadata(&src).is_ok_and(|m| m.len() == d.size)
-    {
-        return Ok(false);
-    }
-    let target = d.path(dir);
-    if let Some(p) = target.parent() {
-        std::fs::create_dir_all(p)?;
-    }
-    let tmp = part_path(&target);
-    std::fs::copy(&src, &tmp)?;
-    if sha256_file(&tmp)? != d.sha256 {
-        remove_part(&tmp);
-        return Err(std::io::Error::other(format!(
-            "the bundled {name} is damaged"
-        )));
-    }
-    std::fs::rename(&tmp, &target)?;
-    Ok(true)
-}
-
-/// ESRGAN models in the app's own upscalers folder other than those named in `keep` (the
-/// selected model), with their sizes.
-pub fn legacy_upscalers(dir: &Path, keep: &[&str]) -> Vec<(PathBuf, u64)> {
-    crate::catalog::LEGACY_UPSCALERS
-        .iter()
-        .map(|f| crate::catalog::join_rel(dir, f))
-        .filter(|p| {
-            p.file_stem()
-                .and_then(|s| s.to_str())
-                .is_none_or(|s| !keep.contains(&s))
-        })
-        .filter_map(|p| {
-            std::fs::metadata(&p)
-                .ok()
-                .filter(|m| m.is_file())
-                .map(|m| (p, m.len()))
-        })
-        .collect()
-}
-
-/// Deletes [`legacy_upscalers`]; returns the bytes freed.
-pub fn remove_legacy_upscalers(dir: &Path, keep: &[&str]) -> AppResult<u64> {
-    let mut freed = 0;
-    for (p, size) in legacy_upscalers(dir, keep) {
-        std::fs::remove_file(&p).map_err(|e| AppError::io("delete the old upscaler", &p, e))?;
-        freed += size;
-    }
-    Ok(freed)
-}
-
 /// Free space on the drive that holds `dir` (or its nearest existing parent).
 pub fn free_space(dir: &Path) -> Option<u64> {
     let mut p = dir.to_path_buf();
@@ -1150,13 +1075,12 @@ mod tests {
             sha256_file(&f).unwrap(),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
-        let p = crate::catalog::preset("16gb").unwrap();
-        let all = crate::catalog::downloads_for(p, crate::config::GpuBackend::Cuda, dir.path());
+        let all = vec![crate::catalog::UPSCALER, crate::catalog::ULTRASHARP];
         let (dl, disk) = space_needed(dir.path(), &all);
         assert_eq!(dl, all.iter().map(|d| d.size).sum::<u64>());
-        assert!(disk > dl, "zips need room to extract");
+        assert!(disk >= dl);
         // A partial download counts toward what is left.
-        let vae = crate::catalog::VAE;
+        let vae = crate::catalog::UPSCALER;
         std::fs::create_dir_all(vae.path(dir.path()).parent().unwrap()).unwrap();
         std::fs::write(
             part_path(&vae.path(dir.path())),
@@ -1214,59 +1138,6 @@ mod tests {
             "bytes 0-99/337915440".parse().unwrap(),
         );
         assert_eq!(content_range_total(&h), Some(337_915_440));
-    }
-
-    #[test]
-    fn bundled_upscaler_is_copied_once_and_checked() {
-        let (dir, bundle) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let d = Download {
-            size: 3,
-            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-            ..crate::catalog::UPSCALER
-        };
-        assert!(
-            !install_bundled(&d, dir.path(), bundle.path()).unwrap(),
-            "nothing bundled (dev build)"
-        );
-        std::fs::write(bundle.path().join("4xNomos2_hq_mosr.pth"), b"abd").unwrap();
-        assert!(
-            install_bundled(&d, dir.path(), bundle.path()).is_err(),
-            "a damaged copy is refused"
-        );
-        assert!(!d.is_present(dir.path()) && !part_path(&d.path(dir.path())).exists());
-        std::fs::write(bundle.path().join("4xNomos2_hq_mosr.pth"), b"abc").unwrap();
-        assert!(install_bundled(&d, dir.path(), bundle.path()).unwrap());
-        assert!(d.is_present(dir.path()));
-        assert!(
-            !install_bundled(&d, dir.path(), bundle.path()).unwrap(),
-            "already in place"
-        );
-    }
-
-    #[test]
-    fn legacy_upscalers_only_in_the_app_folder() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(legacy_upscalers(dir.path(), &[]).is_empty());
-        let up = dir.path().join("models").join("upscalers");
-        std::fs::create_dir_all(&up).unwrap();
-        std::fs::write(up.join("4x-UltraSharp.pth"), vec![0u8; 100]).unwrap();
-        std::fs::write(up.join("4xNomos2_hq_mosr.pth"), b"keep").unwrap();
-        std::fs::write(up.join("my-own.pth"), b"keep").unwrap();
-        std::fs::write(up.join("4x_NMKD-Superscale-SP_178000_G.pth"), b"in use").unwrap();
-        let ss = &["4x_NMKD-Superscale-SP_178000_G"][..];
-        assert_eq!(
-            legacy_upscalers(dir.path(), ss),
-            vec![(up.join("4x-UltraSharp.pth"), 100)],
-            "the selected model is never offered"
-        );
-        assert_eq!(remove_legacy_upscalers(dir.path(), ss).unwrap(), 100);
-        assert!(
-            !up.join("4x-UltraSharp.pth").exists()
-                && up.join("4xNomos2_hq_mosr.pth").exists()
-                && up.join("my-own.pth").exists()
-        );
-        assert!(up.join("4x_NMKD-Superscale-SP_178000_G.pth").exists());
-        assert_eq!(remove_legacy_upscalers(dir.path(), ss).unwrap(), 0);
     }
 
     /// Real download of the smallest catalog file (QLS_TEST_DOWNLOAD=1; ~17 MB).

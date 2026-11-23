@@ -1,6 +1,6 @@
 // Pure UI logic (unit-tested in logic.test.ts).
 
-import type { Advanced, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InpaintAction, InputRecord, InstallItem, InstallStatus, JobView, LoraItem, LutInfo, Mode, ModelsStatus, OutpaintSpec, Plan, Quality, ResolutionMode, Size } from "./types";
+import type { Advanced, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InpaintAction, InputRecord, InstallItem, InstallStatus, JobView, LoraItem, LutInfo, Mode, OutpaintSpec, Plan, Quality, ResolutionMode, Size } from "./types";
 
 export interface Ref {
   key: string;
@@ -871,26 +871,10 @@ export function formatBytes(n: number): string {
   return `${Math.max(0, Math.round(n / 1e3))} KB`;
 }
 
-/** Whether What's new shows at start: once per release `version` after an update (not on a new install, which gets the
- * welcome screen), and again while a needed engine update was not postponed. */
-export function whatsNewDue(ui: Record<string, unknown>, engine: { release: string; update_needed: boolean } | undefined, version: string): boolean {
-  if (!ui.welcomeSeen) return false;
-  return ui.whatsNewSeen !== version || (!!engine?.update_needed && ui.engineUpdateSkipped !== engine.release);
-}
-
-/** The image-model step of What's new (the Q4_K_M, 0.11.1): offered to the official files still on the Q4_K and, as a
- * suggestion, to own files that are that Q4_K. "Later" waits for the next release `version`; "Keep using my file" is
- * never asked again. */
-export function modelOfferDue(dit: ModelsStatus["dit"] | undefined, ui: Record<string, unknown>, version: string): boolean {
-  if (!dit?.update) return false;
-  if (dit.update === "own" && ui.ownModelKept) return false;
-  return ui.modelUpdateSkipped !== version;
-}
-
-/** What closing What's new remembers about a model step it offered and that did not happen: "keep" (own files) for
- * good, otherwise postponed until the next release `version`. */
-export function modelChoiceUi(choice: "later" | "keep", version: string): Record<string, unknown> {
-  return choice === "keep" ? { ownModelKept: true } : { modelUpdateSkipped: version };
+/** Whether What's new shows at start: once per release `version` after an update (not on a
+ * new install, which gets the welcome screen). */
+export function whatsNewDue(ui: Record<string, unknown>, version: string): boolean {
+  return !!ui.welcomeSeen && ui.whatsNewSeen !== version;
 }
 
 /** Overall download progress over the files that were not installed already. */
@@ -899,67 +883,6 @@ export function installProgress(items: InstallItem[]): { received: number; total
   const total = todo.reduce((a, i) => a + i.size, 0);
   const received = todo.reduce((a, i) => a + Math.min(i.received, i.size), 0);
   return { received, total, frac: total ? received / total : 1 };
-}
-
-/** One line under a file in the setup wizard. */
-export function installItemText(i: InstallItem, bytesPerSec: number): string {
-  switch (i.state) {
-    case "present":
-    case "done":
-      return `Installed · ${formatBytes(i.size)}`;
-    case "pending":
-      return `To download · ${formatBytes(i.size - i.received)}`;
-    case "downloading": {
-      const rate = bytesPerSec > 0 ? ` · ${formatBytes(bytesPerSec)}/s` : "";
-      const left = bytesPerSec > 0 ? ` · ${formatDuration((i.size - i.received) / bytesPerSec)} left` : "";
-      return `${formatBytes(i.received)} of ${formatBytes(i.size)}${rate}${left}`;
-    }
-    case "verifying":
-      return "Checking the file…";
-    case "extracting":
-      return "Extracting…";
-    case "cancelled":
-      return i.received ? `Paused at ${formatBytes(i.received)}; continues where it stopped` : "Cancelled";
-    case "failed":
-      return i.error ?? "Failed";
-  }
-}
-
-/** Right-hand status of a file in the setup list. */
-export function installItemShort(i: InstallItem): string {
-  switch (i.state) {
-    case "present":
-    case "done":
-      return "Installed";
-    case "downloading":
-      return `${Math.floor((i.received / i.size) * 100)}%`;
-    case "verifying":
-      return "Checking";
-    case "extracting":
-      return "Extracting";
-    case "failed":
-      return "Failed";
-    case "cancelled":
-      return i.received ? `Paused · ${formatBytes(i.size - i.received)} left` : formatBytes(i.size);
-    case "pending":
-      return formatBytes(i.size - i.received);
-  }
-}
-
-/** What the installer is doing right now, for the progress panel. */
-export function installStep(items: InstallItem[]): string | null {
-  const it = items.find((i) => i.state === "downloading" || i.state === "verifying" || i.state === "extracting");
-  if (!it) return null;
-  if (it.state === "verifying") return `Checking ${it.label}`;
-  if (it.state === "extracting") return `Unpacking ${it.label}`;
-  return `Downloading ${it.label}`;
-}
-
-/** "about 2 min left" once the speed is known. */
-export function installTimeLeft(remaining: number, bytesPerSec: number): string | null {
-  if (bytesPerSec < 100e3 || remaining <= 0) return null;
-  const s = remaining / bytesPerSec;
-  return s < 60 ? "less than a minute left" : `about ${Math.ceil(s / 60)} min left`;
 }
 
 /** Aspect ratios offered in the menus (landscape, then its portrait twin). */

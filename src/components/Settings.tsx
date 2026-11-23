@@ -1,18 +1,17 @@
-import { Activity, Copy, Cpu, Download, FolderOpen, HardDrive, Heart, Layers, MonitorSmartphone, RefreshCw, RotateCcw, Settings2, Trash2, Users, X } from "lucide-react";
+import { Activity, Copy, Cpu, FolderOpen, HardDrive, Heart, Layers, MonitorSmartphone, RefreshCw, RotateCcw, Settings2, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { AiMarkingCard } from "./AiCheck";
 import { People } from "./People";
 import { native } from "../lib/native";
 import { inBrowser } from "../lib/platform";
-import { getState, openModelSetup, refreshStatus, setState, startTour, toastError, toastInfo, useStore } from "../lib/store";
-import { formatBytes } from "../lib/logic";
+import { getState, refreshStatus, setState, startTour, toastError, toastInfo, useStore } from "../lib/store";
 import { setThemeChoice, themeChoice, type ThemeChoice } from "../lib/theme";
 import { LoraSettings } from "./LoraSettings";
 import { RemoteAccess } from "./RemoteAccess";
 import { UpscalerControls } from "./Upscalers";
 import { WHATS_NEW_VERSION } from "./WhatsNew";
-import type { AppConfig, Check, InstallStatus, ModelProfile, ModelsStatus, SetupReport, TextEncoderPlacement } from "../lib/types";
+import type { AppConfig, TextEncoderPlacement } from "../lib/types";
 import { IconButton, Seg, Switch } from "./ui";
 
 const REPO_URL = "https://github.com/GabrieleLozupone/kokon";
@@ -200,15 +199,12 @@ export function Settings() {
     setState({ settingsFocus: null });
     window.requestAnimationFrame(() => el.scrollIntoView({ block: "start", behavior: "smooth" }));
   }, [cfg, tab]);
-  const [devices, setDevices] = useState<[string, string][]>([]);
   // Who is looking: the named account's name (null = the operator or the desktop), and
   // whether a remote password is set. Both come from the session endpoint, which the
   // desktop calls with its token (no cookie, so `user` is null there).
   const [who, setWho] = useState<{ user: string | null; password_set: boolean } | null>(null);
-  const [upscaler, setUpscaler] = useState<Check | null>(null);
+  const up = useStore((st) => st.status?.upscaler);
   // The saved model setup: what is missing, whether the official files are downloaded.
-  const [ms, setMs] = useState<ModelsStatus | null>(null);
-  const [legacy, setLegacy] = useState<{ files: string[]; bytes: number } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [theme, setTheme] = useState(themeChoice);
   const [enhancerDefaults, setEnhancerDefaults] = useState<{ t2i: string; edit: string; compose?: string; max_chars: number } | null>(null);
@@ -218,59 +214,7 @@ export function Settings() {
     api.config().then(setCfg, toastError);
     api.session().then(setWho, () => {});
     api.enhancerDefaults().then(setEnhancerDefaults, () => {});
-    api.setup().then(
-      (r: SetupReport) => {
-        setDevices(r.devices);
-        setUpscaler(r.checks.find((c) => c.id === "upscaler") ?? null);
-      },
-      () => {},
-    );
-    api.models().then(setMs, () => {});
   }, []);
-  // Upscaler files not in use, keeping the model chosen here even before Save.
-  const draftModel = cfg?.upscalerModel;
-  useEffect(() => {
-    if (draftModel !== undefined) api.legacyUpscalers(draftModel).then(setLegacy, () => {});
-  }, [draftModel]);
-
-  const removeLegacy = async () => {
-    if (!cfg || !legacy || !window.confirm(`Delete the upscaler files not in use (${formatBytes(legacy.bytes)})?\n\n${legacy.files.join("\n")}`)) return;
-    try {
-      const r = await api.removeLegacyUpscalers(cfg.upscalerModel);
-      toastInfo(`Deleted (${formatBytes(r.freed_bytes)} freed)`);
-      api.legacyUpscalers(cfg.upscalerModel).then(setLegacy, () => {});
-    } catch (e) {
-      toastError(e);
-    }
-  };
-
-  // Switching to the new VAE (#21) or the Q4_K_M image model: download, then the service swaps it and deletes the old
-  // file from Kokon's folder (never the user's own).
-  const [vaeProgress, setVaeProgress] = useState<number | null>(null);
-  const [ditProgress, setDitProgress] = useState<number | null>(null);
-  const switchFile = async (start: () => Promise<InstallStatus>, setProgress: (p: number | null) => void, done: string) => {
-    try {
-      let st = await start();
-      setProgress(0);
-      while (st.running) {
-        await new Promise((r) => window.setTimeout(r, 700));
-        st = await api.installStatus();
-        const total = st.items.reduce((a, i) => a + i.size, 0);
-        setProgress(total ? st.items.reduce((a, i) => a + i.received, 0) / total : 0);
-      }
-      const failed = st.items.find((i) => i.state === "failed");
-      if (failed) toastError(new Error(`${failed.label}: ${failed.error}`));
-      else if (st.complete) toastInfo(done);
-      api.models().then(setMs, () => {});
-      api.config().then(setCfg, () => {});
-    } catch (e) {
-      toastError(e);
-    } finally {
-      setProgress(null);
-    }
-  };
-  const improveVae = () => switchFile(api.improveVae, setVaeProgress, "The new decoder is in use");
-  const newImageModel = () => switchFile(api.newImageModel, setDitProgress, "The Q4_K_M image model is in use");
 
   // Leaving with unsaved changes asks first (people forgot Save): `then` runs after Save or
   // Discard, Cancel stays here.
@@ -294,7 +238,6 @@ export function Settings() {
     setCfg({ ...cfg, ...patch });
     setDirty(true);
   };
-  const setProfile = (patch: Partial<ModelProfile>) => set({ profiles: cfg.profiles.map((p) => (p.id === profile.id ? { ...p, ...patch } : p)) });
   // Upscaler options apply at once, like in the Advanced menu: saved on top of the stored
   // settings (other unsaved fields stay a draft) and mirrored in the draft, so Save keeps them.
   const applyNow = async (patch: Partial<AppConfig>) => {
@@ -302,7 +245,6 @@ export function Settings() {
     try {
       const saved = await api.config();
       await api.saveConfig({ ...saved, ...patch });
-      api.setup().then((s: SetupReport) => setUpscaler(s.checks.find((c) => c.id === "upscaler") ?? null), () => {});
       refreshStatus();
     } catch (e) {
       toastError(e);
@@ -313,7 +255,6 @@ export function Settings() {
     try {
       const r = await api.saveConfig(cfg);
       setDirty(false);
-      api.setup().then((s: SetupReport) => setUpscaler(s.checks.find((c) => c.id === "upscaler") ?? null), () => {});
       toastInfo(r.backend_restart_needed ? "Saved. The model reloads with the new settings on the next generation." : "Saved");
       refreshStatus();
       return true;
@@ -471,7 +412,7 @@ export function Settings() {
 
           {tab === "models" && (
             <>
-              {cfg?.externalEngine ? (
+              {cfg.externalEngine ? (
                 <div className="setting-card">
                   <div className="setting-card-text">
                     <strong>External engine</strong>
@@ -483,130 +424,26 @@ export function Settings() {
                   </div>
                 </div>
               ) : (
-                <>
-              <div className="setting-card">
-                <div className="setting-card-text">
-                  <strong>Model setup</strong>
-                  <span className="muted">Downloads the official Qwen-Image 2.1 weights for your graphics card, uses model files you already have, or switches between the 12, 16, 24 and 32 GB presets.</span>
-                </div>
-                <button
-                  className="btn primary"
-                  onClick={() => leave(() => setState({ overlay: null, needsSetup: true }))}
-                >
-                  <Download size={15} /> Set up models…
-                </button>
-              </div>
-              <PathField label="stable-diffusion.cpp folder" value={cfg.sdcppDir} folder onChange={(v) => set({ sdcppDir: v })} />
-              {cfg.profiles.length > 1 ? (
-                <label className="field-row">
-                  <span>Model</span>
-                  <select className="select" value={profile.id} onChange={(e) => set({ activeProfile: e.target.value })}>
-                    {cfg.profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.displayName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <span className="muted">Model: {profile.displayName}</span>
-              )}
-              {profile.source === "official" ? (
-                // The official files follow the install folder and preset; own files get their own profile.
                 <div className="setting-card">
                   <div className="setting-card-text">
-                    <strong>Official model</strong>
+                    <strong>Model</strong>
                     <span className="muted">
-                      {ms === null
-                        ? "Qwen-Image 2.1 Turbo, tested with Kokon."
-                        : ms.official_installed
-                          ? "Qwen-Image 2.1 Turbo, tested with Kokon. Downloaded."
-                          : "Qwen-Image 2.1 Turbo, tested with Kokon. Not downloaded into this folder yet: Download… gets it, or use model files you already have."}
+                      {profile.displayName}. On this box the model files live in the stable-diffusion.cpp folder; a box that runs its
+                      engine elsewhere keeps them on that box (the fresh-box doc names the folder).
                     </span>
-                    <details className="model-files">
-                      <summary>Files</summary>
-                      {[profile.diffusionModel, profile.vae, profile.textEncoder, profile.visionProjector].filter(Boolean).map((p) => (
-                        <span key={p}>{p}</span>
+                  </div>
+                  {cfg.profiles.length > 1 ? (
+                    <select className="select" value={profile.id} onChange={(e) => set({ activeProfile: e.target.value })}>
+                      {cfg.profiles.map((pp) => (
+                        <option key={pp.id} value={pp.id}>
+                          {pp.displayName}
+                        </option>
                       ))}
-                    </details>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {ms && !ms.official_installed && (
-                      <button
-                        className="btn primary"
-                        onClick={() => {
-                          if (dirty && !window.confirm("Discard the unsaved changes and open the model setup?")) return;
-                          openModelSetup("official");
-                        }}
-                      >
-                        <Download size={15} /> Download…
-                      </button>
-                    )}
-                    {!inBrowser && (
-                      <button
-                        className="btn"
-                        onClick={() => {
-                          if (dirty && !window.confirm("Discard the unsaved changes and choose your own model files?")) return;
-                          openModelSetup("own");
-                        }}
-                      >
-                        <FolderOpen size={15} /> Use my own files…
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <span className="muted">Your own files: not tested by Kokon. Set up models… checks them and finds them again if they move.</span>
-                  <PathField label="Diffusion model" value={profile.diffusionModel} onChange={(v) => setProfile({ diffusionModel: v })} />
-                  <PathField label="VAE" value={profile.vae} onChange={(v) => setProfile({ vae: v })} />
-                  <PathField label="Text encoder (Qwen3-VL)" value={profile.textEncoder} onChange={(v) => setProfile({ textEncoder: v })} />
-                  <PathField label="Vision projector (mmproj)" value={profile.visionProjector ?? ""} onChange={(v) => setProfile({ visionProjector: v || null })} />
-                </>
-              )}
-              {ms?.dit.update && (
-                <div className="setting-card">
-                  <div className="setting-card-text">
-                    <strong>Image model file</strong>
-                    <span className="muted">
-                      {ms.dit.update === "official"
-                        ? "Kokon now uses unsloth's Q4_K_M of the image model: better supported, slightly better, the same 4-bit size. Switching downloads it and deletes the old file from Kokon's folder."
-                        : "Your image model is the Q4_K file Kokon used before. Kokon now uses unsloth's Q4_K_M: better supported, slightly better, the same 4-bit size. Switching downloads it into Kokon's folder; your own file stays where it is."}
-                    </span>
-                    {ditProgress !== null && (
-                      <div className="progress" style={{ marginTop: 6 }}>
-                        <i style={{ width: `${ditProgress * 100}%` }} />
-                      </div>
-                    )}
-                  </div>
-                  <button className="btn primary" disabled={ditProgress !== null || vaeProgress !== null || dirty} title={dirty ? "Save or discard your changes first" : undefined} onClick={newImageModel}>
-                    <Download size={15} /> {ditProgress !== null ? `${Math.floor(ditProgress * 100)}%` : `Switch${ms.dit.download_bytes ? ` · ${formatBytes(ms.dit.download_bytes)}` : ""}`}
-                  </button>
+                    </select>
+                  ) : null}
                 </div>
               )}
-              {ms && (
-                <div className="setting-card">
-                  <div className="setting-card-text">
-                    <strong>Image decoder (VAE)</strong>
-                    <span className="muted">
-                      {ms.vae.improved
-                        ? "The new decoder: no fine grid pattern on skin, hair and smooth areas."
-                        : "A new decoder removes the fine grid pattern on skin, hair and smooth areas, with the same speed and colours. Switching downloads it and deletes the old one from Kokon's folder" +
-                          (profile.source === "official" ? "." : "; your own VAE file stays where it is.")}
-                    </span>
-                    {vaeProgress !== null && (
-                      <div className="progress" style={{ marginTop: 6 }}>
-                        <i style={{ width: `${vaeProgress * 100}%` }} />
-                      </div>
-                    )}
-                  </div>
-                  {!ms.vae.improved && (
-                    <button className="btn primary" disabled={vaeProgress !== null || ditProgress !== null || dirty} title={dirty ? "Save or discard your changes first" : undefined} onClick={improveVae}>
-                      <Download size={15} /> {vaeProgress !== null ? `${Math.floor(vaeProgress * 100)}%` : `Switch${ms.vae.download_bytes ? ` · ${formatBytes(ms.vae.download_bytes)}` : ""}`}
-                    </button>
-                  )}
-                </div>
-              )}
+              <PathField label="stable-diffusion.cpp folder" value={cfg.sdcppDir} folder onChange={(v) => set({ sdcppDir: v })} />
               <UpscalerControls
                 model={cfg.upscalerModel}
                 blend={cfg.upscaleBlend}
@@ -614,7 +451,9 @@ export function Settings() {
                 onBlend={(b) => setCfg({ ...cfg, upscaleBlend: b })}
                 onBlendDone={() => applyNow({ upscaleBlend: cfg.upscaleBlend })}
               />
-              {upscaler && !upscaler.ok && <span className="muted">{upscaler.detail}</span>}
+              {up && up.available === false && (
+                <span className="muted">The upscaler model is not on this box; enlargements use Lanczos until it is pinned (the fresh-box doc names the folder).</span>
+              )}
               <div className="field-row">
                 <span>Shrink the image before upscaling</span>
                 <Switch on={cfg.upscalePrescale} onChange={(v) => applyNow({ upscalePrescale: v })} />
@@ -622,21 +461,9 @@ export function Settings() {
               <span className="muted" style={{ marginTop: -10 }}>
                 Gives the upscaler a smaller image, like the ones it was trained on: fewer invented patterns on clean renders and faster, slightly less fine detail. Only for enlargements under 2.8×.
               </span>
-              {legacy && legacy.files.length > 0 && (
-                <div className="setting-card">
-                  <div className="setting-card-text">
-                    <strong>Upscaler files not in use</strong>
-                    <span className="muted">{legacy.files.map((f) => f.split(/[\\/]/).pop()).join(", ")}: not the selected model. Only Kokon's own folder is checked.</span>
-                  </div>
-                  <button className="btn" onClick={removeLegacy}>
-                    <Trash2 size={15} /> Delete ({formatBytes(legacy.bytes)})
-                  </button>
-                </div>
-              )}
-                </>
-              )}
             </>
           )}
+
 
           {tab === "performance" && mac && (
             <>
@@ -666,19 +493,8 @@ export function Settings() {
               <div className="field">
                 <span>Engine</span>
                 <span>{cfg.gpuBackend === "vulkan" ? "Vulkan" : "CUDA (NVIDIA)"}</span>
-                <span className="muted">To switch engine, use Models → Set up models…: it downloads the other engine if needed. Both can stay installed.</span>
+                <span className="muted">A pinned stock build (the fresh-box doc names it); the engine the box runs is reported in Diagnostics.</span>
               </div>
-              <label className="field-row">
-                <span>GPU device</span>
-                <select className="select" value={cfg.device} onChange={(e) => set({ device: e.target.value })}>
-                  {(devices.length ? devices : [[cfg.device, ""] as [string, string]]).map(([n, d]) => (
-                    <option key={n} value={n.toLowerCase()}>
-                      {n}
-                      {d ? ` — ${d}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <div className="field">
                 <span>Text encoder weights</span>
                 <Seg<TextEncoderPlacement>

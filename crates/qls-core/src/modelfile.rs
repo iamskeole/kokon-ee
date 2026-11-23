@@ -1,6 +1,6 @@
-//! Model files the user already has (#14): what a `.gguf` or `.safetensors` file is, read from
-//! its header only (a few KB to a few MB, never the weights), and a folder scan that finds the
-//! Qwen-Image 2.1 pieces in it (e.g. a ComfyUI `models` folder).
+//! What a `.gguf` or `.safetensors` model file is, read from its header only (a few KB to
+//! a few MB, never the weights) — the /diagnostics report uses it to say what the model
+//! files are and whether the engine can use them.
 //!
 //! The checks mirror how stable-diffusion.cpp recognizes the files (commit af46afa):
 //! - diffusion model: Qwen-Image 2.1 has `txt_in.text_norm.weight` (`model_loader.cpp`), older
@@ -17,12 +17,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{
-    Download, Preset, TEXT_ENCODER_Q4_K_M, TEXT_ENCODER_Q8_0, TURBO_Q4_K, TURBO_Q4_K_M, VAE,
-    VAE_ORIGINAL, VISION_PROJECTOR,
-};
-use crate::config::ModelProfile;
-use crate::error::AppError;
 
 /// Hidden size of Qwen3-VL 8B, the text encoder of Qwen-Image 2.1.
 const TEXT_HIDDEN: u64 = 4096;
@@ -155,7 +149,6 @@ const FINGERPRINT_BYTES: u64 = 64 << 10;
 
 const BASE_MODEL_WARNING: &str = "This looks like the base Qwen-Image 2.1 model, not Turbo. Kokon always runs 8 steps, which is made for Turbo: with the base model, images come out soft and unfinished. Download the official Turbo file, or choose a Qwen-Image 2.1 Turbo file.";
 
-/// The first 32 hex digits of the SHA-256 of 64 KiB in the middle of the file.
 fn fingerprint(path: &Path, size: u64) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     let mut f = std::fs::File::open(path)?;
@@ -178,42 +171,7 @@ struct Tensor {
     dtype: String,
 }
 
-/// Fingerprint of [`TURBO_Q4_K`], the image model installed up to 0.11.0.
-const OLD_TURBO_Q4_K_FINGERPRINT: &str = "7fe006396566cac6819c2eb78ef3f01f";
 
-/// `path` is the image model installed up to 0.11.0 (DogukanUrker's Q4_K), under any name and
-/// in any folder: same size and fingerprint. Own files like it are offered the Q4_K_M.
-pub fn is_old_turbo_q4k(path: &Path) -> bool {
-    is_known_file(path, TURBO_Q4_K.size, OLD_TURBO_Q4_K_FINGERPRINT)
-}
-
-/// `path` has this size and fingerprint (only a file of that size is read).
-fn is_known_file(path: &Path, size: u64, fp: &str) -> bool {
-    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == size)
-        && fingerprint(path, size).is_ok_and(|f| f == fp)
-}
-
-/// The catalog download a file with this name and size is (any folder).
-pub fn official_download(path: &Path, size: u64) -> Option<Download> {
-    let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
-    [
-        TURBO_Q4_K_M,
-        TURBO_Q4_K,
-        VAE,
-        VAE_ORIGINAL,
-        TEXT_ENCODER_Q4_K_M,
-        TEXT_ENCODER_Q8_0,
-        VISION_PROJECTOR,
-    ]
-    .into_iter()
-    .find(|d| {
-        d.size == size
-            && d.dest
-                .rsplit('/')
-                .next()
-                .is_some_and(|f| f.eq_ignore_ascii_case(&name))
-    })
-}
 
 /// Reads the header of `path` and says what it is. Errors only for files that cannot be read.
 pub fn inspect(path: &Path) -> std::io::Result<FileInfo> {
@@ -274,10 +232,8 @@ fn inspect_with(path: &Path, base_files: &[(u64, &str)]) -> std::io::Result<File
     };
     info.weights = main_weight_type(&tensors);
     classify(&tensors, &meta, &name, &mut info);
-    info.official = info.compatible && official_download(path, size).is_some();
     if info.compatible
         && info.role == Some(Role::Diffusion)
-        && !info.official
         && is_known_base(path, size, base_files)
     {
         info.warning = Some(BASE_MODEL_WARNING.into());
@@ -742,142 +698,9 @@ fn scan_with(dir: &Path, min_bytes: u64) -> Vec<FileInfo> {
 /// The files a scan suggests for each role (None: not found). The official files win; then a
 /// text encoder that carries its vision weights (no projector needed); then a diffusion model
 /// that leaves room on a card with `vram_mib`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-pub struct Picks {
-    pub diffusion: Option<PathBuf>,
-    pub vae: Option<PathBuf>,
-    pub text_encoder: Option<PathBuf>,
-    /// None also when the text encoder has the vision weights.
-    pub vision_projector: Option<PathBuf>,
-}
-
-pub fn best(files: &[FileInfo], vram_mib: Option<u64>) -> Picks {
-    let usable = |r: Role| {
-        files
-            .iter()
-            .filter(move |f| f.role == Some(r) && f.compatible)
-    };
-    let diffusion = usable(Role::Diffusion)
-        .min_by_key(|f| {
-            let fits = vram_mib.is_none_or(|v| f.size / (1 << 20) + 6 * 1024 <= v);
-            // Official first; then the largest that fits; then the smallest.
-            (
-                !f.official,
-                !fits,
-                if fits { u64::MAX - f.size } else { f.size },
-            )
-        })
-        .map(|f| f.path.clone());
-    let vae = usable(Role::Vae)
-        .min_by_key(|f| (!f.official, f.size))
-        .map(|f| f.path.clone());
-    let te = usable(Role::TextEncoder).min_by_key(|f| (!f.official, !f.has_vision, f.size));
-    let vision_projector = match te {
-        Some(t) if t.has_vision => None,
-        _ => usable(Role::VisionProjector)
-            .min_by_key(|f| (!f.official, f.size))
-            .map(|f| f.path.clone()),
-    };
-    Picks {
-        diffusion,
-        vae,
-        text_encoder: te.map(|f| f.path.clone()),
-        vision_projector,
-    }
-}
 
 /// What the user chose for a role in Setup: a file of theirs, or the official file downloaded
 /// into a folder.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Slot {
-    Path(PathBuf),
-    Download(PathBuf),
-}
-
-/// The official file Setup downloads for a role (the text encoder of `preset`).
-pub fn official_for(role: Role, preset: &Preset) -> Download {
-    match role {
-        Role::Diffusion => preset.diffusion,
-        Role::Vae => VAE,
-        Role::TextEncoder => preset.text_encoder,
-        Role::VisionProjector => VISION_PROJECTOR,
-    }
-}
-
-/// The path a slot resolves to, checked: the user's file must be a usable `role` file; an
-/// official download goes into the folder under its own name (a file of that name already
-/// there must be the official one). Also returns whether a text encoder has vision weights.
-fn resolve(slot: &Slot, role: Role, preset: &Preset) -> Result<(PathBuf, bool), AppError> {
-    match slot {
-        Slot::Path(p) => {
-            let info = inspect(p).map_err(|e| AppError::io("read", p, e))?;
-            if info.role != Some(role) {
-                let what = match (info.role, info.problem) {
-                    (Some(r), _) => format!("this is a {} file", r.label().to_lowercase()),
-                    (None, Some(problem)) => problem,
-                    (None, None) => "not recognized".into(),
-                };
-                return Err(AppError::invalid(format!(
-                    "{}: {what} ({}).",
-                    role.label(),
-                    p.display()
-                )));
-            }
-            if !info.compatible {
-                return Err(AppError::invalid(format!(
-                    "{}: {}",
-                    role.label(),
-                    info.problem
-                        .unwrap_or_else(|| "not usable with Qwen-Image 2.1.".into())
-                )));
-            }
-            Ok((p.clone(), info.has_vision))
-        }
-        Slot::Download(dir) => {
-            let d = official_for(role, preset);
-            let path = dir.join(d.file_name());
-            if let Ok(m) = std::fs::metadata(&path)
-                && m.len() != d.size
-            {
-                return Err(AppError::invalid(format!(
-                    "{}: {} already exists and is not the official file. Choose another folder, or choose that file instead.",
-                    role.label(),
-                    path.display()
-                )));
-            }
-            Ok((path, false))
-        }
-    }
-}
-
-/// The user profile for the files chosen in Setup, every one checked. The vision projector is
-/// left out when the text encoder carries the vision weights, and required otherwise
-/// (editing needs it).
-pub fn user_profile(
-    diffusion: &Slot,
-    vae: &Slot,
-    text_encoder: &Slot,
-    vision: Option<&Slot>,
-    scan_dir: Option<PathBuf>,
-    preset: &Preset,
-) -> Result<ModelProfile, AppError> {
-    let (diffusion, _) = resolve(diffusion, Role::Diffusion, preset)?;
-    let (vae, _) = resolve(vae, Role::Vae, preset)?;
-    let (te, te_vision) = resolve(text_encoder, Role::TextEncoder, preset)?;
-    let vision = match (vision, te_vision) {
-        (_, true) => None,
-        (Some(v), false) => Some(resolve(v, Role::VisionProjector, preset)?.0),
-        (None, false) => {
-            return Err(AppError::invalid(
-                "This text encoder has no vision weights, which editing needs: choose the vision projector (mmproj), or download it.",
-            ));
-        }
-    };
-    let mut p = ModelProfile::user(diffusion, vae, te, vision);
-    p.scan_dir = scan_dir;
-    Ok(p)
-}
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -1166,27 +989,8 @@ pub(crate) mod tests {
         assert_eq!((v.compatible, v.has_vision), (true, false));
         // A scan with only the text-only files suggests no text encoder (the official one is downloaded).
         std::fs::remove_file(&vl).unwrap();
-        assert_eq!(best(&scan_with(dir.path(), 0), None).text_encoder, None);
     }
 
-    #[test]
-    fn old_q4k_is_known_by_size_and_fingerprint() {
-        let dir = tempfile::tempdir().unwrap();
-        let f = dir.path().join("any name.gguf");
-        std::fs::write(&f, vec![7u8; 200_000]).unwrap();
-        let fp = fingerprint(&f, 200_000).unwrap();
-        assert!(is_known_file(&f, 200_000, &fp));
-        assert!(
-            !is_known_file(&f, 200_001, &fp),
-            "another size is never read"
-        );
-        assert!(
-            !is_known_file(&f, 200_000, OLD_TURBO_Q4_K_FINGERPRINT),
-            "same size, other content"
-        );
-        assert!(!is_known_file(&dir.path().join("gone.gguf"), 200_000, &fp));
-        assert!(!is_old_turbo_q4k(&f));
-    }
 
     #[test]
     fn warns_about_known_base_files_only() {
@@ -1271,206 +1075,7 @@ pub(crate) mod tests {
         assert!(inspect(&dir.path().join("missing.gguf")).is_err());
     }
 
-    #[test]
-    fn official_files_by_name_and_size() {
-        let p = Path::new("D:/anywhere/Qwen3VL-8B-Instruct-Q4_K_M.gguf");
-        assert_eq!(
-            official_download(p, TEXT_ENCODER_Q4_K_M.size).unwrap().id,
-            "text_encoder_q4_k_m"
-        );
-        assert!(official_download(p, 123).is_none(), "same name, other size");
-        assert!(
-            official_download(Path::new("D:/x/renamed.gguf"), TEXT_ENCODER_Q4_K_M.size).is_none()
-        );
-    }
 
-    #[test]
-    fn scan_finds_the_pieces_and_picks_the_best() {
-        let dir = tempfile::tempdir().unwrap();
-        let (dit, vae, te) = comfy_folder(dir.path());
-        let files = scan_with(dir.path(), 0);
-        assert_eq!(
-            files.len(),
-            5,
-            "skipped folders are not entered: {files:#?}"
-        );
-        let picks = best(&files, Some(16_303));
-        assert_eq!(
-            picks,
-            Picks {
-                diffusion: Some(dit.clone()),
-                vae: Some(vae),
-                text_encoder: Some(te),
-                vision_projector: None
-            },
-            "the text encoder carries the vision weights"
-        );
-        // A text encoder without vision needs the projector, when there is one.
-        let mm = dir.path().join("models").join("mmproj.gguf");
-        write_gguf(
-            &mm,
-            &[("general.architecture", "clip")],
-            &[("clip.vision.projection_dim", 4096)],
-            &[("v.blk.0.attn_qkv.weight", 1, &[1152, 3456])],
-        );
-        let mut files = scan_with(dir.path(), 0);
-        for f in files
-            .iter_mut()
-            .filter(|f| f.role == Some(Role::TextEncoder))
-        {
-            f.has_vision = false;
-        }
-        assert_eq!(best(&files, None).vision_projector, Some(mm));
-        // The minimum size skips small files.
-        assert!(scan_with(dir.path(), 1 << 20).is_empty());
-        assert!(scan(&dir.path().join("missing")).is_empty());
-    }
 
-    #[test]
-    fn user_profile_checks_every_choice() {
-        let dir = tempfile::tempdir().unwrap();
-        let (dit, vae, te) = comfy_folder(dir.path());
-        let preset = crate::catalog::preset("16gb").unwrap();
-        let path = |p: &Path| Slot::Path(p.to_path_buf());
-        // badraymen's set (#14): the fused text encoder needs no projector.
-        let p = user_profile(
-            &path(&dit),
-            &path(&vae),
-            &path(&te),
-            None,
-            Some(dir.path().to_path_buf()),
-            preset,
-        )
-        .unwrap();
-        assert_eq!(
-            (
-                p.id.as_str(),
-                p.vision_projector.clone(),
-                p.scan_dir.clone()
-            ),
-            (
-                crate::config::USER_PROFILE_ID,
-                None,
-                Some(dir.path().to_path_buf())
-            )
-        );
-        // ...and a projector chosen anyway is not passed.
-        let mm = dir.path().join("mm.gguf");
-        write_gguf(
-            &mm,
-            &[("general.architecture", "clip")],
-            &[("clip.vision.projection_dim", 4096)],
-            &[("v.blk.0.attn_qkv.weight", 1, &[1152, 3456])],
-        );
-        assert_eq!(
-            user_profile(
-                &path(&dit),
-                &path(&vae),
-                &path(&te),
-                Some(&path(&mm)),
-                None,
-                preset
-            )
-            .unwrap()
-            .vision_projector,
-            None
-        );
-        // Wrong file for the role, or a file of another model.
-        let e = user_profile(&path(&vae), &path(&vae), &path(&te), None, None, preset).unwrap_err();
-        assert!(
-            e.message.starts_with("Diffusion model: this is a vae file"),
-            "{}",
-            e.message
-        );
-        let old = dir
-            .path()
-            .join("models/diffusion_models/qwen_image_2512.safetensors");
-        assert!(
-            user_profile(&path(&old), &path(&vae), &path(&te), None, None, preset)
-                .unwrap_err()
-                .message
-                .contains("not Qwen-Image 2.1")
-        );
-        // Official pieces to download: the official text encoder has no vision, so the
-        // projector is required, and downloaded too.
-        let dl = dir.path().join("dl");
-        let e = user_profile(
-            &path(&dit),
-            &path(&vae),
-            &Slot::Download(dl.clone()),
-            None,
-            None,
-            preset,
-        )
-        .unwrap_err();
-        assert!(e.message.contains("vision projector"), "{}", e.message);
-        let p = user_profile(
-            &path(&dit),
-            &Slot::Download(dl.clone()),
-            &Slot::Download(dl.clone()),
-            Some(&Slot::Download(dl.clone())),
-            None,
-            preset,
-        )
-        .unwrap();
-        assert_eq!(p.vae, dl.join(VAE.file_name()));
-        assert_eq!(p.text_encoder, dl.join(preset.text_encoder.file_name()));
-        assert_eq!(
-            p.vision_projector,
-            Some(dl.join(VISION_PROJECTOR.file_name()))
-        );
-        assert_eq!(
-            crate::catalog::profile_model_downloads(&p).len(),
-            3,
-            "and they are what the install downloads"
-        );
-        // A different file under the official name is never overwritten.
-        std::fs::create_dir_all(&dl).unwrap();
-        std::fs::write(dl.join(VAE.file_name()), b"mine").unwrap();
-        assert!(
-            user_profile(
-                &path(&dit),
-                &Slot::Download(dl),
-                &path(&te),
-                None,
-                None,
-                preset
-            )
-            .unwrap_err()
-            .message
-            .contains("not the official file")
-        );
-    }
 
-    #[test]
-    fn diffusion_pick_follows_vram() {
-        let f = |name: &str, gib: u64| FileInfo {
-            path: PathBuf::from(name),
-            size: gib << 30,
-            role: Some(Role::Diffusion),
-            compatible: true,
-            has_vision: false,
-            weights: String::new(),
-            official: false,
-            problem: None,
-            warning: None,
-        };
-        let files = [f("bf16", 20), f("int8", 10), f("q4", 5)];
-        assert_eq!(
-            best(&files, Some(16 * 1024)).diffusion,
-            Some(PathBuf::from("int8")),
-            "the largest that leaves room"
-        );
-        assert_eq!(
-            best(&files, Some(8 * 1024)).diffusion,
-            Some(PathBuf::from("q4")),
-            "nothing fits: the smallest"
-        );
-        let mut off = f("official", 4);
-        off.official = true;
-        assert_eq!(
-            best(&[files[0].clone(), off], Some(32 * 1024)).diffusion,
-            Some(PathBuf::from("official"))
-        );
-    }
 }

@@ -43,8 +43,8 @@ impl GpuInfo {
     /// (`planner::unified_memory_planning_mib`).
     pub fn planning_mib(&self) -> u64 {
         if self.unified {
-            use crate::catalog::{TEXT_ENCODER_Q4_K_M, VISION_PROJECTOR};
-            let te = (TEXT_ENCODER_Q4_K_M.size + VISION_PROJECTOR.size) / (1024 * 1024);
+            // The official text encoder plus vision projector (0.12 catalog sizes).
+            let te = (5_027_784_800 + 1_159_029_824) / (1024 * 1024);
             crate::planner::unified_memory_planning_mib(self.memory_total_mib, te)
         } else {
             self.memory_total_mib
@@ -411,7 +411,9 @@ fn fmt_size(bytes: u64) -> String {
     }
 }
 
-/// First-launch / settings checks. `server_ok` is the live health result if known.
+/// Box-health checks. `server_ok` is the live health result if known. On a split box this
+/// reports what this box holds (the lab's models, the watermark) plus the engine it calls;
+/// on a single box it checks the local engine and its model files.
 pub fn setup_checks(cfg: &AppConfig, server_ok: Option<bool>) -> SetupReport {
     let exe = cfg.server_exe();
     let probe = exe.is_file();
@@ -428,6 +430,73 @@ pub fn setup_checks_with(
     devices: Vec<(String, String)>,
     backend_version: Option<String>,
 ) -> SetupReport {
+    // Split box: this box keeps no engine and no inference model files — the engine box
+    // holds those. Report what this box does hold, plus the door it calls through.
+    if let Some(ee) = cfg.external_engine() {
+        let mut checks = vec![Check {
+            id: "external_engine",
+            label: "Engine (the other box)".into(),
+            ok: true,
+            detail: format!(
+                "{} via {} — model {}; starts on demand (its live state is the /status engine field)",
+                ee.model, ee.gateway, ee.model_name
+            ),
+        }];
+        if let Some(v) = &cfg.vision_engine {
+            checks.push(Check {
+                id: "vision_door",
+                label: "Lab door (the other box)".into(),
+                ok: true,
+                detail: format!("door {} via {} — on demand, resident", v.door, v.gateway),
+            });
+        }
+        checks.push(upscaler_check(cfg));
+        checks.push(engine_release_check(cfg));
+        let d = cfg.sdcpp_dir.clone();
+        checks.push(Check {
+            id: "lab_sam",
+            label: "Lab: click segmentation (MobileSAM)".into(),
+            ok: crate::matting::sam_installed(&d),
+            detail: if crate::matting::sam_installed(&d) {
+                "installed".into()
+            } else {
+                "not downloaded (Settings → Lab)".into()
+            },
+        });
+        checks.push(Check {
+            id: "lab_birefnet",
+            label: "Lab: matting (BiRefNet-lite)".into(),
+            ok: crate::matting::birefnet_installed(&d),
+            detail: if crate::matting::birefnet_installed(&d) {
+                "installed".into()
+            } else {
+                "not downloaded (Settings → Lab)".into()
+            },
+        });
+        checks.push(Check {
+            id: "lab_segment",
+            label: "Lab: segmenter (MobileSAM GGUF)".into(),
+            ok: crate::segment::installed(&d),
+            detail: if crate::segment::installed(&d) {
+                "installed".into()
+            } else {
+                "not downloaded (Settings → Lab)".into()
+            },
+        });
+        checks.push(Check {
+            id: "watermark",
+            label: "AI watermark (TrustMark)".into(),
+            ok: crate::watermark::installed(&d),
+            detail: if crate::watermark::installed(&d) {
+                "installed".into()
+            } else {
+                "not downloaded (Settings → Lab)".into()
+            },
+        });
+        let ready = checks.iter().all(|c| c.ok);
+        return SetupReport { ready, checks, devices: vec![], backend_version: None };
+    }
+
     let mut checks = Vec::new();
     let dir_ok = cfg.sdcpp_dir.is_dir();
     checks.push(Check {
@@ -628,10 +697,6 @@ mod tests {
             mac.planning_mib() < 6 * 1024,
             "16 GB Mac plans like a small card"
         );
-        assert_eq!(
-            crate::catalog::recommended_preset(Some(mac.planning_mib()), true).id,
-            "12gb"
-        );
     }
 
     #[test]
@@ -725,10 +790,7 @@ mod tests {
         let mut cfg = AppConfig::default();
         cfg.sdcpp_dir = std::env::temp_dir().join("qls-does-not-exist");
         cfg.upscaler_model = crate::config::UPSCALER_CHOICES[0].0.into(); // the PC default (Macs: Lanczos)
-        cfg.profiles = vec![crate::config::ModelProfile::official(
-            &cfg.sdcpp_dir,
-            cfg.preset(),
-        )];
+        cfg.profiles = vec![crate::config::ModelProfile::official(&cfg.sdcpp_dir)];
         let r = setup_checks(&cfg, None);
         assert!(!r.ready);
         assert!(r.checks.iter().any(|c| c.id == "server_exe" && !c.ok));

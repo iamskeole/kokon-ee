@@ -1136,7 +1136,7 @@ mod tests {
         cfg.gpu_backend = crate::config::GpuBackend::Cuda; // the default is Metal on a Mac
         // A folder without an upscalers subfolder.
         cfg.sdcpp_dir = std::env::temp_dir().join("qls-no-sdcpp-here");
-        cfg.apply_preset(crate::catalog::preset("16gb").unwrap());
+        cfg.normalize();
         let a = build_server_args(&cfg, cfg.profile());
         let s = a.join(" ");
         let m = |f: &str| {

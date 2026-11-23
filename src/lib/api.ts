@@ -6,9 +6,9 @@
 import { inBrowser } from "./platform";
 import type { ProjectData } from "./store";
 import type {
-  GpuBackend,
-  AppConfig, AppErrorBody, ExternalEngine, GenerationRecord, GenerationRequest, HardwareReport, InputRecord, InstallStatus, JobView, LoraItem, LutEntry, ModelFileInfo, ModelScan, ModelSlot, ModelsStatus, Plan,
-  ServiceEvent, SetupReport, StatusResponse, UpscalerItem, UserRecord,
+
+  AppConfig, AppErrorBody, ExternalEngine, GenerationRecord, GenerationRequest, InputRecord, InstallStatus, JobView, LoraItem, LutEntry, Plan,
+  ServiceEvent, StatusResponse, UpscalerItem, UserRecord,
 } from "./types";
 
 export class ApiError extends Error {
@@ -108,33 +108,6 @@ export interface AiCheckReport {
 
 export const api = {
   status: () => call<StatusResponse>("/status"),
-  setup: () => call<SetupReport>("/setup"),
-  /** `gpu`: index in `gpus` to size the presets for (default: the card in use). */
-  hardware: (backend?: GpuBackend, gpu?: number) => {
-    const q = new URLSearchParams();
-    if (backend) q.set("backend", backend);
-    if (gpu !== undefined) q.set("gpu", String(gpu));
-    const qs = q.toString();
-    return call<HardwareReport>(`/setup/hardware${qs ? `?${qs}` : ""}`);
-  },
-  /** `apply = false`: only download (an engine update), keeping the configured preset and settings.
-   * `gpu`: card to run on once installed (index in `hardware().gpus`). */
-  install: (preset: string, backend: GpuBackend, apply = true, gpu?: number, target?: "official" | "user") =>
-    call<InstallStatus>("/setup/install", { method: "POST", body: json({ preset, backend, apply, gpu, target }) }),
-  /** The active model's files and what is missing. */
-  models: () => call<ModelsStatus>("/models"),
-  /** Model files in a folder (sub-folders included), with a suggested file per role. */
-  scanModels: (dir: string) => call<ModelScan>("/models/scan", { method: "POST", body: json({ dir }) }),
-  inspectModel: (path: string) => call<ModelFileInfo>("/models/inspect", { method: "POST", body: json({ path }) }),
-  /** Saves the user's own files (checked) as the active model; `vision_projector` null = not needed. */
-  setUserModels: (b: { diffusion_model: ModelSlot; vae: ModelSlot; text_encoder: ModelSlot; vision_projector: ModelSlot | null; scan_dir: string | null }) =>
-    call<ModelsStatus>("/models/user", { method: "POST", body: json(b) }),
-  useModels: (profile: "official" | "user") => call<ModelsStatus>("/models/use", { method: "POST", body: json({ profile }) }),
-  /** Downloads the texture-fix VAE and switches the active model to it (progress in installStatus). */
-  improveVae: () => call<InstallStatus>("/models/vae", { method: "POST" }),
-  newImageModel: () => call<InstallStatus>("/models/dit", { method: "POST" }),
-  /** Runs the engine on another card (index in `hardware().gpus`); needs the engine installed. */
-  setGpu: (gpu: number) => call<{ saved: boolean }>("/setup/gpu", { method: "POST", body: json({ gpu }) }),
   upscalers: () => call<{ selected: string; active: string | null; external?: boolean; items: UpscalerItem[] }>("/upscalers"),
   /** Progress in `installStatus` (preset "upscaler:<name>"). */
   downloadUpscaler: (name: string) => call<InstallStatus>(`/upscalers/${encodeURIComponent(name)}/download`, { method: "POST" }),
@@ -188,10 +161,6 @@ export const api = {
   },
   /** Stops the quick cut-out `run` in the service (running, or as soon as it starts). */
   cancelMatte: (run: string) => call<{ stopped: boolean }>("/matte/cancel", { method: "POST", body: json({ run }) }),
-  /** ESRGAN models of earlier versions in the app's own folder. */
-  legacyUpscalers: (keep: string) => call<{ files: string[]; bytes: number }>(`/setup/legacy-upscalers?keep=${encodeURIComponent(keep)}`),
-  /** `keep`: the model chosen in Settings, even if not saved yet. */
-  removeLegacyUpscalers: (keep: string) => call<{ freed_bytes: number }>(`/setup/legacy-upscalers?keep=${encodeURIComponent(keep)}`, { method: "DELETE" }),
   installStatus: () => call<InstallStatus>("/setup/install"),
   cancelInstall: () => call<InstallStatus>("/setup/install/cancel", { method: "POST" }),
   config: () => call<AppConfig>("/config"),
