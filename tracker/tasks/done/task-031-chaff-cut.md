@@ -184,3 +184,40 @@ the MCP**, all pointing at a gateway of stock engines.
   (toast only on a witnessed live-to-failed transition, plus a 60 s freshness
   window for first sightings) and shipped the same afternoon as **task-034**
   (image `multiuser-508182b`) so this task stays focused on the chaff itself.
+- 2026-11-23 (night, owner's GO in the day message; owner asleep, demo day
+  the next morning — the cut was done, deployed and closed in one sitting,
+  the box left serving): **DONE**. Phases as commits: P1 the Tauri shell
+  + updater (`c953acb`), P2 the Mac engine (`8a45344`), P3 the engine-update
+  machinery (`a1de77d`), P4 the installer + setup wizard + the model
+  machinery (`d68bc38`), P5 the bundled process management (service
+  `c5fb7a9` — process.rs is now a pure adopt/reconnect state machine with
+  `pid_alive`; the backend routes are gone; the config's desktop fields
+  sleep as schema-17 values; plus the shared-`config.json.tmp` flake fixed
+  by a unique temp name) + P5 the UI (`cbd32b2` — `inBrowser` and every
+  desktop branch are out; the UI is unconditionally the browser client),
+  P7 the image header (`ed4a1ce`), P8 the docs/CI/scripts (`9a825d9` —
+  linux/platforms/releasing out; engineering-notes, http-api, the
+  fresh/prod-box docs, README, AGENTS, CONTRIBUTING, NOTICE, the workflows
+  retargeted to the fork's ghcr), P9 the MCP (`cf3b510` — finds the box's
+  `kokon-service`, tells the user to start the box), P10 the boot guard
+  (`b3cdbed` — a config without `externalEngine` is a stock config and
+  fails the boot with a kind `InvalidConfig` error, AC3).
+  **AC check:** 1 the cut list (`65bf5e0`, per file with reasons);
+  2 the shell is out (AC2); 3 the stock path is out, schema 16→17 with the
+  live box config as fixture (it loads, migrates in memory and keeps every
+  field; the boot guard lands in P10); 4 the docs follow (P8 — the
+  fresh/prod-box docs stay authoritative); 5 the suite: qls-core
+  **417 → 383** (the bundled engine/installer/catalog/model-profile tests
+  are gone; the external-engine, multi-user, security and lab suites
+  intact), service 20 (the flake gone — 15/15 green runs), UI **248 → 242**,
+  mcp 35+3sk; the image **203 → 201 MB** (57.9 → 57.4 compressed); the
+  deploy window ran on CPU only — image `multiuser-b3cdbed` built,
+  recreated on the dev box (web sessions die and re-login, as planned),
+  ping + LAN UI 200, the engine still adopted (`kokon-1013-1814814`,
+  owned=false), vllm healthy on 9118 (200); the rollback tag
+  `multiuser-9f1f070` stays on the box (ml repo `4115e86`, `0388a46`).
+  6 the MCP re-list is staged: the repo side is done (P9); the registry
+  pages (glama/mcpservers.org) are owner-account actions — **flagged for
+  the owner in STATUS**. **Next: task-032** (projects → the database —
+  its recorded trigger, the retirement of the byte-identity constraint,
+  fired with this cut).
