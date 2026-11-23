@@ -1,6 +1,6 @@
 // Pure UI logic (unit-tested in logic.test.ts).
 
-import type { Advanced, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InpaintAction, InputRecord, InstallItem, InstallStatus, JobView, LoraItem, LutInfo, MacBenchState, Mode, ModelsStatus, OutpaintSpec, Plan, Quality, ResolutionMode, Size, StatusResponse } from "./types";
+import type { Advanced, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InpaintAction, InputRecord, InstallItem, InstallStatus, JobView, LoraItem, LutInfo, Mode, ModelsStatus, OutpaintSpec, Plan, Quality, ResolutionMode, Size } from "./types";
 
 export interface Ref {
   key: string;
@@ -891,26 +891,6 @@ export function modelOfferDue(dit: ModelsStatus["dit"] | undefined, ui: Record<s
  * good, otherwise postponed until the next release `version`. */
 export function modelChoiceUi(choice: "later" | "keep", version: string): Record<string, unknown> {
   return choice === "keep" ? { ownModelKept: true } : { modelUpdateSkipped: version };
-}
-
-/** Kokon's Mac engine is the default on Macs since 0.12: switch it on once, at start, when set up, the engine is in
- * the app, it is off and nobody chose yet (`macEngineOffered`: the 0.11 offer's "Not now" or this switch). Not below
- * 16 GB: the engine peaks at ~9 GB during a 1024² decode (M2 Pro, Benchmark button 2026-10-26) and was never run on 8 GB. */
-export function macEngineDefaultDue(st: Pick<StatusResponse, "gpu" | "mac_engine"> | null, ui: Record<string, unknown>, setupComplete: boolean): boolean {
-  const engine = st?.mac_engine;
-  return setupComplete && !!engine?.available && !engine.on && !ui.macEngineOffered && (st?.gpu?.memory_total_mib ?? 0) >= 15 * 1024;
-}
-
-/** Benchmark this Mac while it runs: the bar's fill and the line under it ("Step 2 of 7 · Default: accuracy at
- * 512² · 3 min"). The engine names a run by the setting it changes; its first run is the default paths. */
-export function macBenchProgress(b: MacBenchState, now: number): { frac: number; text: string } | null {
-  if (b.state !== "running") return null;
-  const minutes = Math.max(0, Math.floor((now - Date.parse(b.started_at)) / 60000));
-  const elapsed = Number.isFinite(minutes) ? ` · ${minutes} min` : "";
-  if (b.n <= 0) return { frac: 0, text: `Starting${elapsed}` };
-  const label = b.label.replace(/^default \(paths above\)/, "Default");
-  // A step is done when the next one starts: k − 1 of n.
-  return { frac: (b.k - 1) / b.n, text: `Step ${b.k} of ${b.n}${label ? ` · ${label}` : ""}${elapsed}` };
 }
 
 /** Overall download progress over the files that were not installed already. */

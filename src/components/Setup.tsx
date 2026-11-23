@@ -319,7 +319,7 @@ export function Setup() {
       if (st?.engine?.update_needed) ui.engineUpdateSkipped = st.engine.release;
       await api.saveConfig({ ...cfg, setupComplete: true, ui });
       setState({ needsSetup: false, setupMode: null });
-      // On a Mac, the Mac engine offer first; then the model loads in the background (the status indicator shows it).
+      // The model loads in the background (the status indicator shows it).
       afterStartScreens();
       refreshStatus();
     } catch (e) {

@@ -85,18 +85,12 @@ impl SpeedBook {
     }
 }
 
-/// What makes timings comparable: engine, GPU and how the weights are held.
+/// What makes timings comparable: backend, GPU and how the weights are held.
 pub fn machine_key(cfg: &AppConfig, gpu: Option<&GpuInfo>) -> String {
     let gpu = gpu.map(|g| g.name.as_str()).unwrap_or("unknown GPU");
-    // Kokon's Mac engine has its own speed: its calibration is kept apart from sd.cpp's on the same Mac.
-    let engine = if cfg.uses_mac_engine() {
-        "mac-engine"
-    } else {
-        cfg.gpu_backend.device_prefix()
-    };
     format!(
         "{}|{}|{:?}|sage={}",
-        engine,
+        cfg.gpu_backend.device_prefix(),
         gpu,
         cfg.text_encoder_placement,
         cfg.uses_sage_attention()
@@ -150,15 +144,7 @@ mod tests {
         assert_ne!(
             a,
             machine_key(&cfg, Some(&gpu)),
-            "engines are calibrated separately"
-        );
-        cfg.gpu_backend = GpuBackend::Metal;
-        let metal = machine_key(&cfg, Some(&gpu));
-        cfg.mac_engine = true;
-        assert_ne!(
-            metal,
-            machine_key(&cfg, Some(&gpu)),
-            "Kokon's Mac engine apart from sd.cpp's Metal build"
+            "backends are calibrated separately"
         );
         cfg.gpu_backend = GpuBackend::Vulkan;
         assert!(!trust_uncalibrated(&cfg));

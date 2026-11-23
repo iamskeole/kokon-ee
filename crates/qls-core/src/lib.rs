@@ -18,7 +18,6 @@ pub mod lora;
 mod glibc_compat;
 pub mod lut;
 pub mod matting;
-pub mod mac_bench;
 pub mod modelfile;
 pub mod onnx;
 pub mod paths;

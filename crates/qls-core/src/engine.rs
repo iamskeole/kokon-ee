@@ -146,8 +146,6 @@ pub enum Event {
         deleted: bool,
         user: Option<String>,
     },
-    /// Settings → Performance → Benchmark this Mac.
-    MacBench { bench: crate::mac_bench::BenchState },
 }
 
 pub struct Engine {
@@ -173,7 +171,6 @@ pub struct Engine {
     devices: crate::bounded_cache::BoundedCache<Option<DeviceList>>,
     /// First-run downloads (setup wizard).
     pub installer: Arc<crate::installer::Installer>,
-    pub mac_bench: Arc<crate::mac_bench::MacBench>,
     backend_version: crate::bounded_cache::BoundedCache<Option<String>>,
     last_activity: Mutex<Instant>,
 }
@@ -316,7 +313,6 @@ impl Engine {
             gpus: crate::bounded_cache::BoundedCache::new((None, Vec::new())),
             devices: crate::bounded_cache::BoundedCache::new(None),
             installer: crate::installer::Installer::new(),
-            mac_bench: crate::mac_bench::MacBench::new(),
             backend_version: crate::bounded_cache::BoundedCache::new(None),
             last_activity: Mutex::new(Instant::now()),
         });
@@ -677,46 +673,11 @@ impl Engine {
     }
 
     pub fn has_pending_work(&self) -> bool {
-        self.has_jobs() || self.installer.is_running() || self.mac_bench.is_running()
+        self.has_jobs() || self.installer.is_running()
     }
 
     fn has_jobs(&self) -> bool {
         self.active.lock().unwrap().is_some() || self.jobs.lock().unwrap().values().any(|j| !j.view.status.is_terminal())
-    }
-
-    /// Starts Kokon's Mac engine benchmark on the active model files: refused while images or an install are
-    /// running; stops the server and keeps it stopped until the bench ends (the next job starts it again).
-    pub async fn start_mac_bench(self: &Arc<Self>, quick: bool) -> Result<crate::mac_bench::BenchState, AppError> {
-        use crate::mac_bench as mb;
-        let cfg = self.config();
-        if let Some(e) = mb::unavailable(&cfg) {
-            return Err(e);
-        }
-        if self.mac_bench.is_running() {
-            return Ok(self.mac_bench.state());
-        }
-        if self.has_jobs() || self.installer.is_running() {
-            return Err(AppError::new(ErrorCode::QueueFull, "Wait for the current images to finish, then run the benchmark."));
-        }
-        self.server.hold(Some("The Mac is running the benchmark: images can be made when it ends.".into()));
-        self.server.stop().await;
-        self.emit_server();
-        let report = mb::report_path(&self.data_dir);
-        let args = mb::bench_args(cfg.profile(), &report, quick);
-        let envs = vec![("KOKON_ENGINE_VERSION".to_string(), format!("0.1.1 (experimental), Kokon {APP_VERSION}"))];
-        let command = mb::BenchCommand { exe: cfg.server_exe(), args, envs, report, quick };
-        let (e1, e2) = (self.clone(), self.clone());
-        let r = self.mac_bench.start(
-            command,
-            move |bench| {
-                let _ = e1.events.send(Event::MacBench { bench });
-            },
-            move || e2.server.hold(None),
-        );
-        if r.is_err() {
-            self.server.hold(None);
-        }
-        r.map(|()| self.mac_bench.state())
     }
 
     /// Every graphics card found (refreshed every few seconds for the live memory use).
@@ -1694,10 +1655,6 @@ impl Engine {
             // (config externalEngine.sample: steps / cfg / sampler / clear_sigmas).
             if let Some(ext) = &cfg.external_engine {
                 pipeline::apply_sample_overrides(&mut sd_req, &ext.sample);
-            }
-            if let Some(what) = caps.mac_engine_unsupported(&sd_req) {
-                return Err(AppError::new(ErrorCode::Unsupported, format!("Kokon's Mac engine (experimental) does not do {what} yet."))
-                    .suggest("Turn it off in Settings → Performance to use the standard engine for this."));
             }
 
             // 4a. Blend into scene: only the reading of the place the object stands in.

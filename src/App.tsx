@@ -3,9 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { api, configure, setSignedOutHandler } from "./lib/api";
 import { native } from "./lib/native";
 import { inBrowser, isNarrow, useNarrow } from "./lib/platform";
-import { macEngineDefaultDue } from "./lib/logic";
 import {
-  addExampleProjects, closeStarPrompt, loadProjects, dismissToast, getState, initStarPrompt, redoVersion, refreshLoras, refreshStatus, selectItem, setState, startEvents, startTour, submitComposer, toastError, toastInfo, turnOnMacEngine, undoVersion, useStore,
+  addExampleProjects, closeStarPrompt, loadProjects, dismissToast, getState, initStarPrompt, redoVersion, refreshLoras, refreshStatus, selectItem, setState, startEvents, startTour, submitComposer, toastError, toastInfo, undoVersion, useStore,
 } from "./lib/store";
 import { Composer, uploadFiles } from "./components/Composer";
 import { Login } from "./components/Login";
@@ -168,10 +167,7 @@ export default function App() {
         // After an app update: what's new, with the engine and model downloads the release offers
         // (they can be postponed there). Closing it goes on with afterStartScreens.
         const whatsNew = cfg.setupComplete && whatsNewDue(ui, st?.engine);
-        // Otherwise, once on a Mac: Kokon's Mac engine switched on (the default there since 0.12), before the model loads.
-        const macOn = !inBrowser && welcomeSeen && !whatsNew && macEngineDefaultDue(st, ui, cfg.setupComplete);
         setState({ needsSetup: !cfg.setupComplete, ...(!welcomeSeen ? { overlay: "welcome" } : whatsNew ? { overlay: "whats-new" } : {}) });
-        if (macOn) await turnOnMacEngine();
         setBoot("ok");
         // An externally managed engine: visiting the UI must not put a model on the GPU.
         if (cfg.externalEngine) setState({ external: cfg.externalEngine, models: cfg.models ?? [] });

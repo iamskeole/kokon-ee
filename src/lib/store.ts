@@ -9,11 +9,11 @@ import { inBrowser, isNarrow } from "./platform";
 import { useSyncExternalStore } from "react";
 import { markFresh } from "../components/Cocoon";
 import { api, ApiError, setPrivateInputs, subscribe, urls } from "./api";
-import { activeLoras, buildRequest, composing, emptyComposer, goneVersions, isGenericName, macEngineDefaultDue, needsPrompt, newKey, pageOutdated, persistentAdvanced, refFromGen, refFromInput, reviewRequest, stageFitsPreview, starPromptDue, timelineLinks, undoTarget, versionLabels, wantsPromptReview, type CompareMode, type Composer, type Ref } from "./logic";
+import { activeLoras, buildRequest, composing, emptyComposer, goneVersions, isGenericName, needsPrompt, newKey, pageOutdated, persistentAdvanced, refFromGen, refFromInput, reviewRequest, stageFitsPreview, starPromptDue, timelineLinks, undoTarget, versionLabels, wantsPromptReview, type CompareMode, type Composer, type Ref } from "./logic";
 import { keepLabsIn, labsChanged, labSources, loadLab, type LabStore } from "./layerDoc";
-import type { AppErrorBody, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InputRecord, JobView, LoraItem, MacBenchState, ServerState, StatusResponse } from "./types";
+import type { AppErrorBody, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InputRecord, JobView, LoraItem, ServerState, StatusResponse } from "./types";
 
-export type Overlay = null | "gallery" | "settings" | "inpaint" | "expand" | "layers" | "boxes" | "welcome" | "whats-new" | "prompt-tips" | "shortcuts" | "ai-check" | "mac-engine";
+export type Overlay = null | "gallery" | "settings" | "inpaint" | "expand" | "layers" | "boxes" | "welcome" | "whats-new" | "prompt-tips" | "shortcuts" | "ai-check";
 
 export interface SessionItem {
   key: string;
@@ -72,7 +72,6 @@ export interface State {
   toasts: Toast[];
   galleryVersion: number;
   /** Benchmark this Mac: null until Settings asks the service. */
-  macBench: MacBenchState | null;
   needsSetup: boolean;
   /** Setup opens on "Use models I already have" or on the official download (Settings → Models). */
   setupMode: "own" | "official" | null;
@@ -469,7 +468,6 @@ let state: State = {
   compareUpscalers: false,
   toasts: [],
   galleryVersion: 0,
-  macBench: null,
   needsSetup: false,
   setupMode: null,
   compare: "off",
@@ -558,27 +556,12 @@ export function dismissToast(id: string) {
 
 let unsub: (() => void) | null = null;
 
-/** Kokon's Mac engine, the default on Macs it suits since 0.12: switched on once (`macEngineDefaultDue`), with a note
- * on how to go back. Remembered like the 0.11 offer's answer, so a later "off" in Settings stays off. */
-export async function turnOnMacEngine(): Promise<void> {
-  try {
-    const cfg = await api.config();
-    const ui = { ...((cfg.ui ?? {}) as Record<string, unknown>), macEngineOffered: true };
-    await api.saveConfig({ ...cfg, macEngine: true, ui });
-    toastInfo("Kokon's Mac engine is on: about 4 times faster. LoRAs and the upscaler model need the standard engine (Settings → Performance).");
-  } catch (e) {
-    toastError(e);
-  }
-}
-
-/** After Setup or What's new: Kokon's Mac engine switched on when it is due (before the model loads, so it loads on
- * it), then the model loads in the background so the first image starts at once. */
+/** After Setup or What's new: the model loads in the background so the first image starts at once. */
 export async function afterStartScreens() {
   let external = false;
   try {
-    const [cfg, st] = await Promise.all([api.config(), api.status()]);
+    const cfg = await api.config();
     external = !!cfg.externalEngine;
-    if (!inBrowser && macEngineDefaultDue(st, (cfg.ui ?? {}) as Record<string, unknown>, cfg.setupComplete)) await turnOnMacEngine();
   } catch {
     // It can wait for the next start; the model still loads.
   }
@@ -658,7 +641,6 @@ export function startEvents() {
       }
       else if (ev.type === "gallery") setState((s) => ({ galleryVersion: s.galleryVersion + 1 }));
       else if (ev.type === "projects") onProjectEvent(ev.id, ev.rev, ev.deleted);
-      else if (ev.type === "mac_bench") setState({ macBench: ev.bench });
     },
     (ok) => {
       setState({ connected: ok });
