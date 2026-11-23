@@ -1109,13 +1109,38 @@ impl Engine {
 
     /// The fast-sticker matte of an image already in Kokon ("input:"/"gen:"), as a grey PNG at
     /// its size (white = the main thing in it; the layers lab combines it with the selection).
+    /// The model runs where the lab's ladder says (task-037 P3, D-037-13): the door first (the
+    /// split-box path: the accelerator's `vision-server`, its `/birefnet`), this box's own
+    /// pinned copy second (the single-box path, and a mixed box's escape when its door is
+    /// down), nothing below that (a thin box whose door is down says so plainly). The door's
+    /// request cannot be cancelled mid-flight: a Stop while it is in flight lets it finish.
     pub fn matte(&self, src: &str, run: Option<&str>) -> AppResult<Vec<u8>> {
         if !src.starts_with("input:") && !src.starts_with("gen:") {
             return Err(AppError::invalid("Stickers are made from images already in Kokon."));
         }
         let (bytes, _, _) = self.read_source(src, None)?;
         let img = imaging::decode_image(&bytes)?;
-        let m = crate::matting::matte(&self.config().sdcpp_dir, &img.pixels, run)?;
+        let c = self.config();
+        let m = if let Some(v) = c.vision_engine() {
+            let door = crate::segment::Door::new(&v.gateway, &v.door, &v.api_key)?;
+            if door.capabilities().is_ok() {
+                door.matte(&img.pixels)?
+            } else if crate::matting::birefnet_installed(&c.sdcpp_dir) {
+                crate::matting::matte(&c.sdcpp_dir, &img.pixels, run)?
+            } else {
+                return Err(AppError::new(
+                    ErrorCode::ServerUnavailable,
+                    "The sticker model's engine is not answering (the accelerator's door is down).",
+                ));
+            }
+        } else if crate::matting::birefnet_installed(&c.sdcpp_dir) {
+            crate::matting::matte(&c.sdcpp_dir, &img.pixels, run)?
+        } else {
+            return Err(AppError::new(
+                ErrorCode::MissingModel,
+                "The sticker model is not downloaded yet.",
+            ));
+        };
         let rgba = image::DynamicImage::ImageLuma8(m).to_rgba8();
         imaging::encode_png(&rgba, &[], None, true)
     }
@@ -1136,20 +1161,77 @@ impl Engine {
         Ok(self.read_source(src, None)?.0)
     }
 
-    /// The encoder for `src` at the size a `w`×`h` mask needs (the lab calls it once per photo
-    /// before its clicks; the embeddings stay cached in the process). The model runs here —
-    /// this box has the two pinned files; a box without them reports "not downloaded".
+    /// The lab's click-to-select ladder (task-037 P3, D-037-13), decided per call:
+    /// **a configured door behind the box's gateway first** (the split-box path: a stock
+    /// `vision-server` on the accelerator answers the 4-mask contract, so this box stores no
+    /// files and runs no ONNX); **then this box's own pinned files** (the single-box path —
+    /// and the escape for a mixed box whose door is down: the box still runs the model
+    /// in-process, as before this door existed). Below the ladder there is *nothing* — the
+    /// owner's rule: the gateway/service owns the lab's model, the browser is a thin client,
+    /// and a failure is said plainly, never quietly covered by an in-browser copy.
+    fn segment_ladder(&self) -> AppResult<crate::segment::SegmentPath> {
+        let c = self.config();
+        if let Some(v) = c.vision_engine() {
+            let door = crate::segment::Door::new(&v.gateway, &v.door, &v.api_key)?;
+            if door.capabilities().is_ok() {
+                return Ok(crate::segment::SegmentPath::Door(door));
+            }
+            // The door is named but not answering. A mixed box (it has the files too) still
+            // has a way to run the lab; a thin one does not, and says so plainly below.
+            if !crate::segment::installed(&c.sdcpp_dir) {
+                return Err(AppError::new(
+                    ErrorCode::ServerUnavailable,
+                    "The selection engine is not answering (the accelerator's door is down).",
+                ));
+            }
+            return Ok(crate::segment::SegmentPath::InProcess(crate::segment::Sam::new(c.sdcpp_dir.clone())));
+        }
+        if crate::segment::installed(&c.sdcpp_dir) {
+            return Ok(crate::segment::SegmentPath::InProcess(crate::segment::Sam::new(c.sdcpp_dir.clone())));
+        }
+        Err(AppError::new(
+            ErrorCode::MissingModel,
+            "The selection model is not downloaded yet.",
+        ))
+    }
+
+    /// The lab's door, as named in the config (its gateway root, its key, its matrix id).
+    fn segment_door(&self) -> Option<crate::segment::Door> {
+        let c = self.config();
+        let v = c.vision_engine()?;
+        crate::segment::Door::new(&v.gateway, &v.door, &v.api_key).ok()
+    }
+
+    /// `(configured, answering)`: whether a door is named in the config, and whether it
+    /// answers `/health` right now (a short probe — the door's cold boot is a fraction of
+    /// the timeout on the box; a down gateway just reads as not up). The service's
+    /// `/segment` status reports both, so the browser knows whether to download a single
+    /// box's model or to say the door is down plainly (never to run the model itself).
+    pub fn segment_door_state(&self) -> (bool, bool) {
+        let Some(door) = self.segment_door() else {
+            return (false, false);
+        };
+        let answering = door.capabilities().is_ok();
+        (true, answering)
+    }
+
+    /// The encoder for `src` at the size a `w`×`h` mask needs (the lab calls it once per
+    /// photo before its clicks; the in-process embeddings stay cached in this process, the
+    /// door's by its own image-bytes cache). The model runs where the ladder says.
     pub fn segment_encode(&self, src: &str, w: u32, h: u32) -> AppResult<()> {
         let bytes = self.sam_source(src)?;
         let img = imaging::decode_image(&bytes)?;
-        crate::segment::Sam::new(self.config().sdcpp_dir.clone())
-            .encode(&Self::sam_key(&bytes), &img.pixels, w, h)
+        match self.segment_ladder()? {
+            crate::segment::SegmentPath::InProcess(sam) => sam.encode(&Self::sam_key(&bytes), &img.pixels, w, h),
+            // The door has no encode step (its server runs the encoder itself and caches
+            // the embedding per image): the first predict pays the one-time encoder run.
+            crate::segment::SegmentPath::Door(door) => door.encode(),
+        }
     }
 
     /// SAM's 4 masks at `w`×`h` (0/255 PNGs) plus the predicted IoUs: `points` are clicks in
     /// mask pixels (label 0 = not, 1 = object), `box_` confines the object (mask pixels).
-    /// The model runs here — the box has the two pinned files; a box without them reports
-    /// "not downloaded" (the browser then uses its in-browser copy, the stock path).
+    /// The model runs where the ladder says (this box's files, else the door).
     pub fn segment_predict(
         &self,
         src: &str,
@@ -1160,8 +1242,12 @@ impl Engine {
     ) -> AppResult<(Vec<Vec<u8>>, Vec<f32>)> {
         let bytes = self.sam_source(src)?;
         let img = imaging::decode_image(&bytes)?;
-        let (masks, iou) = crate::segment::Sam::new(self.config().sdcpp_dir.clone())
-            .predict(&Self::sam_key(&bytes), &img.pixels, w, h, &points, box_)?;
+        let (masks, iou) = match self.segment_ladder()? {
+            crate::segment::SegmentPath::InProcess(sam) => {
+                sam.predict(&Self::sam_key(&bytes), &img.pixels, w, h, &points, box_)?
+            }
+            crate::segment::SegmentPath::Door(door) => door.predict(&img.pixels, w, h, &points, box_)?,
+        };
         let pngs = masks
             .iter()
             .map(|m| imaging::encode_png(&image::DynamicImage::ImageLuma8(m.clone()).to_rgba8(), &[], None, true))
