@@ -290,12 +290,20 @@ impl Engine {
         }
         let private_store = Arc::new(Store::open_in_memory(&private_dir)?);
         let (events, _) = broadcast::channel(512);
+        // The project list moves to the database (task-032). The file stays a read-only
+        // export for exactly this one schema version, so a rollback to the previous image
+        // reads it as it always has; the next bump retires it (D-032-1).
+        let export_projects_file = cfg.schema_version == 18;
         let engine = Arc::new(Self {
             cfg: RwLock::new(cfg),
             server: ServerManager::new(data_dir.to_path_buf()),
             store,
             private_store,
-            projects: if cfg!(test) { crate::projects::ProjectStore::in_memory() } else { crate::projects::ProjectStore::open(data_dir) },
+            projects: if cfg!(test) {
+                crate::projects::ProjectStore::in_memory()
+            } else {
+                crate::projects::ProjectStore::open(data_dir, export_projects_file)?
+            },
             speed: if cfg!(test) { crate::speed::SpeedBook::in_memory() } else { crate::speed::SpeedBook::open(data_dir) },
             data_dir: data_dir.to_path_buf(),
             private_dir,

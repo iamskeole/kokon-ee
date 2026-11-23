@@ -86,19 +86,61 @@ follow-through.
 
 ## decisions
 
-- **D-032-1 — (fill in in-session) the file's fate**: lean = written as
-  a read-only export for one schema version (the rollback path), retired
-  at the next bump; the DB is the source of truth from the first
-  successful import (the file is no longer read after the import, except
-  on rollback to the previous image, which predates the DB and reads the
-  file).
-- **D-032-2 — (fill in in-session) the table layout** (the working
-  sketch in the acceptance criteria).
-- **D-032-3 — (fill in in-session) where the merge protocol lives**:
-  lean = the same home as today (`projects.rs` becomes the DB-backed
-  store; the pure `merge()` stays pure and unit-tested against the
-  tables' row shape — the merge is a function of values, the store is
-  its home).
+- **D-032-1 — The file's fate (decided 2026-11-23, night):** the database is
+  the source of truth from the first successful import. `projects.json` stays
+  **written on every change for exactly this one schema version (18)** as a
+  read-only export: the previous image reads that file, and the export uses the
+  *exact* old serialisation (camelCase; the `owner` key skipped while empty, so
+  a single-user file stays a single-user file — the previous image reads it as
+  it always has). On the first import the pre-import bytes are snapshotted to
+  `projects.json.pre-db` (the house `*.pre-*` one-step-rollback pattern). The
+  export stops at the next schema bump (19) — the store is built with an
+  `export_file` flag the engine sets from the config's schema version (== 18
+  today).
+- **D-032-2 — The table layout (decided 2026-11-23, night):** in `gallery.db`,
+  at `PRAGMA user_version` 2 → 3:
+  ```sql
+  CREATE TABLE projects (
+      id TEXT PRIMARY KEY,          -- the project id (the file's key)
+      title TEXT NOT NULL,
+      named INTEGER,                -- NULL/0/1 (the title was typed by the user)
+      updated_at REAL NOT NULL,     -- ms since 1970; the list sorts by it
+      cover TEXT,                   -- "gen:<id>" / "input:<id>" or NULL
+      count INTEGER NOT NULL DEFAULT 0,
+      selected TEXT,                -- an item key or NULL
+      loras TEXT,                   -- JSON array or NULL
+      rev INTEGER NOT NULL,
+      owner TEXT,                   -- the users table's name; NULL = the machine's shared project
+      deleted_at REAL,              -- NOT NULL = tombstone; the row is never physically deleted
+      extra TEXT NOT NULL DEFAULT '{}'  -- forward-compatible fields (the lab doc, ...)
+  );
+  CREATE TABLE project_items (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      kind TEXT NOT NULL,           -- "gen" | "input" | "job"
+      gen_id TEXT, input_id TEXT, job_id TEXT,
+      position INTEGER NOT NULL,    -- order in the versions list
+      extra TEXT NOT NULL DEFAULT '{}',  -- fields of newer apps (the job's request, ...)
+      PRIMARY KEY (project_id, key)
+  );
+  CREATE INDEX items_pos ON project_items(project_id, position);
+  ```
+  A tombstone is the `projects` row itself with `deleted_at` set (its items
+  deleted, its owner kept for the event's filter) — the file's `deleted` map
+  has no table of its own. No physical deletion anywhere: a removed id can
+  never be reused, which is what the tombstones are for.
+- **D-032-3 — Where the merge protocol lives (decided 2026-11-23, night):**
+  `projects.rs` keeps the home: the `Project`/`Meta`/`Item`/`Change` types and
+  the pure `merge()` are unchanged — the merge is a function of values, and its
+  tests are the spec (they move to the DB-backed store and keep passing).
+  `ProjectStore` becomes the DB-backed store: every mutation is one
+  transaction — read the stored rows into `Project` values, run the pure
+  merge, write the rows back. The known-set three-way merge, the tombstones
+  and the D-MU13 ownership semantics all move to the tables with the same
+  behaviour; the module comment records that the byte-identity constraint
+  which shaped the parallel `owner` side-map is gone (the `owner` column is
+  first-class) and that the file export is the one-version transition aid of
+  D-032-1, not a format we owe.
 
 ## progress
 

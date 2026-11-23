@@ -40,7 +40,7 @@ pub const DEFAULT_REMOTE_PORT: u16 = 39152;
 /// path, D-037-12/13): the serving box runs no ONNX and stores no model files when the
 /// door serves the lab. Deployment-level like the VLM doors: the UI carries no such field,
 /// so a settings save keeps the stored one (`absorb_secrets`).
-const SCHEMA_VERSION: u32 = 17;
+const SCHEMA_VERSION: u32 = 18;
 /// `upscaler_model` value for a plain Lanczos resize (no model).
 pub const LANCZOS: &str = "lanczos";
 /// Upscalers offered in Settings: (file stem, label). Superscale-SP is a setup download, MoSR is
@@ -887,6 +887,12 @@ impl AppConfig {
                         // but no longer act; the service box's config is read as-is.
                         tracing::debug!("config migrated to schema 17 (the service box keeps a stock config)");
                     }
+                    if c.schema_version < 18 {
+                        // The project list moves from its own file to the box's database
+                        // (task-032): the file stays a read-only export for this one version
+                        // so a rollback reads it, and the next bump retires it (D-032-1).
+                        tracing::debug!("config migrated to schema 18 (projects live in the database; the file stays a read-only export for this version)");
+                    }
                     // The official weights are always available as a profile, built for the
                     // configured folder and preset; the active one stays as it is.
                     c.normalize();
@@ -1720,19 +1726,39 @@ mod tests {
 
     #[test]
     fn schema_17_migration() {
-        // The cut (task-031): a schema-16 file with the desktop-app fields reads, bumps to
-        // 17, and keeps the fields as dormant values.
+        // The cut (task-031): a schema-16 file with the desktop-app fields reads, migrates
+        // through 17 and on to the current schema, and keeps the fields as dormant values.
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("config.json");
         let old = r#"{"schemaVersion":16,"hardwarePreset":"8gb","macEngine":true,"serverPort":7860,"keepServerRunning":true,"idleUnloadMinutes":7}"#;
         std::fs::write(&p, old).unwrap();
         let c = AppConfig::load_from(&p);
-        assert_eq!(c.schema_version, 17);
+        assert_eq!(c.schema_version, SCHEMA_VERSION);
         assert_eq!(c.hardware_preset, "8gb", "dormant: read, no effect");
         assert!(c.mac_engine);
         assert_eq!(c.server_port, 7860);
         assert!(c.keep_server_running);
         assert_eq!(c.idle_unload_minutes, 7);
+    }
+
+    #[test]
+    fn schema_18_migration() {
+        // task-032: a schema-17 file (the last shape of the cut) reads, bumps to the
+        // current schema, and changes nothing else: the migration only marks that the
+        // project list now lives in the database (the file stays a read-only export for
+        // this one version, D-032-1).
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.json");
+        let old = r#"{"schemaVersion":17,"externalEngine":{"gateway":"http://gw","model":"m","modelName":"m.gguf"}}"#;
+        std::fs::write(&p, old).unwrap();
+        let c = AppConfig::load_from(&p);
+        assert_eq!(c.schema_version, 18);
+        assert_eq!(c.external_engine.as_ref().unwrap().model, "m");
+        let saved = serde_json::to_string(&c).unwrap();
+        assert!(
+            saved.contains(&format!("\"schemaVersion\":{SCHEMA_VERSION}")),
+            "the load migrated it, the save writes the current schema"
+        );
     }
 
     #[test]

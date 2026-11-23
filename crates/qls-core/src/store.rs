@@ -332,7 +332,9 @@ impl Store {
         if !has_user {
             conn.execute_batch("ALTER TABLE generations ADD COLUMN user TEXT;").map_err(db_err)?;
         }
-        conn.pragma_update(None, "user_version", 2).map_err(db_err)?;
+        // The database's schema generation (2 since 0.12; 3 with the projects tables,
+        // task-032). Older images set 2 on their opens and read the content, not the number.
+        conn.pragma_update(None, "user_version", 3).map_err(db_err)?;
         Ok(Self { conn: Mutex::new(conn), data_dir: data_dir.to_path_buf() })
     }
 
