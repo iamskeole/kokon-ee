@@ -42,7 +42,7 @@ kokon-service --set-password         # asks twice, nothing is shown while you ty
 kokon-service --persistent --remote  # keeps running; the browser UI is on port 39152
 ```
 
-The first time, open the address in a browser and follow the setup to download the model. A password
+The first time, open the address in a browser and sign in. A password
 set while the service runs takes effect within a few seconds. For a container, see
 [docker.md](docker.md).
 
@@ -52,11 +52,11 @@ set while the service runs takes effect within a few seconds. For a container, s
   settings or the logs.
 - After 5 wrong passwords in a row, that device waits 1 minute, then longer after each new mistake
   (up to 15 minutes). Other devices are not affected.
-- Nothing listens on the network until a password exists and access is on. Kokon's own token, used by
-  the desktop app and the MCP server, works only on the computer itself.
+- Nothing listens on the network until a password exists and access is on. The service's own token,
+  used by the MCP server and scripts on the box, works only on the box itself.
 - A browser can do what the interface does: create and edit, the gallery, Settings. It cannot read or
-  write files on the computer by path, change folders or model files, or turn network access on or
-  off. Those stay in the desktop app.
+  write files on the box by path, change the engine's model or the network access. Those stay in the
+  service's own token API.
 - Web pages from other sites cannot use your signed-in session.
 
 **The connection is plain HTTP, not encrypted.** On your home Wi-Fi that is fine. On a shared network

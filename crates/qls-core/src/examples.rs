@@ -1,6 +1,6 @@
-//! Example projects added on the first launch: real results made by Kokon (see
-//! `marketing/showcase/PROMPTS.md`, resized by `scripts/make-examples.py`), stored as
-//! ordinary generations so they open, compare and edit like the user's own work.
+//! Example projects added on the first launch: real results made by Kokon (regenerated from
+//! full-size originals by `scripts/make-examples.py`), stored as ordinary generations so they
+//! open, compare and edit like the user's own work.
 
 use std::path::Path;
 

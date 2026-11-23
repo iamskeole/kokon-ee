@@ -4,15 +4,15 @@ Copyright 2026 Gabriele Lozupone (the parts derived from Kokon) and 2026 iamskeo
 This product is licensed under the GNU Affero General Public License, version 3 only
 (AGPL-3.0-only, see LICENSE).
 
-Model weights that Kokon EE downloads at setup are not part of this product; they come from
-their authors under their own licenses (see the README). The upscaler model included in the
-installer keeps its own license too (CC BY 4.0, see below).
+Model weights are not part of this product: the image model and its encoders live on the
+box's engine, pinned by the deployment (docs/fresh-box.md); the lab models and the
+upscalers download into the service's data folder from pinned URLs (catalog.rs). The
+upscaler models keep their own licenses (below).
 
 
-Third-party software included in the Kokon installer
-----------------------------------------------------
+Third-party software included in the product
+--------------------------------------------
 
-- Tauri and its plugins (https://tauri.app), Apache-2.0 OR MIT.
 - React and React DOM (https://react.dev), MIT.
 - Lucide icons, lucide-react (https://lucide.dev), ISC.
 - Inter typeface by The Inter Project Authors (https://github.com/rsms/inter),
@@ -24,16 +24,11 @@ Third-party software included in the Kokon installer
   and Zod (https://zod.dev), MIT, bundled in kokon-mcp.
 - Other Rust crates and npm packages, each under its own license as listed in Cargo.lock,
   package-lock.json and mcp/package-lock.json.
-- The Mac engine (engine-mac/) uses techniques from Siliconed by gwenn-ha
-  (https://github.com/gwenn-ha-dev/Siliconed), Apache-2.0: the Neural Engine matrix product as a
-  Core ML program written at run time (including the layout of its coremldata.bin), and the GPU,
-  AMX and Neural Engine sharing one product by rows.
 - 4xNomos2_hq_mosr upscaler model by Philip Hofmann (Phhofm), from
   https://github.com/Phhofm/models/releases/tag/4xNomos2_hq_mosr, licensed under the
   Creative Commons Attribution 4.0 International License (CC BY 4.0,
-  https://creativecommons.org/licenses/by/4.0/). Included unmodified; Setup downloads the same
-  file from a mirror (https://github.com/GabrieleLozupone/kokon/releases/tag/models-1) if the
-  installed copy is missing.
+  https://creativecommons.org/licenses/by/4.0/). Included in the engine box's upscaler
+  folder unmodified; Settings downloads the same file for a single-box service.
 - TrustMark by Adobe (https://github.com/adobe/trustmark), MIT: the P variant's encoder and
   decoder models (encoder_P.onnx, decoder_P.onnx), included unmodified for the AI watermark,
   and its BCH error-correction code (crates/qls-core/src/watermark/bch.rs, from the Rust
@@ -62,31 +57,20 @@ Third-party software included in the Kokon installer
     SOFTWARE.
 
 
-Downloaded by the setup screen (not part of this product)
----------------------------------------------------------
+Downloaded by the service (not part of this product)
+----------------------------------------------------
 
-Every file is pinned by URL, size and SHA-256 in crates/qls-core/src/catalog.rs.
+Every file is pinned by URL, size and SHA-256: the upscalers in crates/qls-core/src/catalog.rs,
+the lab models in crates/qls-core/src/matting.rs.
 
-- stable-diffusion.cpp by leejet (https://github.com/leejet/stable-diffusion.cpp), MIT:
-  official CUDA 12, Vulkan or Metal build of release master-964-1d0a58a
-  (https://github.com/leejet/stable-diffusion.cpp/releases/tag/master-964-1d0a58a), which
-  includes the MoSR upscaler support contributed by Kokon (pull request #2128). A newer
-  official release listed in engine.json of this repository may replace it.
-- ggml by the ggml authors (https://github.com/ggml-org/ggml), MIT, included in the
-  stable-diffusion.cpp builds.
-- NVIDIA CUDA 12 runtime and cuBLAS DLLs (NVIDIA cards only), redistributed in the
-  stable-diffusion.cpp release; see https://docs.nvidia.com/cuda/eula/.
-- Qwen-Image 2.1 Turbo by the Qwen team (https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo),
-  Qwen Research License (research and evaluation only, no commercial use):
-  "Qwen is licensed under the Qwen RESEARCH LICENSE AGREEMENT, Copyright (c) 2026 Hangzhou
-  Tongyi Laboratory Technology Co., Ltd. All Rights Reserved." Downloaded as Unsloth's GGUF
-  (https://huggingface.co/unsloth/Qwen-Image-2.1-Turbo-GGUF); installs from Kokon 0.11.0 or earlier may
-  still use the GGUF conversion by DogukanUrker (https://huggingface.co/DogukanUrker/Qwen-Image-2.1-Turbo-GGUF).
-- Qwen-Image 2.1 VAE, from https://huggingface.co/Comfy-Org/Qwen-Image-2.1; see
-  https://huggingface.co/Qwen/Qwen-Image-2.1 for the terms.
-- Qwen3-VL 8B Instruct text encoder and vision projector by the Qwen team, from
-  https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF; see that page for the terms.
+- MobileSAM (Apache-2.0) in Acly's ONNX export (MIT), and BiRefNet-lite (MIT; onnx-community's
+  ONNX export) — the lab's click-to-select and matte models; see the pinned pages in
+  crates/qls-core/src/matting.rs for the terms.
 - 4x_NMKD-Superscale-SP_178000_G upscaler by Nmkd (the default), WTFPL, from
   https://huggingface.co/uwg/upscaler.
 - 4x-UltraSharp upscaler by Kim2091 (optional, downloaded from Settings), CC BY-NC-SA 4.0
   (non-commercial), from https://huggingface.co/uwg/upscaler.
+
+The engine box's files (the stable-diffusion.cpp build, Qwen-Image and its encoders, the
+upscalers it serves) are pinned by the deployment, not by this product: see
+docs/fresh-box.md and the ml repository.

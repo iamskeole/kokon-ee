@@ -6,7 +6,7 @@
 //
 // Linux: it is built with GCC 13 and needs its libstdc++ (GLIBCXX_3.4.32); Ubuntu 22.04, which the
 // .deb, .rpm and Docker image are built on so they run on glibc 2.35, has GCC 11's. With g++-13
-// installed (ubuntu-toolchain-r PPA; docs/linux.md), its libstdc++.a is put in a folder of its own
+// installed (ubuntu-toolchain-r PPA; docker/Dockerfile), its libstdc++.a is put in a folder of its own
 // and found before the system's .so: the service carries the newer libstdc++ statically and users
 // need nothing new. Without g++-13 the system's is used (enough on Ubuntu 24.04 and newer).
 use std::path::Path;

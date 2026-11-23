@@ -1,40 +1,30 @@
 # Local HTTP API
 
-Kokon's service listens on `127.0.0.1`. The desktop app, the MCP server and your own scripts
-all use it. When access from other devices is on, a second address (port `39152` by default, every
-network interface) serves the browser UI to them, signed in with the password; the token does not work
-there, and a browser can't use routes that touch files by path or change folders, model files or network
-settings ([remote-access.md](remote-access.md)). The routes below are the ones registered in
-[`crates/qls-service/src/api.rs`](../crates/qls-service/src/api.rs); request bodies are JSON unless
-a row says otherwise.
+Kokon's service listens on `127.0.0.1:39151` (the token door). The MCP server and your own
+scripts use it with the token. When access from other devices is on, a second address
+(port `39152` by default, every network interface) serves the browser UI to them, signed in
+with the password; the token does not work there, and browsers must send the `x-kokon-csrf`
+header on every change ([remote-access.md](remote-access.md)). The routes below are the ones
+registered in [`crates/qls-service/src/api.rs`](../crates/qls-service/src/api.rs); request
+bodies are JSON unless a row says otherwise.
 
 ## Base URL and token
 
-The service writes its port and token to `service.json` when it starts:
+The service writes its port and token to `service.json` in its config folder (in the image:
+`/config`, or `$QLS_CONFIG_DIR`) when it starts:
 
-| System | Path |
+| Setup | Path |
 | --- | --- |
-| Windows | `%LOCALAPPDATA%\KokonData\service.json` |
-| Mac | `~/Library/Application Support/KokonData/service.json` |
-| Linux | `~/.local/share/KokonData/service.json` (or `$XDG_DATA_HOME/KokonData`) |
+| Box image | `/config/service.json` |
+| Bare binary | `~/.local/share/kokon-ee/service.json` (or `$QLS_CONFIG_DIR`) |
 
 Base URL: `http://127.0.0.1:<port>/api/v1` (the port is usually `39151`). Every call except
-`/ping` needs `Authorization: Bearer <token>`. Requests from web pages (a browser `Origin`
-header other than the app's own) are refused. Errors come back as `{"error": {...}}`.
+`/ping` needs `Authorization: Bearer <token>`. Errors come back as `{"error": {...}}`.
 
-**PowerShell:**
-
-```powershell
-$i = Get-Content "$env:LOCALAPPDATA\KokonData\service.json" | ConvertFrom-Json
-$h = @{ Authorization = "Bearer $($i.token)" }
-Invoke-RestMethod -Method Post "http://127.0.0.1:$($i.port)/api/v1/generate" -Headers $h `
-  -ContentType 'application/json' -Body '{"prompt":"a lighthouse at dusk, 16:9","quality":"fast"}'
-```
-
-**macOS and Linux (curl):** on Linux, set `INFO` to `$HOME/.local/share/KokonData/service.json`.
+**Bash:**
 
 ```bash
-INFO="$HOME/Library/Application Support/KokonData/service.json"
+INFO="/config/service.json"   # or $HOME/.local/share/kokon-ee/service.json
 TOKEN=$(sed -n 's/.*"token" *: *"\([^"]*\)".*/\1/p' "$INFO")
 PORT=$(sed -n 's/.*"port" *: *\([0-9]*\).*/\1/p' "$INFO")
 
@@ -45,18 +35,18 @@ curl -s -X POST "http://127.0.0.1:$PORT/api/v1/generate" \
   -d '{"prompt":"a lighthouse at dusk, 16:9","quality":"fast"}'
 ```
 
-Kokon has to be running, or `kokon-service` started, for `service.json` to exist and be current.
+The service has to be running for `service.json` to exist and be current.
 
 ## Status and settings
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/ping` | Liveness check (no token needed) |
-| GET | `/status` | Server state, model, GPU and VRAM, active job, queue |
+| GET | `/status` | Engine state (through the gateway), model, GPU and VRAM, active job, queue |
 | GET | `/jobs` | List the jobs the service knows about |
-| GET, PUT | `/config` | Read or replace the app settings; the reply to PUT says whether the backend must restart |
-| GET | `/diagnostics` | GPUs, backend status and version, and detected devices as JSON |
-| GET | `/logs?lines=200` | Tail of the backend log (default 200 lines, at most 4000) |
+| GET, PUT | `/config` | Read or replace the box settings; the reply to PUT says whether the engine door changed |
+| GET | `/diagnostics` | Box health: the engine door, its capabilities, the lab models, the watermark — as JSON |
+| GET | `/logs?lines=200` | Tail of the service log (default 200 lines, at most 4000) |
 | GET | `/enhancer/defaults` | The built-in system prompts for Prompt+ |
 
 ## Generating
@@ -75,23 +65,52 @@ Simple-operation fields: `prompt`, `image` / `images[]`, `mask`, `action`
 (`edit|remove|replace|add`, inpainting), `width`, `height`, `aspect_ratio`, `quality`
 (`fast|balanced|quality`), `seed`, `output_path`, `preserve_dimensions`, `private`,
 `left/right/top/bottom` + `units` (`pixels|percent`) for outpainting, `scale` for upscaling.
-`/generate` with `images[]` makes a new image that uses them as references (people, products, a
-style), sized like any new image; `/edit` with several images edits image 1 with the others.
-Full requests (`/jobs`) also accept `"mode": "upscale"` with `"upscale": {"scale" | "width"/"height"}`,
-`"mode": "compose"` (the references case of `/generate`), and with `"enhance": true` (Prompt+)
-`"enhance_only": true`: the job only writes the prompt (`enhanced_prompt` in the job, no image), so it
-can be read and changed; send it back as `prompt` with `"enhanced_from"` set to your original words.
-Prompt+ works on every mode but upscales; for a painted area (`mask`) and an expansion it writes only
-what goes in the area (for a removal: what is removed) or in the new borders, and the prompt may be
-empty for a removal and an expansion. `"enhance_detail": true` asks Prompt+ for a longer prompt with more context
-about what is in the image or what changes.
+`/generate` with `images[]` makes a new image that uses them as references (people, products,
+a style), sized like any new image; `/edit` with several images edits image 1 with the
+others. Full requests (`/jobs`) also accept `"mode": "upscale"` with
+`"upscale": {"scale" | "width"/"height"}`, `"mode": "compose"` (the references case of
+`/generate`), and with `"enhance": true` (Prompt+) `"enhance_only": true`: the job only
+writes the prompt (`enhanced_prompt` in the job, no image), so it can be read and changed;
+send it back as `prompt` with `"enhanced_from"` set to your original words. Prompt+ works on
+every mode but upscales; for a painted area (`mask`) and an expansion it writes only what
+goes in the area (for a removal: what is removed) or in the new borders, and the prompt may
+be empty for a removal and an expansion. `"enhance_detail": true` asks Prompt+ for a longer
+prompt with more context about what is in the image or what changes.
+
+The engine itself is a stock `sd-server` (stable-diffusion.cpp) on the box's gateway; the
+service never owns its process. A job that outlives the gateway (the engine is evicted or
+reloaded) fails plainly after a short grace.
+
+## The lab (segment and matte)
+
+The lab's models run on the box (in-process, or through the `kokon-vision` door behind the
+gateway — `config.json`'s `visionEngine`), never in the browser:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/segment` | The segment model's state (the in-process copy, or the door's) |
+| POST | `/segment/download` | Download MobileSAM (progress in `/downloads`) |
+| POST | `/segment/encode` | Encode an image's embeddings: `{"image": "<b64 PNG>"}` |
+| POST | `/segment/predict` | One click or one box: `{"image", "point": {"x","y"} | "box": {...}}`; answers four masks |
+| GET | `/matte` | The matte model's state (BiRefNet) |
+| POST | `/matte/download` | Download BiRefNet-lite (progress in `/downloads`) |
+| POST | `/matte` | A matte for an image: `{"image": "<b64 PNG>"}`; answers the matte as a PNG |
+| POST | `/matte/cancel` | Stop a running matte |
+
+## Downloads
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/downloads` | The download that is running (lab models, upscalers, watermark models), if any |
+| POST | `/downloads/cancel` | Cancel it |
+| POST | `/upscalers/{name}/download` | Download one upscaler to the box (refused on a split box: the engine box keeps its own) |
 
 ## Input images
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | POST | `/inputs` | Upload an image: raw bytes as the body, optional percent-encoded `X-Filename` header, `?private=true` for private mode. Up to 210 MB |
-| POST | `/inputs/import` | Import an image from a path on this machine: `{"path": "..."}`; `?private=true` is allowed |
+| POST | `/inputs/import` | Import an image from a path on this box: `{"path": "..."}`; `?private=true` is allowed |
 | GET | `/inputs/{id}` | The stored input's record |
 | GET | `/inputs/{id}/image`, `/inputs/{id}/thumb` | The image, or its thumbnail |
 | GET | `/inputs/{id}/preview` | A screen-sized copy (at most 1280 px on the long side, JPEG; PNG if it has transparency), made on first request |
@@ -124,8 +143,8 @@ about what is in the image or what changes.
 
 ## Projects
 
-The project list every device shares (kept in `projects.json` in the data folder). A version is a
-result (`"kind": "gen"`, `genId`) or an imported image (`"kind": "input"`, `inputId`).
+The project list every device shares (kept in `projects.json` in the data folder). A version
+is a result (`"kind": "gen"`, `genId`) or an imported image (`"kind": "input"`, `inputId`).
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -134,20 +153,15 @@ result (`"kind": "gen"`, `genId`) or an imported image (`"kind": "input"`, `inpu
 | GET | `/projects/{id}/records` | The records of all its versions in one answer: `{"generations": {...}, "inputs": {...}}` by id; versions deleted from the gallery are left out |
 | PUT | `/projects/{id}` | Save a device's copy: `{"project": {...}, "known": [keys]}` (`known`: the versions that device had seen, so a version added elsewhere meanwhile is kept). Answers with the merged project |
 | DELETE | `/projects/{id}` | Remove the project from the list (its images stay in the gallery) |
-| POST | `/projects/import` | Merge a list of projects in, once: what each app kept on its own before 0.11 |
+| POST | `/projects/import` | Merge a list of projects in, once |
 
-## Models, upscalers, LoRAs and LUTs
+## Models, LoRAs and LUTs
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/models` | The active model's files, what is missing and what can be done about it |
-| POST | `/models/scan`, `/models/inspect` | List the model files in a folder (sub-folders included) with the suggested file for each role; inspect one file by `{"path": "..."}` |
-| POST | `/models/user`, `/models/use` | Save your own model files as a profile; switch between the official files and yours |
-| POST | `/models/vae` | Download the texture-fix VAE and make the active model use it (progress in `/setup/install`) |
-| POST | `/models/dit` | Download the Q4_K_M image model and make the active model use it (progress in `/setup/install`) |
-| GET | `/upscalers` | The upscalers Settings offers and whether each is installed |
-| POST | `/upscalers/{name}/download` | Download one upscaler (progress in `/setup/install`) |
-| GET, POST | `/loras` | List LoRAs; add one from a path: `{"path": "..."}` (copied into Kokon's LoRA folder) |
+| POST | `/models/switch` | Switch the active model entry of the config (the box's pinned ones) |
+| GET | `/upscalers` | The upscalers the engine offers and which one is active |
+| GET, POST | `/loras` | List LoRAs; add one from a path on this box: `{"path": "..."}` (copied into the LoRA folder) |
 | PATCH, DELETE | `/loras/{id}` | Update or remove a LoRA |
 | GET | `/luts` | List the color LUTs |
 | POST | `/luts/import` | Add a `.cube` file from a path: `{"path": "..."}` |
@@ -156,21 +170,26 @@ result (`"kind": "gen"`, `genId`) or an imported image (`"kind": "input"`, `inpu
 | POST | `/luts/{name}/apply` | Save the image with the LUT applied as a new version, keeping the source: `{"source": "gen:<id>", "intensity": 1.0, "private": false}` |
 | POST | `/examples` | Add the bundled example projects and list them |
 
-## Internal routes
-
-These exist for the desktop app's setup screen and its lifecycle. Scripts should not need them,
-and they may change between versions.
+## Service routes
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/setup`, `/setup/hardware` | First-run state; hardware and download presets |
-| GET, POST | `/setup/install` | Install progress; start an install |
-| POST | `/setup/install/cancel`, `/setup/gpu` | Cancel an install; run the engine on another graphics card |
-| GET, DELETE | `/setup/legacy-upscalers` | List or remove upscalers from older versions |
-| POST | `/backend/start`, `/backend/stop`, `/backend/restart` | Control the inference server |
 | POST | `/session/heartbeat`, `/session/release` | A client registers or drops its lease on the service |
 | POST | `/shutdown` | Stop the service |
 | GET, POST | `/remote` | Access from other devices: its state and addresses; turn it on or off, `{"enabled": true, "port": 39152}` (needs a password) |
 | POST, DELETE | `/remote/password` | Set or change the password (`{"password": "..."}`, every browser signs in again); remove it, which also turns access off |
 | GET | `/auth/session` | A browser: whether it is signed in and whether a password exists |
 | POST | `/auth/login`, `/auth/logout` | A browser signs in with the password (a session cookie) or out |
+
+## Named accounts (multi-user)
+
+With `multiUser` on in the config, browsers sign in with a name and a password of their own
+and see and save only their own gallery; the shared password stays the operator.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/users` | List accounts (operator only) |
+| POST | `/users` | Create one: `{"name", "password", "enabled"}` |
+| POST | `/users/enable` | Enable or disable an account |
+| POST | `/users/{id}/password` | Change the account's password |
+| DELETE | `/users/{id}` | Remove an account (its gallery stays, owned) |

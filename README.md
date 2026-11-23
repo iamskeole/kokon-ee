@@ -70,112 +70,83 @@ is [docs/fresh-box.md](docs/fresh-box.md).
 ## New in 0.12: split any image into layers
 
 <p align="center">
-  <a href="https://youtu.be/eGr9yYe7NVc"><img src="assets/readme/layers-0.12.webp" alt="The Layers lab: a Halloween poster split into its layers (girl, spider, ghosts, bats, text and the filled background), lifted apart in 3D, with the layer list and Export to PSD" width="860"></a>
+  <a href="https://youtu.be/eGr9yYe7NVc"><img src="assets/readme/layers-0.12.webp" alt="One image split into four layers: the person, two objects and the background, each movable on its own" width="860"></a>
 </p>
-<p align="center"><a href="https://youtu.be/eGr9yYe7NVc">▶ Watch the 0.12 video (2:21)</a> · <a href="https://kokon.app/image-to-layers/">Try the layers in your browser</a></p>
 
-- **Layers lab** (experimental): click the things you want on their own layer. Kokon cuts each one out and paints
-  the background behind it, so you can move, scale, hide or edit any piece, expand one that was cut off by the frame,
-  and save one image or **export a PSD** for Photoshop, GIMP or Photopea.
-- **Blend into scene** (experimental): after a move, Kokon redraws the shadows, or reflections on wet or shiny ground.
-- **Paint with colours**: one colour per thing, and say what goes there, right on the picture; **Select** picks an
-  object with one click.
+- **Split**: the lab (experimental) separates the objects in a photo into layers — each one
+  movable, scalable, editable — with the background behind it, so you can move, scale, hide or
+  edit any piece, expand one that was cut off by the frame, and save one image or **export a
+  PSD** for Photoshop, GMP or Photopea. It runs on the box, never in your browser.
+- **Blend into scene** (experimental): after a move, Kokon redraws the shadows, or reflections
+  on wet or shiny ground.
+- **Paint with colours**: one colour per thing, and say what goes there, right on the picture;
+  **Select** picks an object with one click.
 - **Prompt+ for painted areas and Expand**, with a Standard or Detailed level.
-- **Kokon's own Mac engine is the default** on Macs with 16 GB or more: about a minute for a new 1-megapixel image on
-  an M2 Pro, four times faster than before.
-- **AI marking**: every image says, in its file and in an invisible watermark, that it was made with AI
-  ([docs/ai-marking.md](docs/ai-marking.md)).
+- **AI marking**: every image says, in its file and in an invisible watermark, that it was made
+  with AI ([docs/ai-marking.md](docs/ai-marking.md)).
 
 ---
 
 ## Since 0.11: use it from your phone, or run it as a server
 
 <p align="center">
-  <a href="https://kokon.app/self-hosted/"><img src="assets/readme/other-devices.webp" alt="A computer with a graphics card runs Kokon; a MacBook and an iPhone use it in the browser over the home network" width="860"></a>
+  <a href="https://kokon.app/self-hosted/"><img src="assets/readme/other-devices.webp" alt="A computer with a graphics card runs Kokon; a MacBook and an iPhone use it in a browser over the home network" width="860"></a>
 </p>
 
-Your computer with the graphics card makes the images; your phone, tablet or laptop uses Kokon in a browser.
-Nothing goes through a cloud, and there is no account. [▶ Watch the 0.11 video (77 s)](https://youtu.be/XnC_7P2_cww)
+The computer with the graphics card makes the images; your phone, tablet or laptop uses Kokon
+in a browser. Nothing goes through a cloud, and there is no account.
 
-- **Other devices:** open **Settings → Other devices**, set a password and scan the QR code with your phone.
-  Add Kokon to the home screen and it opens like an app. Off until you turn it on; 5 wrong passwords make
-  that device wait.
-- **From anywhere:** connect your devices with [Tailscale](https://tailscale.com) or another VPN. Never open
-  Kokon's port on your router.
-- **As a server:** `kokon-service` on a Linux box without a screen, or the Docker image for NVIDIA cards:
+- **Other devices:** open **Settings → Other devices** (in the browser UI: the people/settings
+  area), set a password and scan the QR code with your phone. The browser is a full client:
+  everything the interface does works there.
+- **The box:** the service runs headless (Docker image or bare binary) and serves the same
+  interface on its LAN port. This fork's product *is* this shape:
 
   ```bash
-  curl -fsSLO https://raw.githubusercontent.com/GabrieleLozupone/kokon/master/docker/compose.yaml
   docker compose up -d
   docker exec -it kokon kokon-service --set-password
   ```
 
-Step by step: [kokon.app/self-hosted](https://kokon.app/self-hosted/) · full reference:
-[docs/remote-access.md](docs/remote-access.md) and [docs/docker.md](docs/docker.md).
+  Step by step: [docs/fresh-box.md](docs/fresh-box.md) (the whole stack),
+  [docs/service-on-prod-box.md](docs/service-on-prod-box.md) (the split box),
+  [docs/remote-access.md](docs/remote-access.md) and [docs/docker.md](docs/docker.md).
 
 ---
 
 ## A local alternative to Nano Banana, without the node graph
 
-Cloud editors made "edit a photo with a sentence" normal, but they upload your photos and limit how much you
-use them. Node-based tools run locally, but you build everything yourself. Kokon is simple **and** local:
-we make the technical choices (model, files, steps, memory), you make the edits.
+Cloud editors made "edit a photo with a sentence" normal, but they upload your photos and limit
+how much you can make. Kokon is the same idea, run on your own box:
 
-| | **Kokon** | ChatGPT, Gemini (Nano Banana) | Photoshop Generative Fill | ComfyUI |
-| --- | :---: | :---: | :---: | :---: |
-| Your photos stay on your computer | ✅ | ❌ uploaded | ❌ Adobe's cloud | ✅ |
-| Free, no limits | ✅ it's your GPU | daily limits or subscription | subscription + credits | ✅ |
-| Works offline | ✅ after setup | ❌ | ❌ | ✅ |
-| Setup | one installer | an account | Creative Cloud | Python, nodes, model files |
-| Who picks the model and settings | Kokon, tested for your GPU | the service | Adobe | you |
-| Edit with one sentence | ✅ | ✅ | short prompt for a selection | after building a workflow |
-
-Fair to say: cloud models run on data-center GPUs, so they can be faster and stronger on some edits. Kokon runs
-Qwen-Image 2.1, which leads the open-weights image-editing rankings, on the computer you already have. You need
-a 12 GB graphics card (8 GB in beta) or an Apple Silicon Mac, and the images are for non-commercial use because
-of the model's license.
-
-## Why Kokon
-
-<table>
+<table align="center">
   <tr>
-    <td width="33%" valign="top">
-      <h3>✍️ Just describe it</h3>
-      “Remove all the people from the beach.” “Make it golden hour.” Kokon picks the mode, the
-      resolution and the memory settings for you. There are no sliders to learn. Only have a short
-      idea? Prompt+ writes the detailed prompt for you, in any language.
-    </td>
     <td width="33%" valign="top">
       <h3>🔒 Private by design</h3>
-      Everything runs on your own GPU. No account, no uploads, no telemetry, no limits. After
-      setup, Kokon only checks once a day for a new version (you can turn that off). A private
-      mode keeps nothing at all.
+      Your photos never leave your network. The models run on your own hardware through your
+      box's gateway; nothing is sent to any cloud. A private mode keeps nothing at all.
     </td>
     <td width="33%" valign="top">
-      <h3>📦 One installer</h3>
-      A native app built on <a href="https://github.com/leejet/stable-diffusion.cpp">stable-diffusion.cpp</a>.
-      No Python, no ComfyUI, no node graphs. The first run detects your graphics card or your
-      Mac's memory and downloads the right model, then verifies it. Updates install in one click.
-    </td>
-  </tr>
-  <tr>
-    <td width="33%" valign="top">
-      <h3>🎯 Edits that stay in place</h3>
-      Paint over an area and choose Change, Remove, Replace or Add. Kokon shows the model
-      exactly where to work, so the rest of the photo stays untouched.
+      <h3>🎯 Nothing to tune</h3>
+      We pick the model and every setting: the size that fits your card, the memory budget,
+      the schedule. You describe the change; the box does the rest.
     </td>
     <td width="33%" valign="top">
-      <h3>🖼️ Full-size results</h3>
-      Kokon keeps your photo's size and aspect ratio, and enlarges with an AI upscaler
-      instead of blurry resizing. It also opens iPhone HEIC photos, HDR included.
-    </td>
-    <td width="33%" valign="top">
-      <h3>🤖 Works with your AI agent</h3>
-      A built-in MCP server and local HTTP API let Claude, Cursor or your own scripts create
-      and edit images on your machine.
+      <h3>📦 One image</h3>
+      A Docker image with the browser UI and the MCP server, pointed at your box's gateway.
+      No Python, no ComfyUI, no node graphs. The engines stay stock upstream.
     </td>
   </tr>
 </table>
+
+## Why Kokon
+
+| | **Kokon EE** | ComfyUI + Qwen workflow | Krita AI Diffusion | Other Qwen web UIs |
+| --- | :---: | :---: | :---: | :---: |
+| Setup | one image + a gateway | Python environment + nodes | Krita + plugin + ComfyUI | Python or ComfyUI |
+| Picks size and memory settings for you | ✅ | ❌ | partly | partly |
+| Brush edits the model can see | ✅ | depends on the workflow | ✅ | rarely |
+| MCP server for AI agents | ✅ | community nodes | ❌ | ❌ |
+| Custom pipelines, node graphs | ❌ | ✅ | partly | ❌ |
 
 ## Examples
 
@@ -186,8 +157,7 @@ of the model's license.
   add a tomato sauce river, generate the kitchen, combine the two, expand to 21:9.</sub>
 </p>
 
-Every image below was made by Kokon itself (no stock photos), first try with that seed. Prompts,
-seeds and times are in [marketing/showcase/PROMPTS.md](marketing/showcase/PROMPTS.md).
+Every image below was made by Kokon itself (no stock photos), first try with that seed.
 
 | | |
 | :---: | :---: |
@@ -195,121 +165,49 @@ seeds and times are in [marketing/showcase/PROMPTS.md](marketing/showcase/PROMPT
 | <img src="docs/media/examples/relight.jpg" alt="A summer lake cabin turned into a snowy night"><br>**Relight** · *“Make it a snowy winter night, warm light glowing from the cabin windows”* | <img src="docs/media/examples/restyle.jpg" alt="A portrait turned into a watercolor"><br>**Restyle** · *“Turn it into a hand-painted watercolor illustration”* |
 | <img src="docs/media/examples/text.jpg" alt="A shop sign changed to KOKON CAFÉ"><br>**Text** · *“Change the gold sign text to ‘KOKON CAFÉ’”* | <img src="docs/media/examples/expand.jpg" alt="A square lighthouse photo expanded to a panorama"><br>**Expand** · 40 % left and right · *“continue the rocky coastline and the turquoise sea”* |
 
-## Install
+## Run it
 
-**1. Download** from the [latest release](https://github.com/GabrieleLozupone/kokon/releases/latest):
+**On a fresh machine** — the whole stack (gateway, engines, models, this service):
+[docs/fresh-box.md](docs/fresh-box.md). **On a split box** — the service and the browser UI on
+one machine, all inference on the accelerator box through its one-door gateway:
+[docs/service-on-prod-box.md](docs/service-on-prod-box.md).
 
-- **Windows:** `Kokon_<version>_x64-setup.exe`. Run it. It installs for your user only, so you don't need
-  administrator rights.
-- **Mac (Apple Silicon, beta):** `Kokon_<version>_aarch64.dmg`. Open it and drag Kokon to
-  Applications. The first time, macOS blocks it because the app is not notarized by Apple:
-  open System Settings → Privacy & Security and click **Open Anyway**, or run one Terminal
-  command if there is no such button ([details](#macos-says-kokon-cannot-be-opened)).
-- **Linux (x86-64, beta):** `Kokon_<version>_amd64.deb` for Ubuntu, Debian and Mint, or
-  `Kokon-<version>-1.x86_64.rpm` for Fedora. Install it with your package manager, which also
-  pulls in the few libraries it needs:
+In short:
 
-  ```bash
-  sudo apt install ./Kokon_<version>_amd64.deb      # Ubuntu 22.04+, Debian 12+, Mint 21+
-  sudo dnf install ./Kokon-<version>-1.x86_64.rpm   # Fedora 40+
-  ```
+```bash
+git clone <this repo> && cd kokon-ee
+docker build -f docker/Dockerfile -t kokon-service .
+docker compose up -d
+docker exec -it kokon kokon-service --set-password   # once
+```
 
-  For NVIDIA cards you need the proprietary driver (the CUDA runtime comes with Kokon). AMD and
-  Intel cards use Mesa's Vulkan driver, installed on most desktops already. If apt prints
-  "Download is performed unsandboxed as root", that's harmless (apt can't read your home
-  folder); copy the .deb to `/tmp` first to avoid it.
-- **Server or Docker (NVIDIA):** Kokon without a window, used from a browser on any device. The image
-  `ghcr.io/gabrielelozupone/kokon` is published with every release: see [docs/docker.md](docs/docker.md),
-  or run `kokon-service` from the Linux packages
-  ([docs/remote-access.md](docs/remote-access.md#on-a-server-without-a-screen-linux)).
-
-**2. Set up models.** On first launch Kokon shows your graphics card (or your Mac's chip and
-memory), recommends a preset and downloads everything it needs. The download resumes if it is
-interrupted and every file is checked against its SHA-256 checksum. On a fast connection the
-whole thing takes a few minutes, and the setup screen shows what Kokon can do while you wait.
-
-**3. Edit.** Drop or paste a photo, describe the change and press <kbd>Enter</kbd>.
+Open `http://<the box>:39152`, sign in, and edit.
 
 ### Requirements
 
-**Windows**
+The service box is light (a few hundred MB of RAM); the hardware that matters is the
+**engine box**:
 
 | | Minimum | Recommended |
 | --- | --- | --- |
-| **OS** | Windows 10 64-bit | Windows 11 |
-| **GPU** | NVIDIA, 12 GB VRAM (RTX 3060 12 GB, 4070); 8 GB in beta (RTX 3060 Ti, RTX 5050 Laptop) · AMD / Intel 12 GB+ through Vulkan (beta) | NVIDIA, 16 GB+ VRAM (RTX 4080, 5070 Ti, 5080, 4090, 5090) |
+| **GPU** | 12 GB VRAM (RTX 3060 12 GB, 4070); 8 GB works in beta | 16 GB+ (RTX 4080, 5070 Ti, 5080, 4090, 5090) |
+| **Driver** | the proprietary NVIDIA driver (CUDA) | |
 | **RAM** | 16 GB | 32 GB |
-| **Disk** | 15 GB free | 25 GB free on an SSD |
-| **Time per image** <!-- RTX 5070 edit time not measured yet (text to image only, 10-11) --> | RTX 5070 12 GB: ~12 s per 1 MP image, ~42 s at native 2K (text to image) | RTX 5070 Ti 16 GB: ~24 s per edit at Balanced (1.5K), ~36 s for a new image at native 2K |
+| **Disk** | ~15 GB for the models | 25 GB on an SSD |
+| **Time per image** | RTX 5070 12 GB: ~12 s per 1 MP image, ~42 s at native 2K (text to image) | RTX 5070 Ti 16 GB: ~24 s per edit at Balanced (1.5K), ~36 s for a new image at native 2K |
 
-**Mac (beta)**
+The gateway and its engines need nothing else; the service image is small (the UI is embedded).
 
-| | Minimum | Recommended |
-| --- | --- | --- |
-| **Chip** | Apple M1 or newer (Intel Macs are not supported) | M-series Pro, Max or Ultra (the GPU cores set the speed) |
-| **macOS** | 15 Sequoia | latest |
-| **Unified memory** | 16 GB: works, but slowly (lightest mode, about 1 megapixel) | 32 GB or more (also gets native 2K) |
-| **Disk** | 15 GB free | 25 GB free |
-| **Time per image** | About 4 minutes for a 1 MP image on a 16 GB M2 Pro | Faster on Max/Ultra chips with more memory |
+### What runs where
 
-**Linux (beta)**
-
-| | Minimum | Recommended |
-| --- | --- | --- |
-| **Distribution** | x86-64: Ubuntu 22.04, Debian 12, Mint 21, Fedora 40 (or newer) | the latest Ubuntu LTS or Fedora |
-| **GPU** | As on Windows: NVIDIA 12 GB (8 GB in beta) with the proprietary driver · AMD / Intel 12 GB+ through Vulkan (beta) | NVIDIA, 16 GB+ VRAM |
-| **RAM** | 16 GB | 32 GB |
-| **Disk** | 15 GB free | 25 GB free on an SSD |
-
-Kokon measures your machine's speed with the first image and shows realistic time estimates
-from then on.
-
-> [!NOTE]
-> NVIDIA cards run on the CUDA engine, the fastest and tested path. AMD and Intel cards use the
-> **Vulkan engine (beta)**. First user report on AMD: an RX 9060 XT 16 GB on Windows made a 16:9
-> 1080p image at Balanced in about 80 s (the first image after start, model loading included),
-> with edits quicker after that. Intel is still untested, so please
-> [report how it goes](https://github.com/GabrieleLozupone/kokon/issues).
-> Vulkan is slower than CUDA, and its first image takes longer. Macs use the **Metal engine
-> (beta)**, tested so far on a 16 GB M2 Pro. On Linux Kokon ships its own CUDA and Vulkan builds
-> of the same engine, tested so far on an RTX 5070 Ti under WSL. Details in
-> [docs/platforms.md](docs/platforms.md) and [docs/linux.md](docs/linux.md).
-
-#### Model presets: what gets downloaded
-
-The setup screen picks a preset from your VRAM. On a Mac the presets are named by unified
-memory (16–24 GB Mac, 32–36 GB Mac, 48 GB Mac, 64 GB+ Mac), because the graphics part can use
-only about two thirds of it and the text encoder shares the same memory. You can change the
-preset later from Settings → Models → **Set up models…**
-
-| Preset | Diffusion model | Text encoder (in RAM) | Download | Tested on real hardware |
-| --- | --- | --- | --- | --- |
-| 8 GB (beta) | Qwen-Image 2.1 Turbo Q4_K_M (4.2 GB) | Qwen3-VL 8B Q4_K_M | ~12 GB | by users: RTX 3060 Ti, RTX 5050 Laptop |
-| 12 GB | Qwen-Image 2.1 Turbo Q4_K_M | Qwen3-VL 8B Q4_K_M | ~12 GB | ✅ RTX 5070 (12 GB) |
-| 16 GB | Qwen-Image 2.1 Turbo Q4_K_M | Qwen3-VL 8B Q4_K_M | ~12 GB | ✅ RTX 5070 Ti |
-| 24 GB | Qwen-Image 2.1 Turbo Q4_K_M | Qwen3-VL 8B Q4_K_M | ~12 GB | by users: RX 7900 XTX (Vulkan) |
-| 32 GB+ | Qwen-Image 2.1 Turbo Q4_K_M | Qwen3-VL 8B Q8_0 (8.7 GB) | ~16 GB | not yet |
-
-Every preset also gets stable-diffusion.cpp (the CUDA 12 build on NVIDIA, the Vulkan build on AMD and Intel, the Metal build on a Mac), the Qwen-Image 2.1 VAE with
-[madebyollin's texture fix](https://huggingface.co/madebyollin/texture-fix-vae-for-qwen-image-2.1) (it removes the faint
-2-pixel checkerboard of the original decoder; installs from 0.9.2 or earlier switch to it when you accept the update), the
-Qwen3-VL vision projector and, on a PC, the Superscale-SP upscaler (67 MB). The image model is Qwen's
-official 8-step [Qwen-Image 2.1 Turbo](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo) through
-[unsloth/Qwen-Image-2.1-Turbo-GGUF](https://huggingface.co/unsloth/Qwen-Image-2.1-Turbo-GGUF) (installs from 0.11.0
-or earlier keep their Q4_K file until you accept the update);
-the other sources are
-[Qwen/Qwen3-VL-8B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF),
-[madebyollin/texture-fix-vae-for-qwen-image-2.1](https://huggingface.co/madebyollin/texture-fix-vae-for-qwen-image-2.1) and
-[Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1) (the original VAE).
-
-Files go to `%LOCALAPPDATA%\KokonData\sdcpp` (Mac: `~/Library/Application Support/KokonData/sdcpp`) by default. You can point the setup screen at an
-existing stable-diffusion.cpp folder instead; files that are already there are kept.
-
-Already have Qwen-Image 2.1 files, for example in ComfyUI? Choose **Use models I already have** in
-the setup screen and pick the folder (such as `ComfyUI\models`): Kokon finds the image model, VAE,
-text encoder and vision projector by their contents, as GGUF or safetensors in any quantization,
-and downloads only the engine and any piece you don't have. Files stay where they are. Your own
-files are not tested by Kokon; you can switch to the official files at any time in Settings → Models.
+- **The service box**: this image — the browser UI, the API, the job queue, the gallery, and
+  the lab's two models (MobileSAM, BiRefNet-lite; in-process, or through the `kokon-vision`
+  door on the gateway).
+- **The engine box**: the stock engines behind the gateway — stable-diffusion.cpp for
+  Qwen-Image 2.1 Turbo (the image model, Q4_K_M GGUF, ~4.2 GB) and its Qwen3-VL text encoder
+  (Prompt+), llama.cpp for the prompt-enhancer sidecars, vision.cpp for the lab door. The
+  ml repo pins the exact files and builds.
+- **Your devices**: any browser; the MCP server for your AI agents.
 
 ## What you can do
 
@@ -324,25 +222,25 @@ files are not tested by Kokon; you can switch to the official files at any time 
 | Areas painted in colours + what goes there | **Several changes in one go** | Only what you painted changes |
 | Any result | **Upscale** to 2×, 4K, the source size or a custom width | With the upscaler model, in seconds |
 | Any result | **Colour-grade** it with a LUT | Eight built-in looks (Neutral takes out a yellow cast) or your own `.cube` files, live preview with intensity |
-| A short idea, in any language | **Prompt+** writes the detailed prompt first | You watch it being written; for edits it looks at your photo. Runs on the model Kokon already has: no extra download, a few seconds more |
+| A short idea, in any language | **Prompt+** writes the detailed prompt first | You watch it being written; for edits it looks at your photo. A sidecar on the gateway: a few seconds more |
 | Your own LoRA files | **Apply them** to a project (beta) | Qwen-Image 2.1 LoRAs (`.safetensors`) loaded in Settings → LoRA, up to 3 at once, each with its strength |
 
-**New to prompts?** The [prompt guide](https://kokon.app/prompt-guide/) shows good and bad prompts side by side, with real results.
+**New to prompts?** The [prompt guide](docs/prompting.md) shows good and bad prompts side by
+side; [docs/showcase-prompts.md](docs/showcase-prompts.md) has the recipes for the showcase
+images.
 
 <p align="center">
-  <img src="docs/media/screenshot-app.png" alt="The Kokon window: an Italian street café where a red scooter was removed, shown with the before/after slider, the version tree and the edit prompt box" width="860">
+  <img src="docs/media/screenshot-app.png" alt="The Kokon interface: an Italian street café where a red scooter was removed, shown with the before/after slider, the version tree and the edit prompt box" width="860">
 </p>
 
-Every result can be edited again, varied, used as a reference, upscaled, saved, copied or
-opened in Explorer, Finder or your file manager. A few things make that loop fast:
+Every result can be edited again, varied, used as a reference, upscaled, saved or copied. A
+few things make that loop fast:
 
 - **Before/after**: compare with Slider, Flicker or Changes, or hold <kbd>B</kbd> to see the original.
-- **Undo/redo between versions** with <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> (<kbd>⌘</kbd> on a Mac).
+- **Undo/redo between versions** with <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>.
   Undo returns to the version the current one came from, and nothing is ever deleted.
 - **Gallery**: every image keeps its full recipe (prompt, seed, settings, pipeline) and reopens
   with one click. The recipe is also embedded in the PNG.
-- **Clean up in one go**: press **Select** (or <kbd>Ctrl</kbd>/<kbd>⌘</kbd>-click, <kbd>Shift</kbd>-click
-  for a range) to remove several projects or delete several gallery images at once.
 - **Quality presets**: **Fast** (the default, ~1 MP), **Balanced** (~1.5K) and **Quality**
   (native 2K). All run Qwen's official 8-step Turbo model with its own schedule, so you never
   need to tune steps or guidance.
@@ -352,107 +250,79 @@ opened in Explorer, Finder or your file manager. A few things make that loop fas
 ```mermaid
 flowchart LR
     A["📷 Your photo<br>+ a sentence"] --> B["Planner<br><sub>mode · size · memory budget</sub>"]
-    B --> C["Qwen-Image 2.1<br><sub>stable-diffusion.cpp<br>on your GPU</sub>"]
+    B --> C["Qwen-Image 2.1 Turbo<br><sub>stock stable-diffusion.cpp<br>on the engine box</sub>"]
     C --> D["AI upscaler<br><sub>Superscale-SP, back to<br>full size</sub>"]
     D --> E["🖼️ Result<br><sub>gallery + recipe</sub>"]
     M["🤖 Claude · Cursor · scripts"] -. "MCP / local API" .-> B
 ```
 
-The planner decides what kind of job your request is, picks a working size that fits your GPU
-and runs a single diffusion pass. When the result has to be larger than what the model rendered,
-it is enlarged with an AI upscaler instead of a plain resize. For brushed edits, Kokon marks the area on
-a second reference image so the model knows exactly where to work. Without that, Qwen-Image 2.1
-cannot see the mask.
+The planner decides what kind of job your request is, picks a working size that fits the
+engine box's card and runs a single diffusion pass. When the result has to be larger than
+what the model rendered, it is enlarged with an AI upscaler instead of a plain resize. For
+brushed edits, Kokon marks the area on a second reference image so the model knows exactly
+where to work. Without that, Qwen-Image 2.1 cannot see the mask.
 
-With **Prompt+** on, the planner first asks the model's own text encoder (Qwen3-VL, already loaded
-to read your prompt) to write a detailed English prompt, looking at your photo for edits. It runs
-inside stable-diffusion.cpp, so there is no second language model in memory. The image then uses
-that prompt, and the result keeps both yours and the written one.
+With **Prompt+** on, the planner first asks a Qwen3-VL sidecar on the gateway to write a
+detailed English prompt, looking at your photo for edits. The image then uses that prompt,
+and the result keeps both yours and the written one.
 
 ### The engine
 
-Kokon runs on [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) by leejet.
-Prompt+ needed something it doesn't have: a way for the Qwen3-VL text encoder, already loaded for
-the image, to write text. The easy route was a second language model next to it, but another 5 GB
-model doesn't fit beside Qwen-Image 2.1 on 8–12 GB cards or on most Macs. So since 0.10 Kokon runs
-its own build of stable-diffusion.cpp, from
-[our fork](https://github.com/GabrieleLozupone/stable-diffusion.cpp/tree/kokon), on Windows,
-macOS and Linux. It is upstream plus a few additions:
+The image model runs on **stock**
+[stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (leejet), loaded by the
+box's gateway — no fork of the engine in this project. The parts the product needs from
+outside the engine are separate stock engines on the same gateway:
 
-- **Text generation on the loaded text encoder:** a decoding loop with a KV cache, sampling, the
-  chat template with image tokens, and a `/sdcpp/v1/text_gen` endpoint in sd-server. With greedy
-  decoding it writes the same tokens as llama.cpp on the same GGUF.
-- **Room on small cards:** while it writes, the diffusion model and the VAE wait in RAM if the GPU
-  is short of memory, and come back in about half a second for the image. Prompt+ fits within
-  8 GB (tested on an 8 GB-capped card).
-- **Speed:** the decoding step is reused from token to token and, on NVIDIA, replayed as a CUDA
-  graph: about 127 tokens/s on an RTX 5070 Ti (llama.cpp: 133–145), so a prompt takes 1–2 s.
+- **Prompt+** is a llama.cpp sidecar (a Qwen3-VL GGUF) behind the gateway, named per pipeline
+  in the config, with its prompt bundle in the service's data folder.
+- **The lab** (MobileSAM, BiRefNet-lite) is stock vision.cpp with the upstream
+  [`vision-server` PR](https://github.com/Acly/vision.cpp/pull/25) as the `kokon-vision` door,
+  or runs in-process on the service box when the door is absent.
+- **Upscalers** live with the engine, in its own models folder; the engine's capabilities
+  report them.
 
-The image side is upstream's code, and our changes leave its images bit-identical. We proposed
-the text generation upstream ([#2155](https://github.com/leejet/stable-diffusion.cpp/issues/2155));
-leejet prefers to keep text generation out of stable-diffusion.cpp, since llama.cpp already does
-it, which is fair. So it lives in our fork, which we keep close to upstream's master. Kokon still
-works with an official stable-diffusion.cpp release, just without Prompt+.
-
-Want the details? The [engineering notes](docs/engineering-notes.md) cover the architecture,
-the measured backend settings and the reasons behind each default.
+The engine's request schema is the only thing the service knows about engines
+(`crates/qls-core/src/sdcpp.rs`), and it is stock. Module map and the measured facts:
+[docs/engineering-notes.md](docs/engineering-notes.md).
 
 ## Use it from your AI agent
 
-Kokon EE ships `kokon-ee-mcp`, an [MCP](https://modelcontextprotocol.io) server. It talks to
-the running service through the service's own `service.json` (port + token), so on the box it
-needs nothing but the service's data folder (the compose's `data/` bind):
-
-```bash
-# Claude Code, on the box (the data folder beside the compose file)
-claude mcp add --scope user kokon-ee \
-  --env QLS_DATA_DIR=/home/<you>/ml/frontends/kokon-ee/data \
-  -- npx -y kokon-ee-mcp
-```
-
-Any client that takes the standard JSON config (`.mcp.json`, Claude Desktop, Cursor...):
+Kokon ships an [MCP](https://modelcontextprotocol.io) server (`mcp/`): a small TypeScript
+program that talks to the service over its local API. Point your agent at it:
 
 ```json
 {
   "mcpServers": {
-    "kokon-ee": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "kokon-ee-mcp"],
-      "env": { "QLS_DATA_DIR": "/home/<you>/ml/frontends/kokon-ee/data" }
+    "kokon": {
+      "command": "node",
+      "args": ["path/to/kokon-ee/mcp/build/index.js"],
+      "env": { "QLS_DATA_DIR": "/data" }
     }
   }
 }
 ```
 
-Against a desktop install of [Kokon](https://github.com/GabrieleLozupone/kokon) the same
-server works as before (it finds the app's data folder, or starts the app's service if none
-is running; the app ships it as `kokon-mcp.exe` / `kokon-mcp` next to the service).
+(Or the published package, where available.) Then ask: *“Generate a hero image for this README
+and save it in docs/”* or *“Remove the background clutter from screenshot.png”*. On the box
+the engines load through the gateway on the first call; the first call of a session takes as
+long as the engine boot.
 
-Then ask: *“Generate a hero image for this README and save it in docs/”* or *“Remove the
-background clutter from screenshot.png”*. On the box the engines load through the gateway on
-the first call; the first call of a session takes as long as the engine boot.
-
-**Tools:** `generate_image` · `edit_image` · `edit_images` · `inpaint_image` · `outpaint_image` · `upscale_image` · `get_image_info` · `get_generator_status`
+**Tools:** `generate_image` · `edit_image` · `edit_images` · `inpaint_image` · `outpaint_image`
+· `upscale_image` · `get_image_info` · `get_generator_status`
 
 <details>
 <summary><b>MCP behavior and safety</b></summary>
 <br>
 
-- Every result returns the absolute path of the saved file, its size, seed and generation metadata.
-- Paths may be absolute or relative to the project (`CLAUDE_PROJECT_DIR`). Reads and writes are
-  limited to the project folder, the service's output folder and folders listed in
-  `QLS_MCP_ALLOWED_DIRS` (separated by semicolons). Existing files are never overwritten.
+- Every result returns the path of the saved file, its size, seed and generation metadata.
+- Paths may be absolute or relative to the project (`CLAUDE_PROJECT_DIR`). Reads and writes
+  are limited to the project folder, the service's output folder and folders listed in
+  `QLS_MCP_ALLOWED_DIRS`. Existing files are never overwritten.
 - Images are **not** sent back to the model by default; they stay on disk. Pass
   `include_preview: true` to include a small JPEG preview.
 - `upscale_image` takes `scale` (default 2) or `width`/`height` (up to 8192 px).
-- Progress is reported through MCP progress notifications. Claude Code's default tool timeout is
-  30 minutes (`MCP_TOOL_TIMEOUT`).
-- In the desktop app the model is unloaded after 10 minutes without work, so the graphics card is
-  free for other programs, also with the desktop window open; the next call loads it again
-  (Settings → General, 0 keeps it loaded). On the box the gateway's TTL is the authority on the
-  engine's lifetime; Kokon never unloads an engine it does not own.
-
+- Progress is reported through MCP progress notifications. The gateway's TTL is the authority
+  on the engine's lifetime; Kokon never unloads an engine it does not own.
 
 </details>
 
@@ -462,167 +332,53 @@ the first call; the first call of a session takes as long as the engine boot.
 
 Base URL `http://127.0.0.1:39151/api/v1`. Every call except `/ping` needs
 `Authorization: Bearer <token>`, with the token from the service's `service.json` (on the
-box: the compose's `data/` bind; in the desktop app: `%LOCALAPPDATA%\KokonData\service.json`
-on Windows, `~/Library/Application Support/KokonData/service.json` on Mac,
-`~/.local/share/KokonData/service.json` on Linux).
-Requests from web pages (a browser `Origin` header other than the app's own) are refused.
-
-On the box (the data folder beside the compose file):
-
-```bash
-INFO=/home/<you>/ml/frontends/kokon-ee/data/service.json
-TOKEN=$(sed -n 's/.*"token" *: *"\([^"]*\)".*/\1/p' "$INFO")
-PORT=$(sed -n 's/.*"port" *: *\([0-9]*\).*/\1/p' "$INFO")
-curl -s -X POST "http://127.0.0.1:$PORT/api/v1/generate" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"prompt":"a lighthouse at dusk, 16:9","quality":"fast"}'
-```
-
-The full route list (status, jobs, gallery, inputs, models, LoRAs, LUTs and the internal routes), the
-gallery query parameters and the request fields are in [docs/http-api.md](docs/http-api.md).
+box: `/config/service.json`). The full route list is in
+[docs/http-api.md](docs/http-api.md).
 
 </details>
 
-
 ## Privacy
 
-Kokon makes only two kinds of network request:
+The service makes only two kinds of network request:
 
-- **Setup:** `github.com` for the stable-diffusion.cpp release (and the MoSR upscaler, if the copy
-  that comes with the app is missing) and `huggingface.co` for the models and the other upscalers.
-  The AI watermark's models come with the app; Adobe's model host (`cai-watermark.adobe.net`) is
-  contacted only if that copy is missing.
-- **Update check:** at most once a day, the app fetches `latest.json` from this repository's
-  latest GitHub release, a small file with the newest version number. Nothing about you or your
-  images is sent. Turn it off on the welcome screen or in Settings → General. Updates are
-  downloaded only when you click **Update**, and installed only if their signature matches the
-  key built into the app.
+- **Downloads:** the lab models, the watermark models and (on a single box) the upscalers,
+  from their authors' hosts (`huggingface.co`, GitHub, Adobe's watermark host), pinned by
+  size and SHA-256.
+- **The gateway:** every inference call goes to the box's gateway (a host service), never to
+  a cloud.
 
-Creating, editing, the gallery, the MCP server and the API talk to `127.0.0.1` only, unless you turn
-on access from other devices (Settings → Other devices, off by default, password required): then
-the browser interface is also reachable on your local network. Logs never contain your prompts.
+Creating, editing, the gallery, the MCP server and the API talk to the box only, and to your
+devices over your network when you turn on LAN access (password required). Logs never
+contain your prompts.
 
-You can check this yourself. While you work, watch `Kokon`, `kokon-service` and `sd-server` in
-Resource Monitor's Network tab on Windows (or run `Get-NetTCPConnection -OwningProcess <pid>`),
-or with `lsof -i -P | grep -iE "kokon|sd-server"` on a Mac.
+**Private mode** (the eye icon in the top bar) keeps images and prompts out of the gallery,
+the output folder and the project list. They are deleted when you turn private mode off or
+when the service stops. **Save as…** still writes a copy wherever you choose.
 
-**Private mode** (the eye icon in the top bar) keeps images and prompts out of the gallery, the
-output folder and the project list. They are deleted when you turn private mode off, close the
-window, or restart the service. **Save as…** still writes a copy wherever you choose.
+## Where your files are
 
-## How it compares
+On the box image:
 
-Against other local tools. Kokon does one thing: photo editing with the best open model we've tested
-(today Qwen-Image 2.1), with nothing to set up. If you want full control over every node, ComfyUI is the
-better tool.
+| What | Where |
+| --- | --- |
+| Settings (`config.json`, `service.json`) | `/config` (the compose's `config/` bind) |
+| Gallery database, inputs, thumbnails, logs, lab models | `/data` (the compose's `data/` bind) |
+| Saved images | `/gallery` (the compose's `gallery/` bind) |
+| The image model and the upscalers | on the engine box (the ml repo's model home) |
 
-| | **Kokon** | ComfyUI + Qwen workflow | Krita AI Diffusion | Other Qwen web UIs |
-| --- | :---: | :---: | :---: | :---: |
-| Install | One installer (`.exe` / `.dmg` / `.deb` / `.rpm`) | Python environment + nodes | Krita + plugin + ComfyUI | Python or ComfyUI |
-| Picks size and memory settings for you | ✅ | ❌ | partly | partly |
-| Brush edits the model can see | ✅ | depends on the workflow | ✅ | rarely |
-| MCP server for AI agents | ✅ | community nodes | ❌ | ❌ |
-| AMD / Intel GPUs | beta (Vulkan) | ✅ | ✅ | varies |
-| Apple Silicon Macs | beta (Metal) | ✅ | ✅ | varies |
-| Linux | beta (`.deb` / `.rpm`) | ✅ | ✅ | ✅ |
-| Custom pipelines, node graphs | ❌ | ✅ | partly | ❌ |
-| Painting and layers | ❌ | ❌ | ✅ | ❌ |
+Running the bare binary on your machine: the same folders under `~/.local/share/kokon-ee/`
+(override with `QLS_CONFIG_DIR` / `QLS_DATA_DIR`).
 
 ## FAQ
 
 <details>
-<summary><b>Windows says “Windows protected your PC”</b></summary>
+<summary><b>Does it work on AMD or Intel GPUs?</b></summary>
 <br>
 
-SmartScreen shows this for new apps that don't have a download history yet. Click
-**More info → Run anyway**. You can check the installer against the SHA-256 hash listed in the
-release notes, or [build it yourself](#build-from-source).
-
-If the installer **does nothing at all** (the cursor spins for a second, then no window and no
-process), Windows blocked it silently, usually through Smart App Control on fresh Windows 11
-installs. Right-click the downloaded `.exe` → **Properties**, tick **Unblock** at the bottom of the
-General tab, click **OK** and run it again.
-
-</details>
-
-<details>
-<summary id="macos-says-kokon-cannot-be-opened"><b>macOS says Kokon “cannot be opened”</b></summary>
-<br>
-
-Kokon is not notarized by Apple (that needs a paid Apple developer account), so macOS blocks
-it the first time. You only do this once; in-app updates don't trigger it again.
-
-1. Open Kokon. macOS says **“Kokon” Not Opened**: click **Done** (not *Move to Trash*).
-
-   <img src="docs/media/mac/not-opened.png" alt="The macOS dialog “Kokon” Not Opened, with the buttons Move to Trash and Done" width="260">
-
-2. Open **System Settings → Privacy & Security** and scroll down to **Security**. Next to
-   “Kokon” was blocked to protect your Mac, click **Open Anyway**, then confirm with your
-   password or Touch ID.
-
-   <img src="docs/media/mac/open-anyway.png" alt="System Settings, Privacy and Security: “Kokon” was blocked to protect your Mac, with the Open Anyway button highlighted" width="560">
-
-3. Open Kokon again and click **Open** in the last prompt.
-
-If macOS instead only says **The application “Kokon” can't be opened**, with just an **OK**
-button, and Privacy & Security shows no *Open Anyway*: open **Terminal** and run
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Kokon.app
-```
-
-then open Kokon as usual. This removes the "downloaded from the internet" flag from Kokon only;
-Gatekeeper stays on for everything else.
-
-You can also [build it yourself](#build-from-source).
-
-</details>
-
-<details>
-<summary><b>Do I need an internet connection?</b></summary>
-<br>
-
-Only to download the models. After that Kokon works fully offline. If you are online it checks
-once a day for a new version, which you can turn off on the welcome screen or in Settings →
-General.
-
-</details>
-
-<details>
-<summary><b>Can I use it from my phone or another computer?</b></summary>
-<br>
-
-Yes, in a browser. On the computer with the graphics card, open **Settings → Other devices**, set a
-password and open the address it shows on the other device, on the same network. Images are made and
-saved on that computer; the other device uploads photos and downloads results. From outside your home,
-use Tailscale or another VPN, never port forwarding. Kokon can also run without a window, on a Linux
-server or in Docker. Guide: [docs/remote-access.md](docs/remote-access.md).
-
-</details>
-
-<details>
-<summary><b>Does it work on AMD or Intel GPUs, on a Mac or on Linux?</b></summary>
-<br>
-
-AMD and Intel: in beta. The setup screen installs stable-diffusion.cpp's Vulkan build for
-them, which uses the graphics driver you already have. A user's RX 9060 XT 16 GB made a 1080p
-image at Balanced in about 80 s (first image, model loading included); Intel Arc is still
-untested, and integrated graphics are not supported. Please
-[open an issue](https://github.com/GabrieleLozupone/kokon/issues) with your card and how it went.
-
-Mac: yes, in beta, on Apple Silicon (M1 or newer) with macOS 15 Sequoia or newer. Since 0.12 Kokon runs its own
-Mac engine by default on Macs with 16 GB or more: about a minute per new 1-megapixel image on an M2 Pro (about 106 s
-for an edit), four times faster than before. LoRAs and the upscaler model still use the standard engine (Settings →
-Performance). 32 GB or more and a Pro, Max or Ultra chip are recommended. See the [requirements](#requirements)
-and [docs/platforms.md](docs/platforms.md).
-
-Linux: yes, in beta, on x86-64 with a `.deb` (Ubuntu, Debian, Mint) or an `.rpm` (Fedora). NVIDIA
-cards run Kokon's own CUDA build of the engine, AMD and Intel cards its Vulkan build. Since 0.11 it
-also runs headless, with the interface in your browser, and as a Docker image for NVIDIA cards
-([docs/docker.md](docs/docker.md)).
-
-If the Kokon window stays blank on Linux, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1 kokon`
-(a known WebKitGTK issue; Kokon already does this by itself on NVIDIA drivers).
+The engine box decides. The gateway runs whatever stock engine build it has: CUDA for NVIDIA,
+Vulkan for AMD and Intel. The service itself does not care — it only talks to the gateway.
+On the original product's Vulkan builds, an RX 9060 XT 16 GB made a 1080p image at Balanced in
+about 80 s (first image, model loading included).
 
 </details>
 
@@ -630,11 +386,9 @@ If the Kokon window stays blank on Linux, start it with `WEBKIT_DISABLE_DMABUF_R
 <summary><b>My GPU has 8 GB. Can I still use it?</b></summary>
 <br>
 
-Yes, in beta since 0.9.3. Setup picks the 8 GB preset: the same files as the 12 GB one, with
-smaller working sizes, so images are made at about 1 megapixel (then enlarged). Users report it
-works on an RTX 3060 Ti and on an RTX 5050 Laptop, where an edit takes 1–2 minutes. The text
-encoder runs from system RAM, so 16 GB of RAM or more is recommended. If you try it, please tell us
-how it runs in an issue.
+Yes, in beta. The planner picks smaller working sizes for 8 GB cards, so images are made at
+about 1 megapixel (then enlarged). The text encoder runs from system RAM, so 16 GB of RAM or
+more is recommended.
 
 </details>
 
@@ -642,15 +396,16 @@ how it runs in an issue.
 <summary><b>Can I use Kokon commercially?</b></summary>
 <br>
 
-Not with the default model. Kokon's code is open source (see [License](#license)), but the
+Not with the default model. Kokon EE's code is open source (see [License](#license)), but the
 image model has its own license: Qwen-Image 2.1 and its Turbo model are released under the
-[Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE), which allows **research and evaluation only, no commercial
-use**. That includes selling or using commercially the images you make with it. For commercial
-use, ask the Qwen team for a license (model-business@notice.qwencloud.com).
+[Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE), which
+allows **research and evaluation only, no commercial use**. That includes selling or using
+commercially the images you make with it. For commercial use, ask the Qwen team for a
+license.
 
-The Qwen3-VL text encoder is Apache-2.0. The default upscaler, Superscale-SP by Nmkd, is WTFPL,
-and the experimental MoSR by Philip Hofmann is CC BY 4.0: both allow commercial use. The optional
-UltraSharp upscaler is CC BY-NC-SA 4.0, non-commercial only.
+The Qwen3-VL text encoder is Apache-2.0. The default upscaler, Superscale-SP by Nmkd, is
+WTFPL, and the experimental MoSR by Philip Hofmann is CC BY 4.0: both allow commercial use.
+The optional UltraSharp upscaler is CC BY-NC-SA 4.0, non-commercial only.
 
 </details>
 
@@ -658,13 +413,10 @@ UltraSharp upscaler is CC BY-NC-SA 4.0, non-commercial only.
 <summary><b>iPhone photos (HEIC) and HDR</b></summary>
 <br>
 
-HEIC/HEIF photos open like any other image. On a Mac they are decoded by macOS itself. On
-Windows, Microsoft's **HEIF Image Extensions** and **HEVC Video Extensions** must be installed.
-
-iPhone photos with an HDR gain map (iOS 18+) show a **Keep HDR** switch in Advanced, which is on
-by default. Edits of such photos are saved as **Ultra HDR JPEG**: Chrome, Edge, Android and
-recent Apple systems show them in HDR, and every other viewer shows a normal JPEG. This needs
-`ffmpeg` 7.1+ on PATH; without it the result is saved in SDR and the job's notes say why.
+HEIC/HEIF photos open like any other image (the service needs `libheif` for them on Linux).
+iPhone photos with an HDR gain map (iOS 18+) show a **Keep HDR** switch in Advanced, which is
+on by default. Edits of such photos are saved as **Ultra HDR JPEG**; this needs `ffmpeg` 7.1+
+on the service box's PATH; without it the result is saved in SDR and the job's notes say why.
 
 </details>
 
@@ -672,55 +424,23 @@ recent Apple systems show them in HDR, and every other viewer shows a normal JPE
 <summary><b>Which upscaler is used, and can I change it?</b></summary>
 <br>
 
-By default **Superscale-SP** by Nmkd (ESRGAN), downloaded by the setup screen; on a Mac,
-**Lanczos**, because AI upscalers take minutes there (Superscale-SP: 5 min 45 s to enlarge a
-1024×1024 image to 2048×2048 on an M2 Pro, against about a second). Pick another one
-in the Advanced menu next to the prompt, or in Settings → Models; **Compare upscalers** there
-shows each one on the same crops (a face, a JPEG photo, a night street, text, a landscape, a 4×
-upscale):
+By default **Superscale-SP** by Nmkd (ESRGAN), on the engine box. Pick another in the
+Advanced menu next to the prompt, or in Settings: **Compare upscalers** shows each one on the
+same crops.
 
-- **Superscale-SP** (default): sharp and natural on most images; on JPEG photos and dark areas it
-  can draw a faint grid.
-- **MoSR** (experimental, 17 MB, comes with the app): the fastest, good for 4× upscales, but on
-  clean images enlarged less than about 3× it draws a fine grid. Kokon contributed it to
-  [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
-  ([pull request #2128](https://github.com/leejet/stable-diffusion.cpp/pull/2128), merged 2026-10-12).
-- **UltraSharp** (optional download): very clean, but smooths skin into an artificial look and can
-  invent lines. Non-commercial license.
+- **Superscale-SP** (default): sharp and natural on most images; on JPEG photos and dark
+  areas it can draw a faint grid.
+- **MoSR** (experimental, 17 MB): the fastest, good for 4× upscales, but on clean images
+  enlarged less than about 3× it draws a fine grid. Kokon contributed it to
+  [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (pull request
+  #2128, merged 2026-10-12), so every stock engine since that release carries it.
+- **UltraSharp** (optional download): very clean, but smooths skin into an artificial look
+  and can invent lines. Non-commercial license.
 - **Lanczos**: a plain resize, never invents anything.
 
-**Upscaler strength** (0–100 %) mixes the upscaler's result with a plain resize, to tone down
-texture it invents. Settings → Models also has **Shrink the image before upscaling**, which
-gives the upscaler a smaller image, like the ones it was trained on.
-
-</details>
-
-<details>
-<summary><b>Where are my images and settings stored?</b></summary>
-<br>
-
-| What | Windows | Mac |
-| --- | --- | --- |
-| Images | `%USERPROFILE%\Pictures\Kokon\<date>\` (configurable) | `~/Pictures/Kokon/<date>/` (configurable) |
-| Settings | `%APPDATA%\Kokon\config.json` | `~/Library/Application Support/Kokon/config.json` |
-| Gallery database, inputs, thumbnails, logs | `%LOCALAPPDATA%\KokonData\` | `~/Library/Application Support/KokonData/` |
-| Models (default) | `%LOCALAPPDATA%\KokonData\sdcpp\` | `~/Library/Application Support/KokonData/sdcpp/` |
-| API port and token | `%LOCALAPPDATA%\KokonData\service.json` | `~/Library/Application Support/KokonData/service.json` |
-
-</details>
-
-<details>
-<summary><b>How do I uninstall it?</b></summary>
-<br>
-
-**Windows:** Settings → Apps → Installed apps → Kokon → Uninstall. The uninstaller asks whether to
-delete the downloaded models and app data too (`%LOCALAPPDATA%\KokonData`).
-
-**Mac:** drag Kokon from Applications to the Trash. **Linux:** `sudo apt remove kokon` (or `dnf`).
-On both, the models and app data stay in your home folder until you delete them.
-
-Step by step, with every folder to delete on each system: **[kokon.app/uninstall](https://kokon.app/uninstall/)**.
-Your images stay in your Pictures folder.
+**Upscaler strength** (0–100 %) mixes the upscaler's result with a plain resize. Settings
+also has **Shrink the image before upscaling**, which gives the upscaler a smaller image,
+like the ones it was trained on.
 
 </details>
 
@@ -728,43 +448,30 @@ Your images stay in your Pictures folder.
 <summary><b>Something went wrong</b></summary>
 <br>
 
-If a download fails, the setup screen shows the file's download page and target folder so you
-can fetch it by hand. For anything else, please
-[open an issue](https://github.com/GabrieleLozupone/kokon/issues/new) with your GPU (or Mac model), driver
-or macOS version and the log from `KokonData/logs` (see the table above).
+The service's **Settings → Diagnostics** prints the box's health — the engine door, its
+capabilities, the lab models, the watermark — and a copy button for it. If a download fails,
+the report shows the file's download page and target folder so you can fetch it by hand.
+Engine failures live in the gateway's log, not the service's. For anything else, please
+[open an issue](https://github.com/GabrieleLozupone/kokon/issues/new) with your GPU, driver
+version and the diagnostics report.
 
 </details>
 
 ## Roadmap
 
-- [x] Create, edit, combine, brush edits, expand, upscale
-- [x] First-run setup with GPU detection and verified, resumable downloads
-- [x] MCP server and local HTTP API
-- [x] Before/after, version undo, private mode, HEIC and HDR
-- [x] macOS on Apple Silicon (beta, Metal)
-- [x] One-click in-app updates on Windows, Mac and Linux
-- [x] Linux (`.deb` and `.rpm`, beta)
-- [x] Colour LUTs: built-in looks and your own `.cube` files
-- [x] Qwen's official 8-step Turbo model for every preset
-- [x] Prompt+: the prompt enhancer on the model Kokon already has (0.10.0)
-- [x] Your own LoRA files, per project (0.10.0, beta)
-- [x] New images from reference photos (a person, a product, a style), with Prompt+ (0.10.2)
-- [x] AMD GPUs through Vulkan (beta; RX 7900 XTX and RX 9060 XT reported working, RX 6000 cards still slow)
-- [x] **0.11:** the interface in a browser on your other devices, served by Kokon itself, with a password,
-  and a Docker image for NVIDIA ([#15](https://github.com/GabrieleLozupone/kokon/issues/15))
-- [ ] Docker image for AMD and Intel (Vulkan); the desktop app as a client of a Kokon server elsewhere
-- [x] Kokon's own engine for Apple Silicon (GPU, CPU matrix unit and Neural Engine together; 0.11.1, the default on
-  Macs with 16 GB or more since 0.12: text to image about 4× faster on an M2 Pro)
-- [x] **0.12:** the Layers lab (split an image into layers, the background filled, PSD export; experimental), paint
-  with colours, AI marking (metadata and an invisible watermark)
-- [ ] Intel GPUs through Vulkan (to verify)
-- [ ] Background removal and transparent cutouts
+- [x] The box service: browser UI, MCP, the job queue and the gallery
+- [x] The engine as a stock upstream build behind the box's gateway (no forked engine)
+- [x] The lab on the box: MobileSAM and BiRefNet-lite through the `kokon-vision` door
+  (stock vision.cpp + the upstream server PR) or in-process — never in the browser
+- [x] Multi-user mode: named accounts with per-user galleries
+- [x] The chaff cut: no desktop app, no bundled engine, no in-app updater, no release
+  machinery — the image is the product
+- [ ] The vision.cpp server PR merged upstream (until then the fork's pinned build carries
+  it)
 - [ ] Batch edits: one instruction for a whole folder
-- [ ] Plugins for Krita, GIMP and Photoshop through the local API
+- [ ] Background removal and transparent cutouts
 
-What is in progress right now, known issues and where help is welcome: [docs/STATUS.md](docs/STATUS.md).
-Have an idea? [Start a discussion](https://github.com/GabrieleLozupone/kokon/discussions) or 👍 an existing one.
-Press, creators and anything that isn't a bug: [hello@kokon.app](mailto:hello@kokon.app) (press kit: [kokon.app/press](https://kokon.app/press/)).
+What is in progress right now: [tracker/STATUS.md](tracker/STATUS.md).
 
 ## Build from source
 
@@ -772,36 +479,18 @@ Press, creators and anything that isn't a bug: [hello@kokon.app](mailto:hello@ko
 <summary><b>Requirements and commands</b></summary>
 <br>
 
-**Windows:** Rust (stable, MSVC), Node 22+, Visual Studio Build Tools and WebView2.
+Rust (stable) and Node 22+.
 
-```powershell
+```bash
 npm install
 cargo test -p qls-core            # core unit tests
 npx vitest run                    # UI logic tests
-cd mcp; npx vitest run; cd ..     # MCP tests (includes a stdio protocol test)
-npx tauri dev                     # run the desktop app in development
-powershell -ExecutionPolicy Bypass -File scripts\build-release.ps1   # installer
+cd mcp; npx vitest run; cd ..     # MCP tests
+
+npm run build                     # the UI (embedded into the service)
+cargo build -p qls-service        # the service
+docker build -f docker/Dockerfile -t kokon-service .   # the product
 ```
-
-**Mac (Apple Silicon, macOS 15+):** Xcode Command Line Tools, Rust and Node 22+.
-
-```bash
-bash scripts/dev/mac-dev.sh --check   # check the prerequisites
-bash scripts/dev/mac-dev.sh           # build and run the app in development
-bash scripts/build-release-mac.sh     # Kokon.app + .dmg in dist-release/
-```
-
-**Linux (x86-64):** Rust (stable, via rustup), Node 22+ and Tauri's
-[system packages](https://v2.tauri.app/start/prerequisites/#linux). Build on the oldest distribution
-you want to support (releases are built on Ubuntu 22.04).
-
-```bash
-bash scripts/build-release-linux.sh --setup   # once: system packages
-bash scripts/build-release-linux.sh           # .deb + .rpm in dist-release/
-```
-
-Publishing a release (signed in-app updates for every platform) is described in
-[docs/releasing.md](docs/releasing.md).
 
 </details>
 
@@ -811,21 +500,25 @@ Publishing a release (signed in-app updates for every platform) is described in
 
 ```mermaid
 flowchart TB
-    UI["<b>Kokon</b><br>Tauri 2 + React"]
+    UI["<b>browser UI</b><br>React, served by the service"]
     MCP["<b>kokon-mcp</b><br>MCP over stdio"]
-    S["Scripts and other apps"]
-    SVC["<b>kokon-service</b><br>planner · preprocessing · job queue · gallery<br><code>127.0.0.1:39151/api/v1</code>"]
-    SD["<b>sd-server</b><br>stable-diffusion.cpp (CUDA · Vulkan · Metal)<br><code>127.0.0.1:39150</code>"]
-    UI -- "HTTP + SSE, token" --> SVC
+    S["Scripts and other clients"]
+    SVC["<b>kokon-service</b><br>planner · pipeline · job queue · gallery · the lab<br><code>127.0.0.1:39151 (token) · LAN :39152 (password)</code>"]
+    GW["<b>the box's gateway</b><br>llama-swap, one door"]
+    SD["<b>stock stable-diffusion.cpp</b><br>the image model + VLM sidecars"]
+    V["<b>kokon-vision</b><br>stock vision.cpp + the server PR"]
+    UI -- "HTTP + SSE, token / password" --> SVC
     MCP -- "HTTP, token" --> SVC
     S -- "HTTP, token" --> SVC
-    SVC -- "native async API" --> SD
+    SVC -- "/sdcpp/v1/*" --> GW
+    GW --> SD
+    GW --> V
 ```
 
 The Rust core (`crates/qls-core`) holds all the logic: geometry, image processing, planning,
-the inference adapter, the job queue and the gallery. The service, the desktop app and the
-MCP server are thin layers on top. See the [engineering notes](docs/engineering-notes.md)
-for a module map and the backend facts each default is based on.
+the engine door, the job queue, the lab and the gallery. The service, the browser UI and the
+MCP server are thin layers on top. See the [engineering notes](docs/engineering-notes.md) for
+a module map and the backend facts each default is based on.
 
 </details>
 
@@ -847,12 +540,13 @@ Bug reports, example prompts and pull requests are welcome. Run the tests (`carg
 Kokon edits real photos. Don't use it to deceive, harass or impersonate people, or to make
 images of someone without their consent. You are responsible for what you create and share.
 
-Every image Kokon makes or changes with AI is marked as such, as the EU AI Act asks: in the file's
-metadata (IPTC Digital Source Type) and with an invisible watermark ([TrustMark](https://github.com/adobe/trustmark),
-the text `Kokon-AI`) that survives JPEG, resizing and screenshots. Please don't remove these
-marks. If you publish a realistic image of real people, places or events, say that it was made
-or changed with AI. Settings → General → **Check an image** reads the marks of any image;
-[docs/ai-marking.md](docs/ai-marking.md) has the details.
+Every image Kokon makes or changes with AI is marked as such, as the EU AI Act asks: in the
+file's metadata (IPTC Digital Source Type) and with an invisible watermark
+([TrustMark](https://github.com/adobe/trustmark), the text `Kokon-AI`) that survives JPEG,
+resizing and screenshots. Please don't remove these marks. If you publish a realistic image
+of real people, places or events, say that it was made or changed with AI. Settings →
+Diagnostics can check any image's marks; [docs/ai-marking.md](docs/ai-marking.md) has the
+details.
 
 ## License
 
@@ -864,13 +558,13 @@ derivative stays AGPL. Copyrights are recorded in [NOTICE](NOTICE): Gabriele Loz
 the parts derived from Kokon, iamskeole for the parts this project adds. The license covers
 the code, not the images you make with it.
 
-Model weights and the upscaler are downloaded from their authors and keep their own licenses
-(see the [FAQ](#faq)).
+Model weights and the upscalers are downloaded from their authors and keep their own
+licenses (see the [FAQ](#faq)).
 
 Kokon EE builds on [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) by
 leejet, [Qwen-Image 2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) and its Turbo model by
-the Qwen team, Unsloth's Turbo GGUF files, [Tauri](https://tauri.app) and
-the upscalers by Nmkd (Superscale-SP), Philip Hofmann (4xNomos2 MoSR) and Kim2091
+the Qwen team, Unsloth's Turbo GGUF files, [vision.cpp](https://github.com/Acly/vision.cpp)
+and the upscalers by Nmkd (Superscale-SP), Philip Hofmann (4xNomos2 MoSR) and Kim2091
 (UltraSharp). Thank you.
 
 <p align="center">

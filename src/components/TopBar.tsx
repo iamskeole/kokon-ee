@@ -1,6 +1,6 @@
 // The top bar: the project's title, then undo/redo, the update pill, the status capsule,
 // private mode, the Help menu (shortcuts, video guides, prompt tips) and (only while the sidebar is hidden) Settings, then the window's
-// buttons. Its own file so the launch video (marketing/video) shows the same bar.
+// buttons. Its own file so the stage's boot sequence can share it.
 import { CircleHelp, CirclePlay, EyeOff, Keyboard, Lightbulb, PanelLeft, Redo2, Settings, SquarePen, Undo2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { native } from "../lib/native";

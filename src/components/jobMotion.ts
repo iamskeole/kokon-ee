@@ -1,6 +1,6 @@
 // The timing of a job's card in the stage: the live percentage, the prompt enhancer's text
 // appearing word by word, and the prompt leaving for the percentage. Kept apart from Stage.tsx
-// so the launch video (marketing/video) can drive the same card from its frame clock.
+// so a frame-driven replay can drive the same card.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { jobPercent, type JobClock } from "../lib/logic";
 import type { GenerationRequest, JobView } from "../lib/types";

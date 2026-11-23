@@ -24,8 +24,9 @@ docker compose up -d
 docker exec -it kokon kokon-service --set-password   # once; at least 8 characters
 ```
 
-Open `http://<this computer's address>:39152` in a browser, sign in, and follow the setup: it
-downloads the engine and the model (about 12 GB) into the container's data volume, once.
+Open `http://<this computer's address>:39152` in a browser and sign in. The image's settings
+point at the box's gateway ([fresh-box.md](fresh-box.md)); the lab models (MobileSAM, BiRefNet)
+download into the container's data volume on first use, once.
 
 ## Where things are
 

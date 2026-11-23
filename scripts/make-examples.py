@@ -1,5 +1,6 @@
 """Builds the example projects bundled with Kokon (assets/examples) from the full-size
-showcase originals (made by Kokon, see marketing/showcase/PROMPTS.md).
+showcase originals (made with Kokon; the prompt list lived in the upstream's
+marketing/showcase/PROMPTS.md).
 
     python scripts/make-examples.py [originals folder]   # default: ~/Pictures/Kokon/marketing
 """

@@ -4,7 +4,8 @@ Thanks for helping. Bug reports, docs fixes, example prompts and pull requests a
 Kokon is a small project maintained by one person, so short, focused changes are the easiest to
 review.
 
-Using a coding agent? Start from [AGENTS.md](AGENTS.md) and [docs/STATUS.md](docs/STATUS.md).
+Using a coding agent? Start from [AGENTS.md](AGENTS.md) (the fork blocks at the top) and
+[tracker/STATUS.md](tracker/STATUS.md).
 
 ## Before you start
 
@@ -17,38 +18,27 @@ Using a coding agent? Start from [AGENTS.md](AGENTS.md) and [docs/STATUS.md](doc
 
 ## Build from source
 
-**Windows:** Rust (stable, MSVC), Node 22+, Visual Studio Build Tools and WebView2.
+Rust (stable) and Node 22+ are the only prerequisites; the Docker build needs none of them on
+the host.
 
-```powershell
+```bash
+# The service (it embeds the built UI; build the UI first):
 npm install
-npx tauri dev                     # run the desktop app in development
-powershell -ExecutionPolicy Bypass -File scripts\build-release.ps1   # installer
+npm run build
+cargo build -p qls-service
+
+# Or the whole product image (the product is the image):
+docker build -f docker/Dockerfile -t kokon-service .
+docker compose up -d        # on the box; config in config/config.json (docs/fresh-box.md)
 ```
 
-**Mac (Apple Silicon, macOS 15+):** Xcode Command Line Tools, Rust and Node 22+.
+To generate images the box's gateway needs the image model (the ml repo pins it); the lab
+models (MobileSAM, BiRefNet-lite) and the watermark models download into the service's data
+folder on first use. Most code changes (planner, geometry, UI logic, MCP) can be tested
+without a GPU through the unit tests.
 
-```bash
-bash scripts/dev/mac-dev.sh --check   # check the prerequisites
-bash scripts/dev/mac-dev.sh           # build and run the app in development
-bash scripts/build-release-mac.sh     # Kokon.app + .dmg in dist-release/
-```
-
-**Linux (x86_64, built on Ubuntu 22.04 or WSL):** Rust from rustup (Ubuntu's `cargo` package is too
-old) and Node 22+. Clone on the Linux disk, not under `/mnt/c`.
-
-```bash
-bash scripts/build-release-linux.sh --setup   # once: system packages
-bash scripts/build-release-linux.sh           # .deb + .rpm in dist-release/
-```
-
-A quick run without packaging and the details are in [docs/linux.md](docs/linux.md).
-
-To generate images you need the models. The app's first-run setup screen downloads them, or you
-can point it at an existing stable-diffusion.cpp folder. Most code changes (planner, geometry,
-UI logic, MCP) can be tested without a GPU through the unit tests.
-
-Publishing a release is described in [docs/releasing.md](docs/releasing.md) and is done by the
-maintainer.
+This fork does not publish installers or releases: the service image (or the bare
+`kokon-service` binary) *is* the product — clone, build, run.
 
 ## Tests
 
@@ -70,10 +60,11 @@ MCP bundle (`cd mcp && npm run build`).
 
 ## Where things live
 
-- `crates/qls-core`: all the logic (geometry, imaging, planner, inference adapter, job queue,
-  gallery, pinned downloads in `catalog.rs`).
-- `crates/qls-service`: the local HTTP service on `127.0.0.1`.
-- `src-tauri/` and `src/`: the desktop shell (Rust) and the UI (React + TypeScript).
+- `crates/qls-core`: all the logic (geometry, imaging, planner, the engine door, the job
+  queue, the lab, gallery, pinned downloads in `catalog.rs`).
+- `crates/qls-service`: the headless service: the token API on `127.0.0.1` and the LAN
+  listener that serves the browser UI.
+- `src/`: the browser UI (React + TypeScript), served by the service; logic in `src/lib/logic.ts`.
 - `mcp/`: the MCP server (TypeScript, official SDK).
 
 [docs/engineering-notes.md](docs/engineering-notes.md) has a module map and the measured backend
@@ -101,8 +92,8 @@ picked to be approachable. Also welcome:
 - **Docs:** clearer install steps, FAQ entries, fixes to anything that is wrong or out of date.
 - **Example prompts:** prompts that work well, with before/after results
   ([docs/showcase-prompts.md](docs/showcase-prompts.md)).
-- **Hardware reports:** how Kokon runs on AMD and Intel cards (Vulkan) or on Macs other than
-  an M2 Pro. These are still unverified.
+- **Hardware reports:** how the box's engines run on your cards (the service's Diagnostics
+  prints the GPU facts).
 - **Small UI fixes:** layout glitches, keyboard shortcuts, accessibility labels.
 - **Translations:** the UI is English only today. Please open an issue before starting, since
   there is no translation system yet.
@@ -115,6 +106,7 @@ comment. You keep the copyright on your work; the CLA lets the project ship it u
 AGPL and, if needed, under a commercial license too. Contributions are always also available
 under the AGPL.
 
-Model weights are not part of this repository. Kokon downloads them from their authors, and
-they keep their own licenses (see [NOTICE](NOTICE)). Please don't commit model files or other
-large binaries.
+Model weights are not part of this repository: the image model is pinned on the box (the ml
+repo's model home) and the lab and watermark models download into the service's data folder
+from their authors, who keep their own licenses (see [NOTICE](NOTICE)). Please don't commit
+model files or other large binaries.

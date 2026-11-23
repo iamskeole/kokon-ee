@@ -63,8 +63,8 @@ licensed code and model weights. It is an open, documented watermark listed in t
 - **Strength:** TrustMark's default (1.0).
 - **Once:** an image that already carries Kokon's mark (an edit of a Kokon result) is not marked
   again.
-- **Models:** `encoder_P.onnx` and `decoder_P.onnx` from Adobe, included in the installer (pinned by
-  size and SHA-256 in [catalog.rs](../crates/qls-core/src/catalog.rs)).
+- **Models:** `encoder_P.onnx` and `decoder_P.onnx` from Adobe, downloaded by the service to the
+  box (pinned by size and SHA-256 in [catalog.rs](../crates/qls-core/src/catalog.rs)).
 
 Code: [crates/qls-core/src/watermark/](../crates/qls-core/src/watermark/), a port of Adobe's Python
 reference on Kokon's ONNX Runtime.

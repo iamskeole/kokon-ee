@@ -3,33 +3,20 @@ node_modules
 /dist
 /mcp/dist
 /mcp/build
-/src-tauri/target
-/src-tauri/binaries/*.exe
-# Model files bundled with the app, fetched at build time (scripts/release/fetch-bundled.mjs)
-/src-tauri/resources/*.pth
-/src-tauri/resources/*.onnx
-/src-tauri/resources/engine-mac/
 *.log
 /.test-data
 /dist-release
-/src-tauri/gen
 __pycache__/
 /docs/media/raw
 /docs/media/*.mp4
-/src-tauri/binaries/*-apple-darwin
-/target/mac-check
 .DS_Store
 # Maintainer notes: a separate private repo cloned here (see AGENTS.md)
 /private/
 # Local Claude Code settings
 .claude/settings.local.json
-# Reports written by scripts/dev/test-12gb.ps1
+# Test reports
 /docs/test-results/
 /docs/media/demo.gif
 /mcp/LICENSE
-/src-tauri/binaries/kokon-*
-# Swift build output of the Mac engine
-/engine-mac/.build
-/engine-mac/.swiftpm
-# Layers lab: MobileSAM ONNX files served by the vite dev server (not committed)
+# Layers lab: the MobileSAM ONNX files served by the vite dev server (not committed)
 /lab-models/
