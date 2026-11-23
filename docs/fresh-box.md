@@ -570,6 +570,13 @@ services:
 Ports: **39152** web UI (password), **39151** token API (host loopback; the
 MCP server reads the token from `/data/service-token` in the container).
 
+A fresh box has no web password yet, so the UI answers but sign-in refuses
+until one is set: `docker exec -it kokon kokon-service --set-password` (asked
+twice on a terminal, or one line from stdin: `docker exec -i ... < file`).
+The running service picks it up within a few seconds without a restart (the
+clean-slate setup on the reference host, 2026-11-23); every browser then signs
+in with it, and it changes the same way.
+
 The container's `/config/config.json` (schema 16) is the external-engine
 configuration: the service's `externalEngine` points at the **gateway**
 (`http://127.0.0.1:8081/upstream` — alias, not port) and **presents the box
