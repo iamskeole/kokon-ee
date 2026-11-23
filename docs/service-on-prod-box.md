@@ -263,13 +263,22 @@ token door stays 127.0.0.1-only, for the MCP).
    it is reported plainly. (The earlier split-box relay that briefly
    lived in this tree is gone in total; the door is its successor, built
    on stock vision.cpp instead of a second engine.)
-5. The UI: open `https://<ui-name>` from **another device** on the
+5. Upscalers (the split box, task-038): in Settings the upscaler list is
+   **the accelerator's engine's own report** — the models its
+   `--hires-upscalers-dir` holds (the ml home's `models/sd-cpp/upscalers/`,
+   pinned there) — with no Download button: this box keeps no copies and
+   has no write path to the engine box. An enlargement runs the engine's
+   model when it is pinned and falls back to Lanczos with a plain note
+   when it is not. To change the upscaler, pin the `.pth` file on the
+   **accelerator** (the fresh-box doc's model table names the folder);
+   nothing on this box is involved.
+6. The UI: open `https://<ui-name>` from **another device** on the
    LAN → sign in with the password → the gallery loads.
-6. One real generated image (accelerator up): a short text-to-image
+7. One real generated image (accelerator up): a short text-to-image
    job completes and lands in `gallery/` with a dated folder. This
    proves the whole path: browser → nginx → service → gateway over
    the LAN → engine → back.
-7. While that job runs, the UI shows live progress (the SSE stream
+8. While that job runs, the UI shows live progress (the SSE stream
    through nginx — if progress only appears after the job finishes,
    `proxy_buffering` is still on somewhere).
 

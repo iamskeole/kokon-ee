@@ -129,7 +129,7 @@ state of this deployment uses:
 | `sd-cpp/Qwen/qwen-image-2.1/model-Q8_0.gguf` | qwen "full" DiT |
 | `sd-cpp/Qwen/qwen-image-2.1-turbo/model-Q4_K_M.gguf` | qwen "turbo" DiT |
 | `sd-cpp/madebyollin/texture-fix-vae-for-qwen-image-2.1/` | qwen's VAE |
-| `sd-cpp/upscalers/` | hires upscalers (flat) |
+| `sd-cpp/upscalers/` | hires upscalers (flat, by file stem). The **engine** loads these at request time (`--hires-upscalers-dir`; `POST /sdcpp/v1/upscale` and the hires second pass) — this is the only copy that matters. The service box keeps none: in the split box the service only sends the name, and its Settings' upscaler list is the engine's own report (task-038) |
 | `gguf/BFL/flux-3-image-klein-pup/` | the PUP fine-tune: `model-Q8_0.gguf`, `model-Q4_K_M.gguf`, `mmproj-F16.gguf` |
 | `gguf/Qwen/Qwen3-VL-8B-Instruct/` | in-engine conditioner for the qwen engine (`model-Q4_K_M.gguf`, `mmproj-F16.gguf`) |
 | `gguf/Qwen/Qwen3-VL-4B-Instruct/` | in-engine conditioner for the klein engine (`model-Q4_K_M.gguf`, `mmproj-Q8_0.gguf`) |
