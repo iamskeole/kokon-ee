@@ -6,17 +6,26 @@
 #
 #   docker build -f docker/Dockerfile -t kokon-service .
 
+# The ONNX Runtime (AI watermark, stickers) is built with GCC 13 and links against its libstdc++
+# (GLIBCXX_3.4.32), which Ubuntu 22.04 (glibc 2.35, the runtime base) does not have. This stage
+# fetches the GCC 13 static libstdc++ from Ubuntu 24.04's *main* repos (24.04 ships GCC 13;
+# the ubuntu-toolchain-r PPA that used to serve it for 22.04 lives on Launchpad and flakes with
+# 503s) and hands it to the build stage below, which links it in statically.
+FROM ubuntu:24.04 AS toolchain
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends g++-13 \
+ && rm -rf /var/lib/apt/lists/*
+
 FROM ubuntu:22.04 AS build
 ARG DEBIAN_FRONTEND=noninteractive
-# g++-13: ONNX Runtime (AI watermark, stickers) needs GCC 13's libstdc++, linked into kokon-service
-# statically (crates/qls-core/build.rs), so the runtime image below needs nothing new.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential ca-certificates curl pkg-config libssl-dev software-properties-common gpg-agent \
- && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
- && apt-get install -y --no-install-recommends g++-13 \
+ && apt-get install -y --no-install-recommends build-essential ca-certificates curl pkg-config libssl-dev \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
+# The GCC 13 libstdc++ (crates/qls-core/build.rs links it in statically; the runtime stage then needs nothing new).
+COPY --from=toolchain /usr/lib/gcc/x86_64-linux-gnu/13/libstdc++.a /opt/gcc13/libstdc++.a
+ENV KOKON_LIBSTDCXX_A=/opt/gcc13/libstdc++.a
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
 ENV PATH=/root/.cargo/bin:$PATH
 WORKDIR /src
