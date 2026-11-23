@@ -4,7 +4,6 @@
 
 import { CirclePlay, Copy, ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { encode } from "uqr";
 import { api, type RemoteStatus } from "../lib/api";
 import { native } from "../lib/native";
@@ -125,7 +124,7 @@ export function RemoteAccess() {
                   Android, the browser's menu → Add to Home screen. The router can give this computer another address later: reserve it in the router's settings (DHCP
                   reservation) so the icon keeps working.
                 </span>
-                <button className="btn" style={{ alignSelf: "flex-start", marginTop: 6 }} onClick={() => writeText(st.url!).then(() => toastInfo("Address copied"), toastError)}>
+                <button className="btn" style={{ alignSelf: "flex-start", marginTop: 6 }} onClick={() => native.copyText(st.url!).then(() => toastInfo("Address copied"), toastError)}>
                   <Copy size={14} /> Copy address
                 </button>
               </div>

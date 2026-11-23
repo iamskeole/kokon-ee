@@ -1,17 +1,15 @@
 // The top bar: the project's title, then undo/redo, the update pill, the status capsule,
 // private mode, the Help menu (shortcuts, video guides, prompt tips) and (only while the sidebar is hidden) Settings, then the window's
 // buttons. Its own file so the launch video (marketing/video) shows the same bar.
-import { ArrowDownToLine, CircleHelp, CirclePlay, EyeOff, Keyboard, Lightbulb, PanelLeft, Redo2, Settings, SquarePen, Undo2 } from "lucide-react";
+import { CircleHelp, CirclePlay, EyeOff, Keyboard, Lightbulb, PanelLeft, Redo2, Settings, SquarePen, Undo2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { api } from "../lib/api";
 import { native } from "../lib/native";
 import { haptic } from "../lib/haptics";
 import { isNarrow, shortcut } from "../lib/platform";
 import { getState, isMissingModel, newProject, openModelSetup, redoVersion, refreshStatus, setPrivateMode, setState, toastError, undoKey, undoVersion, useStore } from "../lib/store";
-import { installUpdate } from "../lib/updates";
 import { SilkSpin } from "./Cocoon";
 import { ProjectTitle, Wordmark } from "./Sidebar";
-import { WindowControls } from "./TitleBar";
 import { VIDEOS } from "../lib/videos";
 import { IconButton, Popover } from "./ui";
 
@@ -82,28 +80,6 @@ function HistoryButtons() {
   );
 }
 
-/** "Update" pill in the top bar once a newer release is found; one click installs it. */
-function UpdatePill() {
-  const update = useStore((s) => s.update);
-  if (!update) return null;
-  const busy = update.phase !== "available";
-  const click = async () => {
-    const running = Object.values(getState().jobs).some((j) => !["done", "failed", "cancelled"].includes(j.status));
-    const msg = `Install Kokon ${update.version} now? Kokon closes and restarts in a few seconds${running ? "; the images being made now are stopped" : ""}. Your images, settings and models stay.`;
-    if (await native.confirm(update.notes ? `${msg}
-
-What's new:
-${update.notes}` : msg, "Update Kokon")) installUpdate();
-  };
-  const label =
-    update.phase === "downloading" ? `Downloading${update.progress != null ? ` ${Math.round(update.progress * 100)}%` : "…"}` : update.phase === "installing" ? "Installing…" : `Update to ${update.version}`;
-  return (
-    <button className="update-pill" onClick={click} disabled={busy} title={`Kokon ${update.version} is available`}>
-      <ArrowDownToLine size={14} /> {label}
-    </button>
-  );
-}
-
 function PrivateToggle() {
   const on = useStore((s) => s.privateMode);
   return on ? (
@@ -163,8 +139,8 @@ export function TopBar() {
   const needsSetup = useStore((s) => s.needsSetup);
   const sidebar = useStore((s) => s.sidebar);
   return (
-    <div className="topbar" data-tauri-drag-region>
-      <div className="brand" data-tauri-drag-region>
+    <div className="topbar">
+      <div className="brand">
         {(!sidebar || needsSetup) && <Wordmark />}
         {!sidebar && !needsSetup && (
           <>
@@ -178,9 +154,8 @@ export function TopBar() {
         )}
         {overlay === "gallery" ? <span className="project-title">All images</span> : !needsSetup && <ProjectTitle />}
       </div>
-      <div className="toolbar" data-tauri-drag-region>
+      <div className="toolbar">
         {!needsSetup && <HistoryButtons />}
-        <UpdatePill />
         <StatusIndicator />
         {!needsSetup && <PrivateToggle />}
         <HelpMenu />
@@ -191,7 +166,6 @@ export function TopBar() {
           </IconButton>
         )}
       </div>
-      <WindowControls />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 // Video guides on YouTube (decision 11-04): opened in the browser, never embedded, so nothing is
-// fetched from Google until the user clicks. src-tauri open_link allows https://youtu.be/.
+// fetched from Google until the user clicks. The page opens the link in a new tab.
 export const VIDEOS = {
   /** What Kokon can do: remove people, restore, colorize, try-ons, home, text (85 s). */
   useCases: { url: "https://youtu.be/WDbHxkbpU4s", title: "What you can do with Kokon" },

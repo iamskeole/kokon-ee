@@ -1,14 +1,13 @@
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Star, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError, configure, setSignedOutHandler } from "./lib/api";
+import { api, configure, setSignedOutHandler } from "./lib/api";
 import { native } from "./lib/native";
 import { inBrowser, isNarrow, useNarrow } from "./lib/platform";
 import { macEngineDefaultDue } from "./lib/logic";
 import {
   addExampleProjects, closeStarPrompt, loadProjects, dismissToast, getState, initStarPrompt, redoVersion, refreshLoras, refreshStatus, selectItem, setState, startEvents, startTour, submitComposer, toastError, toastInfo, turnOnMacEngine, undoVersion, useStore,
 } from "./lib/store";
-import { Composer, importPaths, uploadFiles } from "./components/Composer";
+import { Composer, uploadFiles } from "./components/Composer";
 import { Login } from "./components/Login";
 import { ExpandEditor } from "./components/ExpandEditor";
 import { Gallery } from "./components/Gallery";
@@ -27,9 +26,7 @@ import { WhatsNew, whatsNewDue } from "./components/WhatsNew";
 import { UpscalerCompare } from "./components/Upscalers";
 import { KokonMark, Welcome } from "./components/Welcome";
 import { PhoneApp } from "./components/PhoneApp";
-import { BareTitleBar } from "./components/TitleBar";
 import { TopBar } from "./components/TopBar";
-import { autoCheckForUpdate } from "./lib/updates";
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|bmp|gif|tiff?|heic|heif)$/i;
 const REPO_URL = "https://github.com/GabrieleLozupone/kokon";
@@ -176,20 +173,8 @@ export default function App() {
         setState({ needsSetup: !cfg.setupComplete, ...(!welcomeSeen ? { overlay: "welcome" } : whatsNew ? { overlay: "whats-new" } : {}) });
         if (macOn) await turnOnMacEngine();
         setBoot("ok");
-        if (!inBrowser) autoCheckForUpdate();
-        // Own model files that run but don't suit Kokon's 8 steps (the base model instead of Turbo).
-        if (cfg.setupComplete && !inBrowser)
-          api.models().then((m) => {
-            const w = m.active.source === "user" ? m.slots.find((x) => x.role === "diffusion")?.info?.warning : null;
-            if (w) toastError(new ApiError({ code: "model_warning", message: w, suggestion: "Settings → Models: download the official files, or use other files of your own." }, 200));
-          }, () => {});
-        // Preload the model so the first generation starts immediately (on the Mac engine when it was just switched
-        // on). After What's new instead (afterStartScreens): not a file or engine about to be replaced.
-        // Never for an externally managed engine: visiting the UI must not put a model on the GPU.
+        // An externally managed engine: visiting the UI must not put a model on the GPU.
         if (cfg.externalEngine) setState({ external: cfg.externalEngine, models: cfg.models ?? [] });
-        // Never for an externally managed engine: visiting the UI must not put a model on the GPU.
-        if (cfg.externalEngine) setState({ external: cfg.externalEngine, models: cfg.models ?? [] });
-        if (cfg.setupComplete && !whatsNew && !cfg.externalEngine && st && st.server.state === "stopped") api.startBackend().then(refreshStatus, () => refreshStatus());
       } catch (e) {
         setBoot(String(e));
       }
@@ -230,32 +215,8 @@ export default function App() {
     };
   }, []);
 
-  // Native file drops (paths) — efficient: the service reads the files itself.
-  useEffect(() => {
-    if (inBrowser) return;
-    // The listener arrives asynchronously: if the effect was already cleaned up (StrictMode's
-    // second mount in development), drop it at once instead of keeping two that add each image twice.
-    let un: (() => void) | undefined;
-    let gone = false;
-    getCurrentWebview()
-      .onDragDropEvent((ev) => {
-        const p = ev.payload;
-        if (p.type === "enter" || p.type === "over") setDragging(true);
-        else if (p.type === "leave") setDragging(false);
-        else if (p.type === "drop") {
-          setDragging(false);
-          const paths = p.paths.filter((x) => IMAGE_EXT.test(x));
-          if (paths.length) importPaths(paths);
-          else if (p.paths.length) toastInfo("Only image files can be added.");
-        }
-      })
-      .then((u) => (gone ? u() : (un = u)))
-      .catch(() => {});
-    return () => {
-      gone = true;
-      un?.();
-    };
-  }, []);
+  // Browser file drops: the page's own drag and drop (above). Native file drops (paths) lived in
+  // the Tauri webview and are gone with it (task-031).
 
   // Clipboard paste: browser image data first, native clipboard as a fallback.
   useEffect(() => {
@@ -335,7 +296,6 @@ export default function App() {
   if (boot !== "ok") {
     return (
       <div className="app" style={{ display: "grid", placeItems: "center" }}>
-        <BareTitleBar />
         {boot === "connecting" ? (
           <BootSplash />
         ) : (

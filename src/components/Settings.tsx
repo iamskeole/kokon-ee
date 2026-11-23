@@ -1,6 +1,5 @@
 import { Activity, Copy, Cpu, Download, FolderOpen, HardDrive, Heart, Layers, MonitorSmartphone, RefreshCw, RotateCcw, Settings2, Trash2, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "../lib/api";
 import { AiMarkingCard } from "./AiCheck";
 import { People } from "./People";
@@ -15,7 +14,6 @@ import { UpscalerControls } from "./Upscalers";
 import { WHATS_NEW_VERSION } from "./WhatsNew";
 import type { AppConfig, Check, InstallStatus, MacBenchState, ModelProfile, ModelsStatus, SetupReport, TextEncoderPlacement } from "../lib/types";
 import { IconButton, Seg, Switch } from "./ui";
-import { autoCheckEnabled, checkForUpdate } from "../lib/updates";
 
 const REPO_URL = "https://github.com/GabrieleLozupone/kokon";
 const SUPPORT_URL = "https://kokon.app/support/";
@@ -196,7 +194,7 @@ function MacBench({ blocked }: { blocked: string | null }) {
       {report && (
         <>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn" onClick={async () => (await writeText(report), toastInfo("Report copied"))}>
+            <button className="btn" onClick={async () => (await native.copyText(report), toastInfo("Report copied"))}>
               <Copy size={14} /> Copy report
             </button>
             <button className="btn" onClick={() => native.openLink(BENCH_DISCUSSION_URL).catch(toastError)}>
@@ -229,8 +227,8 @@ function Diagnostics() {
   return (
     <>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {(!inBrowser || window.isSecureContext) && (
-          <button className="btn" disabled={!text} onClick={async () => (await (inBrowser ? navigator.clipboard.writeText(text ?? "") : writeText(text ?? "")), toastInfo("Diagnostics copied"))}>
+        {window.isSecureContext && (
+          <button className="btn" disabled={!text} onClick={async () => (await native.copyText(text ?? ""), toastInfo("Diagnostics copied"))}>
             <Copy size={14} /> Copy
           </button>
         )}
@@ -492,23 +490,7 @@ export function Settings() {
                     Sign out
                   </button>
                 </div>
-              ) : (
-                <>
-                  <div className="field-row">
-                    <span>Check for updates once a day</span>
-                    <Switch on={autoCheckEnabled(cfg.ui)} onChange={(v) => set({ ui: { ...cfg.ui, updateCheck: v } })} />
-                  </div>
-                  <span className="muted" style={{ marginTop: -10 }}>
-                    Only asks GitHub for the latest version number; nothing about you or your images is sent. Updates install when you click them.
-                  </span>
-                  <div className="field-row">
-                    <span>You have Kokon {appVersion}</span>
-                    <button className="btn" onClick={() => checkForUpdate(true)}>
-                      Check now
-                    </button>
-                  </div>
-                </>
-              )}
+              ) : null}
               <div className="field-row">
                 <span>What's new in Kokon {WHATS_NEW_VERSION}</span>
                 <button className="btn" onClick={() => leave(() => setState({ overlay: "whats-new" }))}>

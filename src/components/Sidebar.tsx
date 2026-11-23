@@ -12,7 +12,7 @@ const CLOSED_KEY = "kokon.sidebarClosed";
 /** The Kokon mark and name: the sidebar's head, and the top bar's while the sidebar is hidden. */
 export function Wordmark() {
   return (
-    <span className="wordmark" data-tauri-drag-region>
+    <span className="wordmark">
       <KokonMark size={18} />
       Kokon
     </span>
@@ -166,7 +166,7 @@ export function Sidebar() {
 
   return (
     <aside className={`sidebar ${selecting ? "selecting" : ""}`}>
-      <div className="side-head" data-tauri-drag-region>
+      <div className="side-head">
         <Wordmark />
         <IconButton title="Hide sidebar" onClick={() => setState({ sidebar: false })}>
           <PanelLeftClose size={18} />

@@ -11,11 +11,7 @@ import restyle from "../assets/showcase/restyle.jpg";
 import text from "../assets/showcase/text.jpg";
 import { api } from "../lib/api";
 import { WHATS_NEW_VERSION } from "./WhatsNew";
-import { inBrowser, isMac } from "../lib/platform";
-import { autoCheckEnabled } from "../lib/updates";
 import { setState, toastError, useStore } from "../lib/store";
-
-const machine = isMac ? "Mac" : "PC";
 
 /** The Kokon mark in the current text color (light and dark themes). */
 export function KokonMark({ size = 40 }: { size?: number }) {
@@ -23,22 +19,21 @@ export function KokonMark({ size = 40 }: { size?: number }) {
   return <span className="kokon-mark" aria-hidden dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-/** Remembers that the welcome screen was seen (in the app config, so it survives updates)
- * and the update-check choice made on it. */
-async function markSeen(updateCheck: boolean) {
+/** Remembers that the welcome screen was seen (in the app config, so it survives deploys). */
+async function markSeen() {
   try {
     const cfg = await api.config();
     const ui = (cfg.ui ?? {}) as Record<string, unknown>;
     // A new install starts on this release: its "what's new" notes are not shown.
-    if (!ui.welcomeSeen || autoCheckEnabled(ui) !== updateCheck) await api.saveConfig({ ...cfg, ui: { whatsNewSeen: WHATS_NEW_VERSION, ...ui, welcomeSeen: true, updateCheck } });
+    if (!ui.welcomeSeen) await api.saveConfig({ ...cfg, ui: { whatsNewSeen: WHATS_NEW_VERSION, ...ui, welcomeSeen: true } });
   } catch (e) {
     toastError(e);
   }
 }
 
 const PROMISES = [
-  { icon: Cpu, title: `Made on your ${machine}`, text: "Your graphics chip creates every image. Photos and prompts never leave this computer." },
-  { icon: CloudOff, title: "Online only when needed", text: "To download the model, and once a day to check for a new Kokon version. Your images and prompts are never sent." },
+  { icon: Cpu, title: "Made on your own hardware", text: "Your graphics card creates every image. Photos and prompts never leave your network." },
+  { icon: CloudOff, title: "Online only when needed", text: "To download a model when it is missing. Your images and prompts are never sent anywhere." },
   { icon: Unlimited, title: "No limits", text: "No account, no credits, no subscription, no queue. Create as much as you like." },
   { icon: EyeOff, title: "Private mode", text: "Click the eye icon and nothing is kept: no gallery, no files, no history." },
 ];
@@ -46,15 +41,9 @@ const PROMISES = [
 /** First launch (and Settings → General → Show welcome screen): what Kokon is and why it is private. */
 export function Welcome() {
   const needsSetup = useStore((s) => s.needsSetup);
-  const [updateCheck, setUpdateCheck] = useState(true);
-  useEffect(() => {
-    api.config().then((c) => setUpdateCheck(autoCheckEnabled(c.ui)), () => {});
-  }, []);
-  const choice = useRef(updateCheck);
-  choice.current = updateCheck;
   const close = () => {
     setState({ overlay: null });
-    markSeen(choice.current);
+    void markSeen();
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
@@ -67,7 +56,7 @@ export function Welcome() {
         <KokonMark size={44} />
         <h1>Welcome to Kokon</h1>
         <p className="welcome-lead">
-          A private image studio that lives on your {machine}. Describe a new image, or a change to a photo, in plain words. Like a cocoon, Kokon is a closed space where something new
+          A private image studio that runs on your own hardware. Describe a new image, or a change to a photo, in plain words. Like a cocoon, Kokon is a closed space where something new
           takes shape, and nothing gets out unless you take it out.
         </p>
         <div className="welcome-grid">
@@ -79,12 +68,6 @@ export function Welcome() {
             </div>
           ))}
         </div>
-        {!inBrowser && (
-          <label className="welcome-check">
-            <input type="checkbox" checked={updateCheck} onChange={(e) => setUpdateCheck(e.target.checked)} />
-            Check for Kokon updates once a day
-          </label>
-        )}
         <button className="btn primary big" onClick={close}>
           {needsSetup ? "Set up Kokon" : "Start creating"}
         </button>

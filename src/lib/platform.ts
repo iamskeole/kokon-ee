@@ -26,5 +26,7 @@ export function useNarrow(): boolean {
   );
 }
 
-/** The UI runs in a browser, served by kokon-service to another device, not in the desktop app. */
-export const inBrowser = typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window);
+/** The UI runs in a browser, served by the box service. The Tauri desktop shell is gone (task-031).
+ * Kept as a constant: the branches that read it take the browser side, and they compile.
+ * */
+export const inBrowser = true;

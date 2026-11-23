@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import pkg from "./package.json" with { type: "json" };
 
-// Tauri expects a fixed dev port and no browser auto-open.
+// A fixed dev port (the service can proxy it) and no browser auto-open.
 export default defineConfig({
   plugins: [react()],
   // A browser page compares it with the service's after an app update (store.ts refreshStatus).

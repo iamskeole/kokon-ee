@@ -1,17 +1,11 @@
-// Native integrations through the Tauri shell. In a browser (the UI served by kokon-service to
-// other devices) there is no shell: files come in by upload and go out by download, and what
-// needs the computer's own folders is hidden by the components (`inBrowser`).
-
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { ask, open, save } from "@tauri-apps/plugin-dialog";
-import { inBrowser } from "./platform";
+// Native integrations. The Tauri desktop shell is gone (task-031): the product is the browser
+// UI served by the box service, so every function here is plain browser behaviour. A few
+// desktop-only signatures survive, degraded, for code paths the cut removes in a later phase.
 
 export interface Connection { baseUrl: string; token: string; version: string }
 
 /** Copying images in a browser needs a secure page (https, e.g. through Tailscale, or localhost). */
-export const canCopyImage = !inBrowser || (typeof window !== "undefined" && window.isSecureContext && !!navigator.clipboard?.write && typeof ClipboardItem !== "undefined");
+export const canCopyImage = typeof window !== "undefined" && window.isSecureContext && !!navigator.clipboard?.write && typeof ClipboardItem !== "undefined";
 
 /** The browser's clipboard takes PNG only. */
 async function asPng(blob: Blob): Promise<Blob> {
@@ -25,21 +19,19 @@ async function asPng(blob: Blob): Promise<Blob> {
 }
 
 export const native = {
-  /** In a browser the API is on the page's own server, signed in by cookie. */
-  connect: () => (inBrowser ? Promise.resolve<Connection>({ baseUrl: "/api/v1", token: "", version: "" }) : invoke<Connection>("connect")),
-  /** Desktop: the image file at `path`. */
-  copyImage: (path: string) => invoke<void>("copy_image", { path }),
-  /** Browser: the image at `url` (see `canCopyImage`). */
+  /** The API is on the page's own server, signed in by cookie. */
+  connect: () => Promise.resolve<Connection>({ baseUrl: "/api/v1", token: "", version: "" }),
+  /** Copying an image by local path had a native counterpart; the box serves every image by URL. */
+  copyImage: (_path: string) => Promise.reject(new Error("Images are copied from their URL on this box.")),
   copyImageUrl: async (url: string) => {
     const res = await fetch(url);
     if (!res.ok) throw new Error("Could not read the image.");
-    const png = await asPng(await res.blob());
+    const png = asPng(await res.blob());
     await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
   },
-  /** Text to the clipboard. A browser page on plain http (the LAN) has no clipboard API: the old
-   * copy command still works there. */
+  /** Text to the clipboard. A page on plain http (the LAN) has no clipboard API: the fallback
+   * still works there. */
   copyText: async (text: string) => {
-    if (!inBrowser) return writeText(text);
     if (window.isSecureContext && navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
     const area = document.createElement("textarea");
     area.value = text;
@@ -51,29 +43,16 @@ export const native = {
     area.remove();
     if (!ok) throw new Error("Could not copy the text.");
   },
-  readClipboardImage: async (): Promise<Uint8Array | null> => {
-    if (inBrowser) return null;
-    const buf = await invoke<ArrayBuffer>("read_clipboard_image");
-    const bytes = new Uint8Array(buf);
-    return bytes.length ? bytes : null;
-  },
-  reveal: (path: string) => invoke<void>("reveal", { path }),
-  openFolder: (path: string) => invoke<void>("open_folder", { path }),
-  dataFolder: () => invoke<string>("data_folder"),
-  /** https links to github.com / huggingface.co / kokon.app / youtu.be only (desktop). */
-  openLink: async (url: string) => {
-    if (inBrowser) window.open(url, "_blank", "noopener,noreferrer");
-    else await invoke<void>("open_link", { url });
-  },
-  /** Desktop: paths of the images picked. */
-  pickImages: async (): Promise<string[]> => {
-    const r = await open({ multiple: true, directory: false, filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif", "tif", "tiff", "heic", "heif"] }] });
-    if (!r) return [];
-    return Array.isArray(r) ? r : [r];
-  },
-  /** Browser: the images picked on this device, to upload. The input stays in the page until it
-   * answers: iOS Safari drops a detached one while the Camera is open (Take Photo never came
-   * back; the photo library, quicker, did). */
+  /** The browser's clipboard cannot hand an image back to the page (no read API on the web). */
+  readClipboardImage: async () => null,
+  reveal: (_path: string) => Promise.resolve(),
+  openFolder: (_path: string) => Promise.resolve(),
+  dataFolder: async () => "",
+  openLink: async (url: string) => window.open(url, "_blank", "noopener,noreferrer"),
+  pickImages: async () => [],
+  /** The images picked on this device, to upload. The input stays in the page until it answers:
+   * iOS Safari drops a detached one while the Camera is open (Take Photo never came back; the
+   * photo library, quicker, did). */
   pickImageFiles: (): Promise<File[]> =>
     new Promise((resolve) => {
       const input = document.createElement("input");
@@ -90,50 +69,22 @@ export const native = {
       document.body.appendChild(input);
       input.click();
     }),
-  pickFile: async (extensions: string[], defaultPath?: string, kind = "Model"): Promise<string | null> => {
-    const r = await open({ multiple: false, directory: false, defaultPath, filters: [{ name: kind, extensions }] });
-    return typeof r === "string" ? r : null;
-  },
-  pickFolder: async (defaultPath?: string): Promise<string | null> => {
-    const r = await open({ multiple: false, directory: true, defaultPath });
-    return typeof r === "string" ? r : null;
-  },
-  confirm: (message: string, title: string) => (inBrowser ? Promise.resolve(window.confirm(message)) : ask(message, { title, kind: "warning" })),
-  isFullscreen: async () => (inBrowser ? !!document.fullscreenElement : getCurrentWindow().isFullscreen()),
+  /** Native file picking had a desktop counterpart; the browser uploads through its own inputs. */
+  pickFile: async (_extensions?: string[], _defaultPath?: string, _kind?: string) => null,
+  pickFolder: async (_defaultPath?: string) => null,
+  confirm: (message: string, _title?: string) => Promise.resolve(window.confirm(message)),
+  isFullscreen: async () => !!document.fullscreenElement,
   setFullscreen: async (on: boolean) => {
-    if (!inBrowser) return getCurrentWindow().setFullscreen(on);
     if (on && !document.fullscreenElement) await document.documentElement.requestFullscreen?.();
     else if (!on && document.fullscreenElement) await document.exitFullscreen();
   },
-  setTheme: async (theme: "light" | "dark" | null) => (inBrowser ? undefined : getCurrentWindow().setTheme(theme)),
-  // Kokon's own title bar (the system one is off on Windows and Linux).
-  minimize: () => getCurrentWindow().minimize(),
-  toggleMaximize: () => getCurrentWindow().toggleMaximize(),
-  close: () => getCurrentWindow().close(),
-  isMaximized: () => getCurrentWindow().isMaximized(),
-  onResized: async (f: () => void): Promise<() => void> => {
-    if (!inBrowser) return getCurrentWindow().onResized(f);
+  setTheme: async (_theme?: "light" | "dark" | null) => undefined,
+  onResized: async (f: () => void) => {
     window.addEventListener("resize", f);
     return () => window.removeEventListener("resize", f);
   },
-  saveAs: (defaultName: string) =>
-    save({
-      defaultPath: defaultName,
-      filters: [
-        { name: "PNG", extensions: ["png"] },
-        { name: "JPEG", extensions: ["jpg"] },
-        { name: "WebP", extensions: ["webp"] },
-      ],
-    }),
-  /** The Layers lab's .psd: desktop asks where (null: cancelled), a browser downloads it. */
-  savePsd: async (psd: Uint8Array): Promise<string | null> => {
-    if (!inBrowser) return invoke<string | null>("save_psd", psd);
-    const url = URL.createObjectURL(new Blob([psd as BlobPart], { type: "image/vnd.adobe.photoshop" }));
-    native.download(url, "Layers.psd");
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    return "Layers.psd";
-  },
-  /** Browser: saves the file at `url` on this device (the browser's downloads). */
+  saveAs: async (_defaultName?: string) => null,
+  /** Saves the file at `url` on this device (the browser's downloads). */
   download: (url: string, name: string) => {
     const a = document.createElement("a");
     a.href = url;
@@ -141,5 +92,12 @@ export const native = {
     document.body.appendChild(a);
     a.click();
     a.remove();
+  },
+  /** The Layers lab's .psd: the browser downloads it. */
+  savePsd: async (psd: Uint8Array) => {
+    const url = URL.createObjectURL(new Blob([psd as BlobPart], { type: "image/vnd.adobe.photoshop" }));
+    native.download(url, "Layers.psd");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return "Layers.psd";
   },
 };

@@ -29,7 +29,7 @@ RUN npm run build && cargo build -p qls-service --release
 
 FROM ubuntu:22.04
 ARG DEBIAN_FRONTEND=noninteractive
-# What the .deb depends on (src-tauri/tauri.linux.conf.json), minus the window.
+# Runtime libraries of the bundled stack (the service and its UI; the inference engine lives on the gateway, not in this image).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates libgomp1 libssl3 libvulkan1 \
  && rm -rf /var/lib/apt/lists/*

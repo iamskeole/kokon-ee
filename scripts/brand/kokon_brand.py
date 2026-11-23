@@ -11,7 +11,6 @@ app already ships in node_modules/@fontsource-variable/inter).
 from __future__ import annotations
 
 import math
-import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -477,21 +476,13 @@ def build(v: Variant):
     imgs[256].save(app_ico, sizes=[(s, s) for s in ico_sizes], append_images=[imgs[s] for s in ico_sizes if s != 256])
     made.append(app_ico)
 
-    # 7. macOS app icon set (Apple template grid), installed into src-tauri/icons/macos.
+    # 7. macOS app icon set (Apple template grid): the brand archive keeps it in assets/brand/icon/macos.
     mac = {sz: macos_icon(v, sz) for sz in (16, 32, 64, 128, 256, 512, 1024)}
     for sz, img in mac.items():
         save(img, f"icon/macos/kokon-macos-{sz}.png")
     icns = OUT / "icon" / "macos" / "kokon.icns"
     mac[1024].save(icns, format="ICNS", append_images=[mac[s] for s in (16, 32, 64, 128, 256, 512)])
     made.append(icns)
-    tauri = ROOT / "src-tauri" / "icons" / "macos"
-    tauri.mkdir(parents=True, exist_ok=True)
-    for sz, name in [(32, "32x32.png"), (128, "128x128.png"), (256, "128x128@2x.png"), (512, "icon.png")]:
-        mac[sz].save(tauri / name)
-        made.append(tauri / name)
-    shutil.copyfile(icns, tauri / "icon.icns")
-    made.append(tauri / "icon.icns")
-
     # 6. Social preview (GitHub, links): dark, white logo, one line of copy.
     W_, H_ = 1280, 640
     size_l, mp, tp = lockup(v, 150, PAPER_RGB)
