@@ -92,7 +92,7 @@ the real data dirs beside it:
 /home/<user>/kokon-ee/    ← one parent dir (or /srv/kokon-ee, your call)
   kokon-ee/                ← git clone of the project (pull and build happen here)
   compose.yaml           ← the service container
-  data/                  # → /data    gallery DB, service token, lab models, logs
+  data/                  # → /data    gallery + projects DB, service token, lab models, logs
   config/                # → /config  config.json (gateway address + key)
   gallery/               # → /gallery saved images, dated folders
 ```

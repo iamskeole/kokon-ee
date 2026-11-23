@@ -30,8 +30,8 @@ browser UI (React, embedded in the service)      kokon-mcp (MCP, stdio)      scr
 | `engine.rs` | Async job queue, cancellation, OOM retry, saving |
 | `speed.rs` | Per-machine speed calibration of time estimates |
 | `diagnostics.rs` | Local GPU detection, box-health report (the engine door, the lab doors, upscalers, watermark) |
-| `store.rs` | SQLite gallery + content-addressed inputs |
-| `projects.rs` | The project list every device shares (`projects.json`): merged saves, tombstones, finished jobs |
+| `store.rs` | SQLite: the gallery + content-addressed inputs (and, task-032, the project list beside them) |
+| `projects.rs` | The project list every device shares (the box's database): merged saves, tombstones, finished jobs |
 | `paths.rs` | Path validation (no UNC/device/ADS/traversal, never overwrite) |
 | `catalog.rs` | Pinned downloads the *service box* keeps: upscaler models, the watermark ONNX, the lab GGUFs; the engine build tag |
 | `matting.rs`, `segment.rs` | The lab: in-process GGUF inference (MobileSAM, BiRefNet) and the `kokon-vision` door client |

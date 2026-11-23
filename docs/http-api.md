@@ -143,7 +143,7 @@ gateway — `config.json`'s `visionEngine`), never in the browser:
 
 ## Projects
 
-The project list every device shares (kept in `projects.json` in the data folder). A version
+The project list every device shares (the box's database, beside the gallery's own records — task-032; during this one release it is also mirrored as a read-only `projects.json` in the data folder, so a rollback to the previous image reads it). A version
 is a result (`"kind": "gen"`, `genId`) or an imported image (`"kind": "input"`, `inputId`).
 
 | Method | Path | Purpose |
