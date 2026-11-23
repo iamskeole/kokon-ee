@@ -18,7 +18,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: docker-${{ github.event.release.tag_name || inputs.tag }}
+  group: docker-${{ inputs.ref || github.sha }}
   cancel-in-progress: false
 
 jobs:
