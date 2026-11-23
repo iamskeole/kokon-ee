@@ -952,6 +952,20 @@ impl AppConfig {
             .filter(|v| !v.gateway.trim().is_empty() && !v.door.trim().is_empty())
     }
 
+    /// The product is the box (task-031): the service adopts its engine through the
+    /// gateway. A config without an external engine is a stock upstream config — this
+    /// build cannot drive one, and the error says so plainly.
+    pub fn require_external_engine(&self) -> Result<(), AppError> {
+        if self.external_engine().is_some() {
+            Ok(())
+        } else {
+            Err(AppError::new(
+                ErrorCode::InvalidConfig,
+                "this version of Kokon runs against an external engine — point it at your gateway (set externalEngine in the config)",
+            ))
+        }
+    }
+
     /// A settings save round-trips the config through the UI, which never shows the key
     /// fields (the UI's `ExternalEngine` type has no gateway key at all): an empty key in
     /// the incoming config therefore means "unchanged", and the stored value is kept for
@@ -1719,6 +1733,32 @@ mod tests {
         assert_eq!(c.server_port, 7860);
         assert!(c.keep_server_running);
         assert_eq!(c.idle_unload_minutes, 7);
+    }
+
+    #[test]
+    fn a_stock_config_cannot_boot_the_box() {
+        // task-031: without an external engine there is nothing to adopt — the boot
+        // guard says so plainly instead of failing per job.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.json");
+        std::fs::write(&p, r#"{"schemaVersion":17}"#).unwrap();
+        let c = AppConfig::load_from(&p);
+        let e = c.require_external_engine().unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidConfig);
+        assert!(e.to_string().contains("external engine"), "{:?}", e);
+
+        let mut ok = AppConfig::default();
+        ok.external_engine = Some(crate::config::ExternalEngine {
+            gateway: "http://127.0.0.1:8081/upstream".into(),
+            api_key: String::new(),
+            model: "kokon-qwen-image-2.1-full".into(),
+            model_name: String::new(),
+            sample: serde_json::json!({}),
+            vlm: None,
+            vlm_vision: None,
+            prompt_bundle: String::new(),
+        });
+        assert!(ok.require_external_engine().is_ok());
     }
 
     #[test]

@@ -253,6 +253,13 @@ async fn run(args: Vec<String>) {
     let _guard = init_logging(&dir);
 
     let cfg = AppConfig::load();
+    // The product is the box: without a gateway door there is no engine to adopt, and a
+    // stock upstream config must not boot a service that can only fail per job.
+    if let Err(e) = cfg.require_external_engine() {
+        tracing::error!("refusing to start: {e}");
+        eprintln!("Kokon: {e}");
+        std::process::exit(1);
+    }
     let port = args
         .iter()
         .position(|a| a == "--port")
