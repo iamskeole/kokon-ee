@@ -415,12 +415,13 @@ pub fn browser_allowed(method: &str, path: &str) -> bool {
         ("GET", ["projects", _, "records"]) => true,
         ("GET", ["luts", _, "preview"]) => true,
         ("GET" | "POST", ["matte"]) | ("POST", ["matte", "download" | "cancel"]) => true,
-        // The selection model: the browser only asks, the box runs it (encode/predict), or runs
-        // it in-browser from the box's own pinned copies (models/{file}). 11-11: this list once
-        // omitted all of them, so a browser could never even see the files were installed.
+        // The selection model: the browser only asks, the box runs it (encode/predict) —
+        // in-process on a single box, or through the box's stock GGUF door on a split one
+        // (task-037 P3). The model never runs in the browser and the files never cross to
+        // it: any failure is the box's, said plainly. 11-11: this list once omitted all of
+        // them, so a browser could never even see the files were installed.
         ("GET", ["segment"]) => true,
         ("POST", ["segment", "download"]) => true,
-        ("GET", ["segment", "models", _]) => true,
         ("POST", ["segment", "encode" | "predict"]) => true,
         ("GET" | "PUT" | "DELETE", ["projects", _]) => true,
         ("PUT", ["config"]) => true,
@@ -685,7 +686,6 @@ mod tests {
             ("POST", "/session/heartbeat"),
             ("GET", "/segment"),
             ("POST", "/segment/download"),
-            ("GET", "/segment/models/mobile_sam_image_encoder.onnx"),
             ("POST", "/segment/encode"),
             ("POST", "/segment/predict"),
             ("DELETE", "/gallery/abc"),
@@ -711,7 +711,6 @@ mod tests {
             ("POST", "/remote"),
             ("POST", "/remote/password"),
             ("DELETE", "/segment"),
-            ("POST", "/segment/models/mobile_sam_image_encoder.onnx"),
             ("DELETE", "/jobs"),
             ("GET", "/gallery/a/b/c"),
             ("POST", "/gallery/abc/preview"),

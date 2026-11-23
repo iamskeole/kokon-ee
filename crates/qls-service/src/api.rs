@@ -87,7 +87,6 @@ pub fn router(state: Arc<AppState>, lan: bool) -> Router {
         .route("/matte/cancel", post(matte_cancel))
         .route("/segment", get(segment_status))
         .route("/segment/download", post(segment_download))
-        .route("/segment/models/{file}", get(segment_model))
         .route("/segment/encode", post(segment_encode))
         .route("/segment/predict", post(segment_predict))
         .route("/config", get(get_config).put(put_config))
@@ -503,10 +502,19 @@ async fn download_upscaler(State(s): St, AxPath(name): AxPath<String>) -> ApiRes
     Ok(Json(serde_json::to_value(s.engine.installer.status()).unwrap()))
 }
 
-/// The fast-sticker model (layers lab): there or not, and its download size.
+/// The fast-sticker model (BiRefNet lite, the layers lab): where the box runs it — its own
+/// files (`installed`, the single-box path) or the stock GGUF door behind its gateway (`door`,
+/// the split-box path); `doorConfigured && !door` = a named door that is not answering (the
+/// browser says so plainly, task-037 P3, D-037-13).
 async fn matte_status(State(s): St) -> Json<Value> {
-    let path = qls_core::matting::model_path(&s.engine.config().sdcpp_dir);
-    Json(json!({ "installed": path.is_file(), "bytes": qls_core::matting::BIREFNET_LITE.size }))
+    let dir = s.engine.config().sdcpp_dir;
+    let installed = qls_core::matting::birefnet_installed(&dir);
+    let engine = s.engine.clone();
+    let (door_configured, door) =
+        tokio::task::spawn_blocking(move || engine.segment_door_state())
+            .await
+            .unwrap_or((false, false));
+    Json(json!({ "installed": installed, "bytes": qls_core::matting::BIREFNET_LITE.size, "doorConfigured": door_configured, "door": door }))
 }
 
 async fn matte_download(State(s): St) -> ApiResult<Json<Value>> {
@@ -515,27 +523,28 @@ async fn matte_download(State(s): St) -> ApiResult<Json<Value>> {
     Ok(Json(serde_json::to_value(s.engine.installer.status()).unwrap()))
 }
 
-/// The layers lab's click-to-select model (MobileSAM): there or not, and its size.
-/// Installed when this box has the two pinned files (the service runs them in-process);
-/// a box without them falls back to the in-browser onnxruntime-web copy, the stock path.
+/// The layers lab's click-to-select model (MobileSAM): where it runs, and its size.
+/// `installed` = this box has the two pinned files (the service runs them in-process);
+/// `door` = a stock GGUF door behind the box's gateway serves the lab right now (the
+/// split-box path — the browser never downloads and never runs the model itself);
+/// `doorConfigured` = a door is named but not answering (the browser says so plainly
+/// instead of downloading for a box that is not the model's home, task-037 P3, D-037-13).
 async fn segment_status(State(s): St) -> Json<Value> {
     let dir = s.engine.config().sdcpp_dir;
     let bytes: u64 = qls_core::matting::MOBILE_SAM.iter().map(|d| d.size).sum();
-    Json(json!({ "installed": qls_core::matting::sam_installed(&dir), "bytes": bytes }))
+    let installed = qls_core::matting::sam_installed(&dir);
+    let engine = s.engine.clone();
+    let (door_configured, door) =
+        tokio::task::spawn_blocking(move || engine.segment_door_state())
+            .await
+            .unwrap_or((false, false));
+    Json(json!({ "installed": installed, "bytes": bytes, "doorConfigured": door_configured, "door": door }))
 }
 
 async fn segment_download(State(s): St) -> ApiResult<Json<Value>> {
     let dir = s.engine.config().sdcpp_dir;
     s.engine.installer.start(dir, "segment", qls_core::matting::MOBILE_SAM.to_vec(), Box::new(|_| {}))?;
     Ok(Json(serde_json::to_value(s.engine.installer.status()).unwrap()))
-}
-
-/// One MobileSAM file, for onnxruntime-web in the webview (only these two names are served).
-async fn segment_model(State(s): St, AxPath(file): AxPath<String>) -> ApiResult<Response> {
-    let path = qls_core::matting::sam_file(&s.engine.config().sdcpp_dir, &file)
-        .filter(|p| p.is_file())
-        .ok_or_else(|| AppError::new(ErrorCode::NotFound, "The selection model is not downloaded."))?;
-    serve_file(&path, Some("application/octet-stream")).await
 }
 
 /// A selection size the service runs (the UI asks for at most 2048 on the long side; be generous,
