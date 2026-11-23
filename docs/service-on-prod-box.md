@@ -1,351 +1,378 @@
 # The service on the stable box (engines stay on the accelerator)
 
-The split deployment: **this** box runs the kokon service, the browser
-UI, and (optionally) the MCP — no GPU, no models. All inference runs on
-the **accelerator** box through its one-door gateway (`:8081`, keyed,
-OpenAI-style door for other clients). This is the setup that lets the
-accelerator go down for OS/CUDA/driver work while the UI keeps serving.
-See also [fresh-box.md](fresh-box.md) (the whole stack on one machine)
-and the tracker's task-027 (the move from the current deployment).
+The split deployment: **the stable box** runs the kokon service and the
+browser UI — no GPU, no models, and (in the atlas deployment) **no
+published ports at all**. All inference runs on the **accelerator** box
+through its one-door gateway (`:8081`, keyed). The browser reaches the
+service through the stable box's reverse proxy (and, on atlas, through
+Cloudflare in front of it). This is the setup that lets the accelerator
+go down for OS/CUDA/driver work while the UI keeps serving.
 
-## The prompt to hand over on the stable box
+Executed and verified 2026-11-23 (task-027): **atlas** (the stable box)
+serves **`https://imagine.unveilx.com`** — a real login and a real
+text-to-image job completed through the whole chain (internet →
+Cloudflare → atlas nginx → the service → apollo's gateway → the engine),
+with the lab 100% apollo-side and vLLM resident throughout.
+
+See also [fresh-box.md](fresh-box.md) (the whole stack on one machine).
+
+## The boxes (as deployed)
+
+| | atlas (the stable box) | apollo (the accelerator) |
+|---|---|---|
+| role | service + UI, behind nginx + Cloudflare | the gateway + every engine, pure muscle |
+| holds | `~/infra/kokon/` (compose, config, data, gallery) | the model home, the gateway (`*:8081`), the engines, the `kokon-vision` door |
+| no | no GPU, no models, **no published ports** | no user data, no UI, no MCP |
+
+Conventions that shaped the atlas deployment (all pre-existing on that
+box): every compose project lives in `~/infra/<name>/` with its compose
+beside it; `~/infra` is **not** a git repo (plain files; secrets sit
+mode-600 beside them); nginx is a container whose `conf.d/` is
+bind-mounted and auto-reloads on a 6-hour loop; a wildcard cert for
+`unveilx.com` is renewed by a `certbot/dns-cloudflare` sidecar every
+12 h; the firewall (ufw) is active with **default-deny INPUT** — which
+is why the service is a plain bridge-network container (below), not a
+host-networked one.
+
+## The prompt to hand over on a stable box
 
 Copy from the next fence, fill in the angle-bracket values, and paste it
 to the agent on that box:
 
 ```text
 Set up the Kokon image service on this box. The full reference is in
-docs/service-on-prod-box.md of the repo in step 2 — read it; the values
+docs/service-on-prod-box.md of the repo (step 3) — read it; the values
 below override anything ambiguous in it.
 
 Owner-supplied values:
-- This box: <name> (<IP>)
-- Accelerator (the model gateway) IP: <IP>. Its gateway listens on
-  :8081 — the box's only model door, every request needs the key.
+- This box: <name> (<IP>); the accelerator: <name> (<IP>), gateway on
+  :8081 — its only model door, every request needs the key.
 - Gateway key: a file at <path on this box>, mode 600. Read it for the
   config. Never print it — not in your reply, logs, diffs, or commits.
-- What people type for the UI: <name or this box's IP>, port <n>;
-  TLS: <yes — self-signed cert at <path> | no, plain HTTP>.
-- Data location: the parent dir <path> that will hold the clone,
-  the compose and the data dirs beside it. Fresh start, or: migrate
-  my existing data (tarball at <path>).
-- Default image model: <kokon-qwen-image-2.1-turbo | kokon-qwen-image-2.1-full | kokon-flux-image-3-klein>.
+- What people type for the UI: <https://name | name>, and whether a CDN
+  (Cloudflare) sits in front of the box's nginx.
+- Data location: <parent dir> — the folder that will hold the compose
+  and the data dirs beside it (fresh start; the dev box's contents are
+  fungible, nothing migrates).
+- Default image model: the accelerator's current one (read its config).
 
 Do, in order:
-1. Preflight: docker + compose plugin present; ports 39151 and 39152
-   free; ~5 GB of disk; NO nvidia runtime needed (and none must be
-   reserved — this service uses no GPU in this mode).
-2. git clone https://github.com/iamskeole/kokon-ee.git <parent>/kokon-ee —
-   branch main, into a single parent dir <parent> that will also hold
-   the compose and the data dirs (see the doc's Layout). The build is
-   self-contained (its own Rust/npm toolchain in the image); allow it
-   up to 30 minutes cold.
-3. Build the image, from inside <parent>/kokon-ee/ (current one: fe302e7;
-   if the repo's main has moved on since, use its short commit instead):
-   docker build -f docker/Dockerfile -t
-   ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-fe302e7 .
-   (or pull that tag from ghcr instead, if the owner says it is pushed
-   and hands you a registry token).
-4. Write <parent>/compose.yaml per the doc, and create
-   <parent>/data, <parent>/config, <parent>/gallery, chowned 1000:1000
-   (the in-container user). The data sits beside the compose on
-   purpose: the owner must be able to see and back it up.
-   If migrating: unpack the owner's tarballs into those directories
-   first (they carry the gallery, the config, the service token and
-   the login password); keep the owner's copy untouched.
-5. Write <parent>/config/config.json per the reference in this doc:
-   gateway and vlm entrypoint at http://<accelerator-IP>:8081/upstream
-   (the vlm one with /kokon-pup-flux-image-3-klein appended), apiKey from the key file,
-   the owner's default model, the rest copied from the accelerator's
-   current config when migrating (or the doc's template when fresh).
-6. docker compose up -d with the compose from the doc. If this is a
-   fresh start, set the browser password:
-   docker exec -it kokon-ee kokon-service --set-password
-   (a migrating setup keeps the existing password in its data).
+1. Preflight: docker + compose plugin; NO nvidia runtime needed (and
+   none must be reserved — this service uses no GPU in this mode).
+2. Create <parent>/kokon/ with data/, config/, gallery/ (chown
+   1000:1000). Fetch the repo's docker/compose.yaml into it (the CI
+   publishes the image on every push to main: tags multiuser-<sha> and
+   latest — the box pulls, no registry credentials anywhere).
+3. Clone the repo to a scratch dir (or fetch its files over https) and
+   read docs/service-on-prod-box.md in full.
+4. Write config/config.json: copy the accelerator's current one, change
+   every 127.0.0.1:8081 address to the accelerator's name-or-IP, set
+   multiUser to the owner's choice (one shared password: false), chmod
+   600. If the box's containers cannot resolve the accelerator's
+   .local name (most cannot — no mDNS in the image), pin it in the
+   compose's extra_hosts.
+5. docker compose pull && docker compose up -d; then
+   docker exec -it kokon-ee kokon-service --set-password (password from
+   a mode-600 file beside the compose; the running service picks it up).
+6. If this box has a shared docker network for fronting services (atlas:
+   nginx_default, the open-webui model) join the service to it and point
+   the proxy at the container name. Publish no ports. Otherwise the box
+   needs a firewall path from the proxy to the service (a host-networked
+   backend behind a default-deny firewall is black-holed — see the doc).
 7. Install the nginx server block from the doc (the exact values are
-   load-bearing: SSE buffering off, timeouts, body size, the two
-   X-Forwarded headers) and reload nginx.
-8. Verify with the doc's checklist — including one real generated
-   image (this needs the accelerator up; ask the owner if it is).
-9. Report back: what you did, where the service token file is (do not
-   print the token itself), any deviation you had to make, and the one
-   thing the owner should open from a second device to believe it.
+   load-bearing: SSE buffering off, 660 s timeouts, 64 m bodies, the
+   X-Forwarded-For APPEND when a CDN is in front, X-Forwarded-Proto
+   https), validate and reload nginx.
+8. If the box's domain has a wildcard cert, use it; otherwise arrange
+   the box's own TLS. Add the DNS record (proxied through the CDN, or
+   the box's IP plain) — on atlas this used the box's own
+   dns-cloudflare token (IPv4 egress only).
+9. Verify with the doc's checklist — from OUTSIDE the network (the
+   CDN's front), including one real generated image (this needs the
+   accelerator up; ask the owner if it is), and confirm the accelerator's
+   resident models were not disturbed.
+10. Report back: what you did, where the service token file is (do not
+    print the token), any deviation, and the one thing the owner should
+    open from a second device to believe it.
 
 Guardrails:
-- Never print the gateway key or the service token (first 4 chars
-  max, masked).
-- This box stores no models and installs no engine; the only traffic
-  you initiate toward the accelerator is through the gateway door on
-  :8081 with the key.
-- If the box's reality conflicts with this brief (port, path, nginx
-  layout), stop and ask before adapting anything.
+- Never print the gateway key or the service token (first 4 chars max,
+  masked).
+- This box stores no models and installs no engine; the only traffic you
+  initiate toward the accelerator is through the gateway door on :8081
+  with the key.
+- If the box's reality conflicts with this brief (network idiom,
+  firewall, TLS), stop and ask before adapting anything.
 ```
 
-## Reference the agent works from
-
-### Layout
-
-One parent dir holds everything — the pull, the build, the yaml, and
-the real data dirs beside it:
+## Layout (as deployed on atlas)
 
 ```
-/home/<user>/kokon-ee/    ← one parent dir (or /srv/kokon-ee, your call)
-  kokon-ee/                ← git clone of the project (pull and build happen here)
-  compose.yaml           ← the service container
-  data/                  # → /data    gallery + projects DB, service token, lab models, logs
-  config/                # → /config  config.json (gateway address + key)
-  gallery/               # → /gallery saved images, dated folders
+/home/p/infra/kokon/
+  compose.yaml            # the service container (fetched from the repo's main)
+  .ui-password            # mode 600 — fed to --set-password once
+  config/
+    config.json           # mode 600 — the accelerator's config, addresses remapped
+  data/                   # → /data    gallery + projects DB, service token, sessions, logs
+  gallery/                # → /gallery saved images, dated folders
 ```
 
-The bind mounts are `./data`, `./config`, `./gallery` — relative to
-the compose file — so the data is visible, back-up-able and movable,
-and never hidden in Docker's volume store. Create the three dirs
-before first start and `chown 1000:1000` them (the in-container user;
-a dir docker creates on your behalf comes out root-owned and the
-service cannot write it).
+The repo is **not** cloned on the box (this box is a consumer, not a
+source; the compose comes from the repo's `main`, the image from CI).
+The three data dirs sit beside the compose on purpose: the owner sees
+and backs them up.
 
-Dev-box variant (how the accelerator is shaped): the clone stays at
-its canonical dev home (this box: `/home/p/code/iamskeole/kokon-ee`,
-where the repo and its tracker live) and the deploy dir
-(`/home/p/ml/frontends/kokon-ee/`) holds the compose + the three data
-dirs. Same shape; the clone just isn't nested.
-
-### compose.yaml
+### compose.yaml (the deployed shape)
 
 ```yaml
-# Kokon service on the stable box. All inference runs on the
-# accelerator through its gateway (:8081, keyed) — nothing in this
-# container touches a GPU, so there is no nvidia reservation.
-#
-#   docker compose up -d            # start / recreate
-#   docker compose logs -f kokon-ee # service log
-#
-# Ports: 39152 = web UI (password; all interfaces — put nginx in
-# front), 39151 = token API (127.0.0.1 only: the MCP on this box).
 services:
   kokon-ee:
-    image: ghcr.io/iamskeole/kokon-ee:external-engine-0.12.0-fe302e7
+    image: ghcr.io/iamskeole/kokon-ee:latest   # CI publishes on every push
     container_name: kokon-ee
     restart: unless-stopped
-    network_mode: host
+    # Plain container on the shared nginx bridge network - the same shape
+    # as open-webui: nginx talks to it by container name (docker handles
+    # that forwarding; no ufw rule needed). Nothing is published: the box
+    # is exposed to the internet, so nginx (via Cloudflare) is the only
+    # door; the service's own listeners are reachable only from the bridge.
+    networks:
+      - nginx
+    # The accelerator's name, pinned for the container: the image has no
+    # mDNS (the host resolves .local via avahi; containers cannot).
+    # Update here if apollo's LAN IP ever changes.
+    extra_hosts:
+      - "apollo.local:192.168.0.202"
     volumes:
       - ./data:/data
       - ./config:/config
       - ./gallery:/gallery
+
+networks:
+  nginx:
+    name: nginx_default   # the shared bridge, owned by the nginx project
+    external: true
 ```
 
-The container's entrypoint is `kokon-service --persistent --remote`:
-it stays up when idle and opens the browser door. `--set-password`
-(one-off, same command form) sets/changes the browser password
-without a restart; it is stored as an Argon2id hash in
-`data/remote-auth.json` (sessions: `data/remote-sessions.json`).
+**Why not `network_mode: host`** (the 11-23 finding): atlas's ufw is
+default-deny on INPUT. A host-networked service is reached by nginx
+through the bridge *gateway IP*, i.e. packets terminating on the host —
+ufw black-holes them (nginx 499/504, nothing logged on the service).
+The box's own idiom (open-webui, searxng, pihole) is the other way:
+containers on a shared bridge network, docker doing the forwarding,
+which ufw's FORWARD handling lets through — which is also why none of
+those services has a ufw rule. Nothing published means the internet
+front is the only front; the LAN cannot reach the service directly
+(decision: wanted, the box is internet-exposed).
 
-### config/config.json (seed)
+**Why `extra_hosts`**: the host resolves `apollo.local` through avahi
+(`mdns4_minimal` in nsswitch); containers cannot (Docker writes their
+`/etc/resolv.conf` without any mDNS path). The name stays in the config
+(self-heals against IP changes the way mDNS would); the pin is the one
+line that has to move if the accelerator's LAN IP ever changes.
 
-```json
-{
-  "schemaVersion": 16,
-  "servicePort": 39151,
-  "setupComplete": true,
-  "externalEngine": {
-    "gateway": "http://<accelerator-IP>:8081/upstream",
-    "apiKey": "<the box key — from the key file, never typed in chat>",
-    "model": "<the owner's default model id>",
-    "modelName": "<that model's gguf name>",
-    "sample": { "cfg": 1, "clear_sigmas": true, "sampler": "euler", "steps": 40 },
-    "vlm": {
-      "entrypoint": "http://<accelerator-IP>:8081/upstream/kokon-pup-flux-image-3-klein",
-      "model": "kokon-pup-flux-image-3-klein",
-      "apiKey": "<same key>"
-    },
-    "promptBundle": "pup-qwen"
-  },
-  "visionEngine": {
-    "gateway": "http://<accelerator-IP>:8081/upstream",
-    "apiKey": "<same key>",
-    "door": "kokon-vision"
-  }
-}
-```
+The container's default command is `kokon-service --persistent
+--remote`: it stays up when idle and opens the browser door (39152,
+password + session cookies). `--set-password` (one-off, same command
+form) sets the password without a restart; it is stored as an Argon2id
+hash in `data/remote-auth.json` (sessions: `data/remote-sessions.json`).
+The token API (39151) binds the container's loopback — with no
+published ports it is reachable only from inside the container.
 
-(Schema 14/15 files load as-is and save as 16. Schema 16 adds
-`visionEngine` — the lab's vision door: the same gateway base and key as
-`externalEngine`, named by its matrix model id; the accelerator's
-`kokon-vision` matrix member (fresh-box doc, §2/§3) serves the lab's two
-models, MobileSAM + BiRefNet-lite, on CPU — zero VRAM, a permanent
-co-tenant of every matrix set, so a lab click never disturbs the resident
-vLLM.)
+### config/config.json (how it was seeded)
 
-When migrating, copy the accelerator's current values verbatim
-(`model`, `modelName`, `sample`, `promptBundle`, `vlm`, `vlmVision`,
-`visionEngine`) and
-change only the
-two `127.0.0.1` addresses to the accelerator's IP. Model ids and
-gguf names as the accelerator's gateway knows them:
+Copied from the accelerator's current config (the source of truth for
+model ids, gguf names, samples, prompt bundles and the two vlm doors),
+with exactly two changes:
 
-| model id | modelName |
-|---|---|
-| kokon-qwen-image-2.1-turbo | qwen-image-2.1-turbo-Q4_K_M.gguf |
-| kokon-qwen-image-2.1-full | model-Q8_0.gguf |
-| kokon-flux-image-3-klein | model-Q8_0.gguf |
+- every `http://127.0.0.1:8081…` address → `http://apollo.local:8081…`
+  (the owner's decision: the name, not the IP — and `extra_hosts` makes
+  the name resolvable inside the container);
+- `multiUser: false` — the family box runs one shared password, no
+  named accounts.
 
-(For klein the `promptBundle` is `pup`, not `pup-qwen` — follow the
-accelerator's config, which is the source of truth.)
+The file on disk may carry an older `schemaVersion` (16 when seeded);
+the service migrates on load and re-saves in the current schema (18) on
+the first config change. The gateway key is the same 48-char key the
+accelerator's other clients carry (it lives mode-600 on both boxes; it
+never appears in this doc).
 
-### nginx (the load-bearing values)
+### nginx (the deployed block, `~/infra/nginx/conf.d/imagine.unveilx.com.conf`)
 
 ```nginx
-# /etc/nginx/conf.d/kokon-ee.conf  (or a location inside an existing vhost)
+# Kokon (imagine.unveilx.com) - the family photo editor; the one service on
+# the stable box. Mirrors chat.unveilx.com: Cloudflare in front, TLS here,
+# one backend behind.
 #
-# Three things make or break this proxy:
-#  1. /api/v1/events is a long-lived SSE stream — buffering must be OFF.
-#  2. job waits and the events stream stay open for minutes — the
-#     read/send timeouts must beat the service's own 600 s job timeout.
-#  3. edit references travel as base64 in JSON — nginx's default 1 MB
-#     body limit rejects real photos (413).
-server {
-    listen 443 ssl;              # or listen 80 if this LAN stays plain HTTP
-    server_name <ui-name>;
-    ssl_certificate     <cert>;  # self-signed is fine on a trusted LAN
-    ssl_certificate_key <key>;
+# The service is a plain container on this same bridge network, so the
+# proxy target is its container name - exactly the open-webui model
+# (docker forwards it; no ufw rule, nothing published on the host).
+# Port 39152 is the service's password door; this block is its only
+# front. That door is reverse-proxy aware: nginx is a peer on a private
+# range, so it is treated as a reverse proxy - it reads X-Forwarded-For
+# for rate limiting (lockouts key on the real client, not nginx) and
+# X-Forwarded-Proto for Secure cookies.
+#
+# Cloudflare is in front, so X-Forwarded-For must APPEND to any incoming
+# value, not replace it ($proxy_add_x_forwarded_for): a client behind its
+# own proxy keeps its real address at the head of the chain, and the door
+# takes the first entry.
 
-    client_max_body_size 64m;
-    proxy_http_version 1.1;
-    proxy_buffering off;          # SSE: stream straight through
-    proxy_read_timeout 660s;
-    proxy_send_timeout 660s;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $remote_addr;
-    proxy_set_header X-Forwarded-Proto $scheme;   # lets the session cookie carry Secure
+server {
+    listen 80;
+    server_name imagine.unveilx.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name imagine.unveilx.com;
+
+    # The *.unveilx.com wildcard cert, renewed by the certbot sidecar
+    # (dns-cloudflare, every 12h) - see this project's readme.
+    ssl_certificate     /etc/letsencrypt/live/unveilx.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/unveilx.com/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:39152;
+        proxy_pass http://kokon-ee:39152;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $http_connection;
+
+        # The door serves long-lived SSE job streams and image uploads.
+        proxy_buffering off;
+        client_max_body_size 64m;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 660s;
+        proxy_read_timeout 660s;
+        proxy_request_buffering off;
     }
 }
 ```
 
-The service trusts `X-Forwarded-For` / `X-Forwarded-Proto` **only from
-private peers** (nginx on the same box qualifies; a direct client's
-claims are ignored), so no trust hole is opened. Point nginx at the
-*remote* port (39152, the password door) — never at 39151 (the
-token door stays 127.0.0.1-only, for the MCP).
+The load-bearing values, and why:
 
-### Verification checklist
+- **`proxy_buffering off`** — `/api/v1/events` is a long-lived SSE
+  stream; buffered, progress appears only at job end.
+- **660 s read/send** — job waits outlive nginx's defaults (the service's
+  own job timeout is 600 s).
+- **64 m bodies** — edit references travel base64-in-JSON; the default
+  1 m rejects real photos with 413. (The box's 200 m OWUI value is a
+  habit for non-image attachments; photos need 64 m.)
+- **`X-Forwarded-For` APPENDS** (`$proxy_add_x_forwarded_for`, not
+  `$remote_addr`) — with Cloudflare in front, replacing would bury the
+  real client behind the CDN edge; the door takes the first entry.
+  Verified 11-23: the login log records the real client's WAN address,
+  and the session cookie carries `Secure` (from `X-Forwarded-Proto
+  https`). The door believes these headers **only from private peers**,
+  so a direct client's claims are still ignored — no trust hole.
+- **proxy target = the container name** — nginx resolves it at config
+  load; when the service container is recreated it gets a new bridge IP,
+  and nginx picks it up on its next reload (the box's 6-hour loop, or a
+  manual one). The open-webui block has the same property.
 
-1. `docker compose up -d` → container Up; log shows the "Open in a
-   browser" banner and no errors.
-2. `data/service.json` exists and holds the service token (the MCP's
-   credential) — note its location, don't print it.
-3. Door, from this box: `curl -o /dev/null -w '%{http_code}' -H
-   "Authorization: Bearer <key>" http://<accelerator-IP>:8081/upstream/no-such-model/sdcpp/v1/capabilities`
-   → **404** (key accepted, model unknown). Without the key → **401**.
-   (A 401 with the key means the key in the config is wrong.)
-4. The lab models: the service's `/api/v1/segment` and `/api/v1/matte`
-   report their rung — checked **from a signed-in browser** (a
-   named session or the password), not with the API token: the LAN
-   listener keeps an allowlist of what a browser may call, and a token
-   check would pass even where a browser call is refused (11-22:
-   the segment routes were missing from it, and the lab read
-   "could not be downloaded" on every real box). **Where each one
-   runs — a ladder the service walks per request (task-037 P3):**
-   first the **`kokon-vision` door** (`visionEngine.door`, answered
-   through the already-configured gateway — `door: true` in the
-   status; this box has no GPU, so the door — stock vision.cpp on the
-   accelerator, CPU, zero VRAM — is the standing path: a split box with
-   no model files at all runs the whole lab this way); then, if the door
-   is down, the **in-process ONNX copies on this box** (`installed:
-   true` — a migrated data dir carries them; a fresh start downloads
-   them on first use in the same session and keeps them); and if neither
-   is available, **a plain error** ("…engine is not answering (the
-   accelerator's door is down)"). **There is no in-browser rung**
-   (owner, 11-23, D-037-13): the browser is a thin client — it sends no
-   image bytes and never runs a model; any failure is this stack's, and
-   it is reported plainly. (The earlier split-box relay that briefly
-   lived in this tree is gone in total; the door is its successor, built
-   on stock vision.cpp instead of a second engine.)
-5. Upscalers (the split box, task-038): in Settings the upscaler list is
-   **the accelerator's engine's own report** — the models its
-   `--hires-upscalers-dir` holds (the ml home's `models/sd-cpp/upscalers/`,
-   pinned there) — with no Download button: this box keeps no copies and
-   has no write path to the engine box. An enlargement runs the engine's
-   model when it is pinned and falls back to Lanczos with a plain note
-   when it is not. To change the upscaler, pin the `.pth` file on the
-   **accelerator** (the fresh-box doc's model table names the folder);
-   nothing on this box is involved.
-6. The UI: open `https://<ui-name>` from **another device** on the
-   LAN → sign in with the password → the gallery loads.
-7. One real generated image (accelerator up): a short text-to-image
-   job completes and lands in `gallery/` with a dated folder. This
-   proves the whole path: browser → nginx → service → gateway over
-   the LAN → engine → back.
-8. While that job runs, the UI shows live progress (the SSE stream
-   through nginx — if progress only appears after the job finishes,
-   `proxy_buffering` is still on somewhere).
+### DNS / Cloudflare
 
-### Migrating the existing data (receiving side)
+`imagine.unveilx.com`: A → the router (84.232.239.80), **proxied**
+(orange cloud), ttl auto — the same pattern as every other record in the
+zone. Added 11-23 through the box's own token
+(`~/infra/nginx/secrets/cloudflare.ini`, single-line
+`dns_cloudflare_api_token`), zone `unveilx.com`
+(`c9014d7006ae387e8fcb64e3ce58724f`). The token is **IP-restricted to
+the box's IPv4** (the nginx project's readme records the IPv6 rejection,
+CF error 9109) — so all API calls from the box force IPv4 (`curl -4`).
+It lists zones and edits records; an earlier "zone-scoped, can't even
+list zones" reading was a failed token extraction plus IPv6 egress, not
+a permissions limit.
 
-The accelerator-side agent packs (with the service stopped there):
+### Verification checklist (all four states proven 11-23)
 
-```sh
-tar czf kokon-move/data.tar.gz   -C /var/lib/docker/volumes/kokon_kokon-data/_data   .
-tar czf kokon-move/config.tar.gz -C /var/lib/docker/volumes/kokon_kokon-config/_data .
-tar czf kokon-move/gallery.tar.gz -C /var/lib/docker/volumes/kokon_kokon-gallery/_data .
-```
-
-(`kokon_*` is the compose project prefix on that box.) Unpack into
-`<data>/{data,config,gallery}`, `chown -R 1000:1000`, start. The
-tarballs carry the gallery database, the config, the service token
-and the login password — after a successful migration the
-accelerator's volumes are the rollback: leave them in place until the
-owner is happy, then delete them.
-
-### The MCP
-
-If an agent session on this box uses the Kokon MCP: install it from
-the repo's `mcp/` directory (official TypeScript SDK, stdio); its
-credential is the service token from `data/service.json`. A client
-that runs elsewhere cannot use the MCP across boxes (the token port
-is loopback-only by design) — the MCP lives where the service lives.
+1. **From the internet** (any device outside the house):
+   `https://imagine.unveilx.com` → 200, the Kokon UI, in well under a
+   second. (A 526 here = the vhost is missing — the CDN reaches the
+   box's default cert; a 504/499 with fast local responses = the
+   proxy-to-service leg, check the firewall, see the compose note.)
+2. **Login** with the password → `{"signed_in":true}`, cookie
+   `kokon_session` with `Secure`. The service log then shows `browser
+   signed in from <the real client address>` — proof the XFF append
+   survives the CDN.
+3. **The lab, from a signed-in browser over the internet**:
+   `GET /api/v1/segment` and `GET /api/v1/matte` →
+   `{"door": true, "doorConfigured": true, "installed": false}`. That is
+   the split-box ladder's top rung: the models run 100% on the
+   accelerator through the `kokon-vision` door; this box holds no lab
+   bytes. (Check from a signed-in browser, not with the API token — the
+   listener keeps a browser allowlist, and a token check passes where a
+   browser call is refused; the 11-22 lesson.)
+4. **One real job, from the internet**: a text-to-image job through the
+   whole chain (CDN → nginx → service → gateway → engine → back)
+   completes and the image downloads from the gallery route; the file
+   sits in `gallery/<date>/` on the stable box. On 11-23: 58 s,
+   1024×1024, qwen-full. While it runs, the UI shows live progress (the
+   SSE through nginx — if it only appears at the end, buffering is on
+   somewhere).
+5. **The accelerator's resident models**: vLLM (and the `kokon-vision`
+   door) still up afterwards. The vision door is a permanent co-tenant
+   of every matrix set, so it even survives a vLLM request (11-23: it
+   did, while qwen was evicted — see the hazard below).
 
 ### Day-to-day
 
-- **Accelerator down** (OS/CUDA/driver work): the UI and logins keep
-  working here; job requests fail fast (~3 s) into the visible
-  "engine unreachable" state; when the accelerator is back, the next
-  job re-adopts the gateway. In-flight jobs during the outage are
-  lost — re-submitting works. First job after recovery pays one cold
-  model load (same as any 10-minute idle unload).
-- **Updating the service**: clone main, rebuild, change the tag in
-  the compose, `docker compose up -d`. The data dirs are untouched.
+- **Update the service**: `cd ~/infra/kokon && docker compose pull &&
+  docker compose up -d` (CI publishes `:latest` and `multiuser-<sha>` on
+  every push to main; the sha tag is the pin for a known-good build).
+  The data dirs are untouched. If you care about the new container IP
+  being live in nginx before the 6-hour reload, `docker exec nginx
+  nginx -s reload` after.
 - **Password change**: `docker exec -it kokon-ee kokon-service
   --set-password` — no restart; every browser signs in again.
-- **Two users today share one password and one gallery.** Per-user
-  accounts and galleries is tracker task-026 — it slots into exactly
-  this topology when it happens.
+- **Accelerator down** (OS/CUDA/driver work): the UI and logins keep
+  working; job requests fail fast into the visible "engine
+  unreachable" state; when the accelerator is back, the next job
+  re-adopts the gateway. In-flight jobs during the outage are lost
+  (re-submitting works); the first job after recovery pays one cold
+  model load.
+- **Roll back / remove**: `docker compose down` in `~/infra/kokon`,
+  delete the folder and the vhost (optionally the DNS record). The box
+  started from zero, so there is nothing else to unwind.
+- **The watermark**: a fresh box has no watermark model yet, so its
+  early images carry a plain note in the record ("the invisible
+  watermark could not be added… the file's metadata still marks it as
+  made with AI"). The job succeeds; the model installs on first real
+  use like any lab model.
+- **An operational hazard (11-23, observed):** any client that talks to
+  **vLLM through the gateway** (the box's agent runtimes, Open WebUI)
+  makes the matrix evict a running image job mid-job — the sets are
+  exclusive, and the job then fails with the honest "the engine stopped
+  answering mid-job" (the next job retries the load). During a long
+  generation, keep agent sessions on the accelerator's direct vLLM port
+  (qwen-direct), per the autonomy protocol — never through the
+  gateway.
+- **MCP (optional, later)**: the token API now lives on the container's
+  own loopback, so an MCP for this service must run *inside* the
+  container's network (a sidecar that joins it, or a tool run via
+  `docker exec`). It was not installed on atlas — the family uses the
+  browser, and the dev box keeps its own MCP.
 
-### Dev on the accelerator, prod on this box — the workflow
+### Dev on the accelerator, prod on the stable box — the workflow
 
-- **Code flows one way only:** dev box (the accelerator, where the
-  repo lives) → the project on GitHub → this box (`git pull` + rebuild +
-  recreate). This box is a **consumer** of the project, never a source:
-  nobody edits code here, and you never pull code from here. If a
-  change is needed, it is committed from the dev box (or any machine
-  that pushes to the project) and lands here on the next update.
-- **Data lives here, and stays here.** The gallery, config and token
-  in the data dirs beside the compose file are the family's actual
-  state; they are written by this service in normal use. They do not
-  "sync back" — a copy of the images to the dev box, when wanted
-  (backup, analysis), is an explicit directory copy, and the dev box's
-  own service data (its test images) is disposable.
-- **A live dev instance can run alongside prod.** The gateway is a
-  shared, multi-client door by design (it already serves Open WebUI,
-  phones and this UI at once), so a service running on the dev box
-  talks to the same `:8081` with the same key, using its own data
-  dirs and config. A dev generation while the family is using prod
-  plays the ordinary eviction dance — no new failure mode. The dev
-  instance is disposable: spin it up to try a build, throw its data
-  away when done.
-- **Real-model validation happens on the dev box**, where the engines
-  are (the GPU windows per the autonomy protocol). What gets deployed
-  here is a commit that already ran against the real models — this
-  box never experiments with a model it hasn't been proven on.
+- **Code flows one way only:** dev box (the accelerator, where the repo
+  lives) → the project on GitHub → the stable box (`compose pull` +
+  recreate). The stable box is a **consumer** of the project, never a
+  source.
+- **Data lives on the stable box, and stays there.** The gallery,
+  config and token beside the compose are the family's actual state.
+  Copies to the dev box, when wanted (backup, analysis), are explicit
+  directory copies; the dev box's own service data is disposable (the
+  owner's 11-23 ruling: fungible).
+- **A live dev instance runs alongside** (it does, on the accelerator):
+  the gateway is a shared, multi-client door by design. A dev
+  generation while the family is using prod plays the ordinary eviction
+  dance — no new failure mode.
+- **Real-model validation happens on the dev box** (the GPU windows per
+  the autonomy protocol). What gets deployed is a commit that already
+  ran against the real models.

@@ -228,5 +228,126 @@ optional, later.
 
 ## blockers
 
-None technical. The DNS record needs the owner's CF dashboard (or the
-zone id); everything else is executable from apollo via ssh.
+None — all cleared during execution (see below).
+
+## Status (DONE, 2026-11-23 night) — atlas is live at https://imagine.unveilx.com
+
+**Owner rulings on the open items:** (a) `apollo.local` in the config
+(the name, not the IP — with a container-side pin, D-027-8); (b) 64 m
+(200 m was the OWUI's habit for non-image attachments); (c) the agent
+should dig into the box's CF token — the dig paid off: the token in
+`~/infra/nginx/secrets/cloudflare.ini` works fine from the box (lists
+zones, edits records); the earlier "zone-scoped, can't list" reading was
+a failed extraction plus IPv6 egress (the token is IP-restricted to the
+box's IPv4 — the nginx readme's own gotcha), so the record was added via
+API from atlas; (d) **reversed by the owner**: the LAN door does *not*
+stay directly reachable — the nginx front is the only door, which is
+what keeps the internet-exposed box more secure; (e) MCP: later.
+
+**What was executed (all from apollo over ssh, plus the DNS via atlas's
+own token):**
+
+- `~/infra/kokon/` on atlas: the repo's compose (fetched from `main`),
+  `data/ config/ gallery/` (uid 1000), `.ui-password` (600), the CI
+  image `:latest` pulled anonymously. The config is a copy of the
+  accelerator's with all nine gateway addresses remapped to
+  `apollo.local:8081` and `multiUser: false` (the family's shared
+  password; no named accounts). Fresh start, per D-027-2.
+- The service joined the box's shared `nginx_default` bridge network
+  (the open-webui idiom) with **no published ports**; nginx proxies to
+  the container name. The first attempt was `network_mode: host` with a
+  `127.0.0.1:39152` proxy target — wrong twice over: the nginx
+  container's loopback is not the host's, and behind atlas's
+  default-deny ufw the bridge→host leg is black-holed (526, then 504/
+  499 with fast local responses; no ufw rule exists and none was added —
+  OWUI has none for the same reason: its traffic is FORWARD, handled by
+  docker, not INPUT). The bridge shape needed zero firewall changes.
+- `~/infra/nginx/conf.d/imagine.unveilx.com.conf`: the chat.unveilx.com
+  model with the two corrections that mattered — the wildcard cert (the
+  11-12 draft's self-signed is void) and **`X-Forwarded-For` as an
+  append** (`$proxy_add_x_forwarded_for`, Cloudflare is in front).
+- DNS: `imagine.unveilx.com` A → 84.232.239.80, proxied, via the box's
+  token (zone `unveilx.com`, id `c9014d7006ae387e8fcb64e3ce58724f`,
+  IPv4-forced egress).
+- **The final test, from the outside world (apollo = a device outside
+  the house, out over the internet and back through CF):** the UI 200
+  in ~150 ms (three in a row); login → `{"signed_in":true}` with a
+  `Secure` cookie, and the service log records `browser signed in from
+  84.232.239.80` (the real client address — the XFF append survives the
+  CDN); a full text-to-image job (job_0ff51e55d902, 58 s, 1024×1024,
+  qwen-full Q8_0) through CDN → nginx → service → gateway → engine,
+  image fetched through the gallery route, file in atlas's
+  `gallery/2026-11-23/`. The lab over the internet: both models
+  `door:true, doorConfigured:true, installed:false` — 100% apollo-side,
+  zero bytes on atlas. vLLM resident before and after.
+- **The one mid-window scare (operational, not a product defect):** the
+  first job died with "the engine stopped answering mid-job" — the
+  gateway journal showed it: `matrix: model=qwen3.8-27b set=vllm
+  evict=[kokon-qwen-image-2.1-full]`, triggered by **this agent's own
+  runtime**, which talks to vLLM through the gateway. The service
+  reported the failure honestly ("the next job retries the load") and
+  the retry succeeded; the `& kv` vision door survived the same vLLM
+  request, as designed. Lesson recorded as D-027-10 and in the doc.
+- `docs/service-on-prod-box.md` rewritten to the executed reality
+  (D-027-7); the ml repo carries the atlas deployment record.
+
+## decisions
+
+- **D-027-1 (owner):** the box names — **atlas** = the stable box,
+  **apollo** = the accelerator (this box). The 11-11 "unknown prod box"
+  is resolved; ssh is `p@atlas.local` (the first attempt at
+  `p@apollo.local` failed for the obvious reason).
+- **D-027-2 (owner, restated):** atlas starts from zero; no data
+  migration (the dev box's contents are fungible — the 11-12
+  pack/ship/restore plan is void).
+- **D-027-3 (owner, reversed the assumption):** no LAN door on the
+  internet-exposed box. nginx (via Cloudflare) is the only front; the
+  service publishes no ports. More secure than the remote door's
+  "directly reachable" design, and sufficient: the family uses the
+  browser.
+- **D-027-4 (owner):** the config names the accelerator
+  `apollo.local` (mDNS, self-healing) rather than the IP — with
+  D-027-8 making the name resolvable inside the container.
+- **D-027-5 (owner):** `client_max_body_size` 64 m on the vhost (the
+  200 m is the OWUI's habit for non-image attachments; photos need 64).
+- **D-027-6 (owner):** the CF DNS record is added with the box's own
+  stored token, not the dashboard — the dig confirmed the token has
+  zone edit rights from the box's IPv4 (the 11-23 morning
+  "zone-scoped" reading was a red herring: empty extraction + IPv6
+  egress, the readme's documented 9109 gotcha).
+- **D-027-7:** the handover doc is rewritten to the executed reality
+  (pull not build; `multiuser-<sha>`/`latest` tags; schema 18; wildcard
+  cert; CF-aware XFF append; container-name proxy target; no migration;
+  the update flow is `compose pull && up -d`).
+- **D-027-8:** containers on this network cannot resolve `.local`
+  (the host uses avahi via `mdns4_minimal`; Docker-written
+  `resolv.conf` has no mDNS path). The compose pins
+  `apollo.local:192.168.0.202` in `extra_hosts` (verified working with
+  host- and bridge-networking). The config keeps the name; the pin is
+  the one line that moves if the accelerator's IP ever changes.
+- **D-027-9:** behind a CDN, the vhost must **append** to
+  `X-Forwarded-For` (`$proxy_add_x_forwarded_for`), never replace it —
+  the door takes the first entry for the per-IP limiter, and the
+  replacement variant would key lockouts on the CDN edge. Proven live:
+  the login log shows the real client's WAN address and the cookie
+  carries `Secure`.
+- **D-027-10 (operational, observed 11-23):** any client that hits
+  **vLLM through the gateway** (agent runtimes, OWUI) evicts a running
+  image job mid-job (exclusive sets; journal: `matrix …
+  evict=[kokon-qwen-image-2.1-full]`). The job fails honestly and the
+  next one retries the load; the `& kv` vision door survives either way.
+  During long generations, agent sessions stay on the direct vLLM port
+  (qwen-direct), per the autonomy protocol — never through the gateway.
+- **D-027-11 (operational, minor):** this repo carries both `origin`
+  (iamskeole/kokon-ee) and `upstream` (GabrieleLozupone/kokon); bare
+  `gh` in this checkout can resolve to the **upstream** repo (it did on
+  11-23 — the "run list" was upstream's runs). Always use
+  `gh … -R iamskeole/kokon-ee` here.
+- **D-027-12 (observed, minor):** a fresh box has no watermark model,
+  so early jobs carry a plain note in their record ("the invisible AI
+  watermark could not be added… the file's metadata still marks it as
+  made with AI"). The job succeeds; the model installs on first real
+  use. Not a chain defect.
+- **D-027-13:** the acceptance test is *from the outside world* (the
+  11-12 plan said "another device on the LAN"); the 11-23 execution
+  used apollo as the outside client, over the CDN, and passed.
