@@ -118,6 +118,21 @@ export const editing = (c: Pick<Composer, "create" | "refs">): boolean => !c.cre
 /** LoRAs one image can use at once (`lora::MAX_ACTIVE`). */
 export const MAX_LORAS = 3;
 
+/** The most reference images the active model accepts: the service plans with the profile's
+ * `recommendedSettings.max_references` (default 10, the makers' card max). The UI reads the
+ * same number from the config, so the composer stops at it and a changed cap never surprises.
+ * A missing or broken value falls back to the default. */
+export const DEFAULT_MAX_REFS = 10;
+export function maxRefs(cfg: {
+  activeProfile?: string;
+  profiles?: { id: string; recommendedSettings?: Record<string, unknown> }[];
+} | null | undefined): number {
+  const profiles = cfg?.profiles ?? [];
+  const p = profiles.find((x) => x.id === cfg?.activeProfile) ?? profiles[0];
+  const n = Number(p?.recommendedSettings?.max_references);
+  return Number.isInteger(n) && n >= 1 ? n : DEFAULT_MAX_REFS;
+}
+
 /** The LoRAs a request from this composer uses: the project's choice, else the ones on by
  * default; only loaded ones whose copy is there, at most `MAX_LORAS`. */
 export function activeLoras(c: Pick<Composer, "loras">, all: LoraItem[]): string[] {

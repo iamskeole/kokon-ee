@@ -21,7 +21,7 @@ import { PromptTips } from "./components/PromptTips";
 import { Shortcuts } from "./components/Shortcuts";
 import { AiCheck } from "./components/AiCheck";
 import { WHATS_NEW_VERSION, WhatsNew } from "./components/WhatsNew";
-import { whatsNewDue } from "./lib/logic";
+import { maxRefs, whatsNewDue } from "./lib/logic";
 import { UpscalerCompare } from "./components/Upscalers";
 import { KokonMark, Welcome } from "./components/Welcome";
 import { PhoneApp } from "./components/PhoneApp";
@@ -166,7 +166,7 @@ export default function App() {
         setState(!welcomeSeen ? { overlay: "welcome" } : whatsNew ? { overlay: "whats-new" } : {});
         setBoot("ok");
         // An externally managed engine: visiting the UI must not put a model on the GPU.
-        if (cfg.externalEngine) setState({ external: cfg.externalEngine, models: cfg.models ?? [] });
+        if (cfg.externalEngine) setState({ external: cfg.externalEngine, models: cfg.models ?? [], maxRefs: maxRefs(cfg) });
       } catch (e) {
         setBoot(String(e));
       }

@@ -1305,6 +1305,21 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
 #[cfg(test)]
 mod tests {
     #[test]
+    fn reference_cap() {
+        let r = GenerationRequest { prompt: "combine them".into(), ..Default::default() };
+        let eleven = PlanInputs { image_sizes: vec![Size::new(1024, 1024); 11], ..Default::default() };
+        let err = plan(&r, &eleven, &RecommendedSettings::default()).unwrap_err();
+        assert_eq!(err.message, "Use at most 10 reference images.");
+        let ten = PlanInputs { image_sizes: vec![Size::new(1024, 1024); 10], ..Default::default() };
+        let p = plan(&r, &ten, &RecommendedSettings::default()).unwrap();
+        assert_eq!(p.references.len(), 10);
+        // A profile with a tighter cap is honoured the same way.
+        let rec = RecommendedSettings { max_references: 3, ..RecommendedSettings::default() };
+        let four = PlanInputs { image_sizes: vec![Size::new(1024, 1024); 4], ..Default::default() };
+        assert_eq!(plan(&r, &four, &rec).unwrap_err().message, "Use at most 3 reference images.");
+    }
+
+    #[test]
     fn estimates_follow_the_measured_speed() {
         let r = GenerationRequest { prompt: "a lighthouse at dusk".into(), ..Default::default() };
         let base = PlanInputs { vram_total_mib: Some(16303), ..Default::default() };

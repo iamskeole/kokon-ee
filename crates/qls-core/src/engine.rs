@@ -718,6 +718,12 @@ impl Engine {
         if upscale && request.images.is_empty() {
             return Err(AppError::invalid("Choose an image to upscale."));
         }
+        // The profile's reference cap (the model's card): reject at submit, before the job is
+        // queued; the planner re-checks at job start (it also sees the mask and outpaint).
+        let max_refs = self.config().profile().recommended_settings.max_references as usize;
+        if request.images.len() > max_refs {
+            return Err(AppError::invalid(format!("Use at most {max_refs} reference images.")));
+        }
         if request.images.len() > 16 {
             return Err(AppError::invalid("Too many images."));
         }
@@ -2693,6 +2699,14 @@ mod tests {
         let e = Engine::new(cfg, dir.path()).unwrap();
         // An empty prompt is refused before queueing.
         assert!(e.submit(GenerationRequest { prompt: " ".into(), ..Default::default() }, None).is_err());
+        // More references than the profile's cap are refused before queueing (the card's max).
+        let too_many = GenerationRequest {
+            prompt: "combine them".into(),
+            images: (0..11).map(|i| format!("gen:{i}")).collect(),
+            ..Default::default()
+        };
+        let err = e.submit(too_many, None).unwrap_err();
+        assert_eq!(err.message, "Use at most 10 reference images.");
         // Remove needs no prompt; other inpaint actions do.
         let remove = GenerationRequest { images: vec!["gen:x".into()], mask: Some("input:m".into()), inpaint_action: planner::InpaintAction::Remove, ..Default::default() };
         assert!(e.submit(GenerationRequest { inpaint_action: planner::InpaintAction::Replace, ..remove.clone() }, None).is_err());

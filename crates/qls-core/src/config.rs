@@ -172,6 +172,9 @@ pub struct RecommendedSettings {
     pub area_quality: u64,
     pub align: u32,
     pub max_side: u32,
+    /// The most reference images a job for this profile may carry: the model's card
+    /// (the makers' max — 10 for the current models). Enforced at job submit and in the
+    /// planner; the UI reads the same number, so the composer stops at it.
     pub max_references: u32,
 }
 
@@ -1370,6 +1373,14 @@ impl AppConfig {
                 format!("Prompt enhancer instructions can be at most {max} characters."),
             ));
         }
+        for p in &self.profiles {
+            if p.recommended_settings.max_references < 1 {
+                return Err(AppError::new(
+                    ErrorCode::InvalidConfig,
+                    "A profile's max references must be at least 1.",
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -2479,6 +2490,10 @@ mod tests {
         let mut c = AppConfig::default();
         c.device = "cuda0; rm".into();
         assert!(c.validate().is_err());
+        let mut c = AppConfig::default();
+        assert!(c.validate().is_ok());
+        c.profiles[0].recommended_settings.max_references = 0;
+        assert!(c.validate().is_err(), "a zero reference cap would reject every edit");
     }
 
     /// A 0.10.2 config file (no network fields) loads with access from other devices off.

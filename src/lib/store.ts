@@ -9,7 +9,7 @@ import { isNarrow } from "./platform";
 import { useSyncExternalStore } from "react";
 import { markFresh } from "../components/Cocoon";
 import { api, ApiError, setPrivateInputs, subscribe, urls } from "./api";
-import { activeLoras, buildRequest, composing, emptyComposer, goneVersions, isGenericName, needsPrompt, newKey, pageOutdated, persistentAdvanced, refFromGen, refFromInput, reviewRequest, stageFitsPreview, starPromptDue, timelineLinks, undoTarget, versionLabels, wantsPromptReview, type CompareMode, type Composer, type Ref } from "./logic";
+import { activeLoras, buildRequest, composing, DEFAULT_MAX_REFS, emptyComposer, goneVersions, isGenericName, needsPrompt, newKey, pageOutdated, persistentAdvanced, refFromGen, refFromInput, reviewRequest, stageFitsPreview, starPromptDue, timelineLinks, undoTarget, versionLabels, wantsPromptReview, type CompareMode, type Composer, type Ref } from "./logic";
 import { keepLabsIn, labsChanged, labSources, loadLab, type LabStore } from "./layerDoc";
 import type { AppErrorBody, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InputRecord, JobView, LoraItem, ServerState, StatusResponse } from "./types";
 
@@ -52,6 +52,8 @@ export interface State {
   external: ExternalEngine | null;
   /** Selectable models of the external engine (config); empty = no model picker. */
   models: ExternalModel[];
+  /** The active model's reference cap (config `recommendedSettings.max_references`, default 10). */
+  maxRefs: number;
   status: StatusResponse | null;
   /** Versions of the open project, in order. */
   session: SessionItem[];
@@ -450,6 +452,7 @@ let state: State = {
   server: { state: "stopped", owned: false, error: null, model: null },
   external: null,
   models: [],
+  maxRefs: DEFAULT_MAX_REFS,
   status: null,
   session: [],
   selected: null,
@@ -1178,16 +1181,16 @@ export function addInputs(records: InputRecord[]) {
     const added = records.map(refFromInput);
     if (s.session.length) {
       const create = s.composer.refs.length ? s.composer.create : true;
-      return { composer: { ...s.composer, refs: [...s.composer.refs, ...added].slice(0, 10), create, outpaint: null } };
+      return { composer: { ...s.composer, refs: [...s.composer.refs, ...added].slice(0, s.maxRefs), create, outpaint: null } };
     }
     const items: SessionItem[] = records.map((r) => ({ key: newKey(), kind: "input", input: r }));
     return {
-      composer: { ...s.composer, refs: [...s.composer.refs, ...added].slice(0, 10), mask: null, outpaint: null, aspect: "auto" },
+      composer: { ...s.composer, refs: [...s.composer.refs, ...added].slice(0, s.maxRefs), mask: null, outpaint: null, aspect: "auto" },
       session: [...s.session, ...items],
       selected: items[0].key,
     };
   });
-  if (getState().composer.refs.length >= 10) toastInfo("Up to 10 reference images are supported.");
+  if (getState().composer.refs.length >= getState().maxRefs) toastInfo(`Up to ${getState().maxRefs} reference images are supported.`);
 }
 
 /** Images made in the app (the layers lab's split): new versions at the end of the project, not
@@ -1301,11 +1304,11 @@ export function addAsReference(item: SessionItem) {
     toastInfo("That image is already in the prompt.");
     return;
   }
-  if (getState().composer.refs.length >= 10) {
-    toastInfo("Up to 10 reference images are supported.");
+  if (getState().composer.refs.length >= getState().maxRefs) {
+    toastInfo(`Up to ${getState().maxRefs} reference images are supported.`);
     return;
   }
-  setState((s) => ({ composer: { ...s.composer, refs: [...s.composer.refs, ref].slice(0, 10), create: s.composer.refs.length ? s.composer.create : true, outpaint: null } }));
+  setState((s) => ({ composer: { ...s.composer, refs: [...s.composer.refs, ref].slice(0, s.maxRefs), create: s.composer.refs.length ? s.composer.create : true, outpaint: null } }));
 }
 
 export function focusPrompt(cursorToEnd = false) {

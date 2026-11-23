@@ -9,7 +9,7 @@ import {
   planPipeline, remainingSeconds, sizeForWidth, timeAgo, upscaleRequest, upscaleTargets, versionLabels, type JobClock, type Ref,
   neighbourAfterRemoval, pageOutdated, previewIndex, starPromptDue, STAR_PROMPT_AFTER, formatBytes, formatDuration, installProgress, timelineLinks, undoTarget, aspectLabel, parseRatio, sizeForRatio, sizeForLongSide, expandToRatio, expandToSize, arcLayout,
   goneVersions, moreLikeThisRequest, MORE_LIKE_THIS, PREVIEW_SIDE, stageFitsPreview, viewerWantsFull,
-  modelRequest, entryForModel, entryForGeneration, boxRows, movedBox, appendBoxTable, splitBoxTable, modelSupportsBoxes, modelSupportsInpaint, type BoxRow,
+  modelRequest, entryForModel, entryForGeneration, maxRefs, boxRows, movedBox, appendBoxTable, splitBoxTable, modelSupportsBoxes, modelSupportsInpaint, type BoxRow,
 } from "./logic";
 import type { GenerationRecord, InstallItem, JobView, LoraItem, Plan } from "./types";
 
@@ -834,6 +834,31 @@ describe("entryForGeneration", () => {
 
   it("lets a known tenant win over a different reported name", () => {
     expect(entryForGeneration(models, { external_model: "kokon-full", model: "m-turbo.gguf" })?.label).toBe("Full");
+  });
+});
+
+describe("maxRefs", () => {
+  const profile = (id: string, max?: unknown) => ({
+    id,
+    recommendedSettings: max === undefined ? {} : { max_references: max },
+  });
+  it("defaults to 10 when the config is absent or carries no value", () => {
+    expect(maxRefs(null)).toBe(10);
+    expect(maxRefs({})).toBe(10);
+    expect(maxRefs({ activeProfile: "a", profiles: [profile("a")] })).toBe(10);
+  });
+  it("reads the active profile's value", () => {
+    const cfg = { activeProfile: "b", profiles: [profile("a", 4), profile("b", 7)] };
+    expect(maxRefs(cfg)).toBe(7);
+    expect(maxRefs({ ...cfg, activeProfile: "a" })).toBe(4);
+    // A profile the picker does not know falls back to the first one.
+    expect(maxRefs({ ...cfg, activeProfile: "gone" })).toBe(4);
+  });
+  it("a missing or broken value falls back to the default", () => {
+    expect(maxRefs({ profiles: [profile("a", 0)] })).toBe(10);
+    expect(maxRefs({ profiles: [profile("a", -3)] })).toBe(10);
+    expect(maxRefs({ profiles: [profile("a", "10")] })).toBe(10); // not an integer in the wire shape
+    expect(maxRefs({ profiles: [profile("a", 3.5)] })).toBe(10);
   });
 });
 

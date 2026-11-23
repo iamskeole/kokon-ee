@@ -67,7 +67,9 @@ Simple-operation fields: `prompt`, `image` / `images[]`, `mask`, `action`
 `left/right/top/bottom` + `units` (`pixels|percent`) for outpainting, `scale` for upscaling.
 `/generate` with `images[]` makes a new image that uses them as references (people, products,
 a style), sized like any new image; `/edit` with several images edits image 1 with the
-others. Full requests (`/jobs`) also accept `"mode": "upscale"` with
+others. The count is capped by the active model's profile (`recommendedSettings.max_references`,
+default 10 — the makers' card max): a job over the cap is a 400 (`Use at most N reference
+images.`) at submit, and the browser stops adding references at the same number. Full requests (`/jobs`) also accept `"mode": "upscale"` with
 `"upscale": {"scale" | "width"/"height"}`, `"mode": "compose"` (the references case of
 `/generate`), and with `"enhance": true` (Prompt+) `"enhance_only": true`: the job only
 writes the prompt (`enhanced_prompt` in the job, no image), so it can be read and changed;
