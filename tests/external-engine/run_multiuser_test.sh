@@ -42,6 +42,17 @@ EOF
 
 python3 "$D/mock_gateway.py" $GW 0.5 "$D/requests.log" > "$D/gateway.log" 2>&1 &
 GWPID=$!
+# The box's list is still in its file (a previous image's world): the boot must import
+# it into the database once (task-032) and keep the file a read-only export.
+cat > "$D/data/projects.json" <<'EOF'
+{
+  "projects": {
+    "p-imported": {"meta":{"id":"p-imported","title":"Imported","updatedAt":5,"cover":"gen:gseed","count":1},
+                   "items":[{"key":"k1","kind":"gen","genId":"gseed"}],"selected":"k1","rev":3}
+  },
+  "deleted": {"p-gone": 7}
+}
+EOF
 QLS_DATA_DIR=$D/data QLS_CONFIG_DIR=$D/config "$BIN" --port $PORT --persistent > "$D/service.log" 2>&1 &
 SPID=$!
 trap 'kill $GWPID $SPID 2>/dev/null' EXIT
@@ -135,6 +146,30 @@ check "operator's ?user=alice" 2 "$(curl -s -b "$JAR_O" "$S/gallery?user=alice" 
 check "operator's ?user=bob" 2 "$(curl -s -b "$JAR_O" "$S/gallery?user=bob" | python3 -c "import json,sys;print(len(json.load(sys.stdin)['items']))")"
 check "operator's ?user=me (no owner rows left)" 0 "$(curl -s -b "$JAR_O" "$S/gallery?user=me" | python3 -c "import json,sys;print(len(json.load(sys.stdin)['items']))")"
 check "named account managing accounts: 403" "403" "$(jc -b "$JAR_A" $S/users)"
+
+echo "=== 6.5 the project list imports from its file into the database (task-032) ==="
+check "the seeded project is in the list after the boot" "Imported/3" \
+  "$(curl -s -H "$H" $S/projects | python3 -c "import json,sys;p=[x for x in json.load(sys.stdin)['projects'] if x['meta']['id']=='p-imported'];print(p[0]['meta']['title']+'/'+str(p[0]['rev']) if p else 'missing')")"
+check "the import kept a pre-import snapshot (the rollback)" "yes" \
+  "$( [ -f "$D/data/projects.json.pre-db" ] && echo yes || echo no )"
+check "the file is now the read-only export (it still names the project)" "yes" \
+  "$(grep -q '"p-imported"' "$D/data/projects.json" && echo yes || echo no)"
+check "the tombstone survived the import in the export" "yes" \
+  "$(python3 -c "import json;print('yes' if 'p-gone' in json.load(open('$D/data/projects.json'))['deleted'] else 'no')")"
+# An edit through the API lands in the database and the export follows it.
+curl -s -H "$H" -H "$CS" -H 'Content-Type: application/json' -X PUT $S/projects/p-imported \
+  -d '{"project":{"meta":{"id":"p-imported","title":"Imported","updatedAt":6,"cover":"gen:gseed","count":2},"items":[{"key":"k1","kind":"gen","genId":"gseed"},{"key":"k2","kind":"gen","genId":"gseed2"}],"selected":"k2","rev":4},"known":["k1"]}' > /dev/null
+check "the edit is in the database (the list)" "k1,k2" \
+  "$(curl -s -H "$H" $S/projects/p-imported | python3 -c "import json,sys;print(','.join(i['key'] for i in json.load(sys.stdin)['items']))")"
+check "the export followed the edit" "yes" \
+  "$(grep -q 'k2' "$D/data/projects.json" && echo yes || echo no)"
+# The file the previous image reads: the pre-multi-user shape (no owner key yet, single-user world).
+check "the export has not gained the owner key in a single-user world" "no" \
+  "$(grep -q '"owner"' "$D/data/projects.json" && echo yes || echo no)"
+# The proof's project goes (a tombstone; the list counts of the next sections start clean).
+curl -s -H "$H" -H "$CS" -X DELETE $S/projects/p-imported > /dev/null
+check "the proof project is gone from the list (tombstoned)" "0" \
+  "$(curl -s -H "$H" $S/projects | python3 -c "import json,sys;print(sum(1 for x in json.load(sys.stdin)['projects'] if x['meta']['id']=='p-imported'))")"
 
 echo "=== 7. projects are per user (D-MU13) ==="
 # One shared project (the machine's list) and one per account; the items reference the
