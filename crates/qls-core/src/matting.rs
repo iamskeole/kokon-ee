@@ -3,7 +3,9 @@
 //! sticker with the user's selection (`src/lib/matte.ts`: the selection decides what, the matte the
 //! edge). Spike s17 (2026-11-02): cleaner edges than SAM, deterministic, ~4 s per object on a
 //! 16-thread CPU, no VRAM taken from the image engine. The webview could not run it (WebGPU kernels
-//! rejected, WASM out of memory), hence here. Also the MobileSAM files the lab's Select uses.
+//! rejected, WASM out of memory), hence here — on a split box it runs on the accelerator's stock
+//! door instead (the engine's ladder, task-037 P3), this in-process path being the box's own. Also
+//! the MobileSAM files the lab's Select runs in-process.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,9 +36,8 @@ pub const BIREFNET_LITE: Download = Download {
 };
 
 /// Click-to-select in the layers lab: MobileSAM (Apache-2.0) in Acly's ONNX export (MIT), pinned.
-/// It runs in the webview (src/lib/sam.ts, onnxruntime-web); kokon-service downloads the two files
-/// the first time the lab is opened and serves them to it (`/segment/models/<file>`), since 0.12
-/// (before: the dev server only, so a release had no Select).
+/// It runs in-process here (the single-box path of the ladder, task-037 P3); the browser never
+/// runs it — it asks, and the box runs it where the ladder says (its door, or these files).
 pub const MOBILE_SAM: [Download; 2] = [
     Download {
         id: "mobile_sam_encoder",
@@ -88,6 +89,11 @@ pub fn model_path(sdcpp_dir: &Path) -> PathBuf {
 /// Loaded once and kept (~0.5 GB of RAM while the lab is used): loading takes ~4 s. The
 /// environment is kept with it (sessions need it alive).
 static SESSION: Mutex<Option<(PathBuf, ort::environment::Environment, Session)>> = Mutex::new(None);
+
+/// BiRefNet lite installed here (the single-box path of the matte ladder)?
+pub fn birefnet_installed(sdcpp_dir: &Path) -> bool {
+    model_path(sdcpp_dir).is_file()
+}
 
 fn ort_err(e: impl std::fmt::Display) -> AppError {
     AppError::new(ErrorCode::Internal, format!("The sticker model failed: {e}"))
