@@ -58,7 +58,7 @@ impl IntoResponse for ApiError {
 
 type ApiResult<T> = Result<T, ApiError>;
 
-const ALLOWED_ORIGINS: &[&str] = &["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost", "http://localhost:1420"];
+const ALLOWED_ORIGINS: &[&str] = &["http://localhost:1420"];
 
 /// The API and the UI. `lan`: the network listener, where the token is refused.
 pub fn router(state: Arc<AppState>, lan: bool) -> Router {
