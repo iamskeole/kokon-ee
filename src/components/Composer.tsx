@@ -769,6 +769,7 @@ export function Composer() {
                       selected={m.model === external.model}
                       label={m.label}
                       sub={m.sub}
+                      stacked
                       onClick={() => {
                         if (m.model === external.model) return close();
                         if (server.state === "starting") return toastError(new Error("A model switch is already in progress"));

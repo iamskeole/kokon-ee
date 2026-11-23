@@ -96,12 +96,17 @@ export function Popover(props: {
   );
 }
 
-export function Option(props: { selected?: boolean; onClick: () => void; icon?: ReactNode; label: string; sub?: string }) {
+/** One row of a menu: a check (or icon) in its own column, the label, and an optional sub.
+ * `stacked` puts the sub on its own line under the label (long, sentence-like subs);
+ * the default keeps it on the right of one line (short subs). */
+export function Option(props: { selected?: boolean; onClick: () => void; icon?: ReactNode; label: string; sub?: string; stacked?: boolean }) {
   return (
-    <button className="opt" onClick={props.onClick} role="menuitemradio" aria-checked={!!props.selected}>
+    <button className={`opt${props.stacked ? " stacked" : ""}`} onClick={props.onClick} role="menuitemradio" aria-checked={!!props.selected}>
       <span className="check">{props.selected ? <Check size={15} /> : props.icon}</span>
-      <span>{props.label}</span>
-      {props.sub && <span className="sub">{props.sub}</span>}
+      <span className="body">
+        <span>{props.label}</span>
+        {props.sub && <span className="sub">{props.sub}</span>}
+      </span>
     </button>
   );
 }
