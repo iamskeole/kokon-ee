@@ -101,22 +101,76 @@ the MCP**, all pointing at a gateway of stock engines.
   the unbundling was meant to shed. The "no docker, window next to the
   service" mode is covered by running the service binary directly
   (`--remote`) — no window needed.
-- **D-031-2 — (fill in in-session) the final cut list** (the working
-  list in the acceptance criteria is the starting point; every file
-  named, every keep argued).
-- **D-031-3 — Marketing: delete, no tag.** `site/`, `marketing/`,
-  `index.html`, `wrangler.jsonc` are deleted (the git history is the
-  archive — no `parked/*` tag needed; the 11-06 tidy already set the
-  pattern for the branches). The README keeps the "Derived from Kokon"
-  attribution and links to upstream for the original product.
-- **D-031-4 — Lab model downloads stay.** `matting.rs`'s hash-pinned
-  MobileSAM/BiRefNet downloads and the upscaler downloads are service
-  features of the shipped product, not standalone-app chaff.
-- **D-031-5 — (fill in in-session) the config schema 16 migration:**
-  stock settings → dropped with a note in the saved file's
-  `migrations` log (same pattern the config already uses) or mapped to
-  the EE equivalent; the `externalEngine`/`vlm`/`multiUser` surface
-  untouched.
+- **D-031-2 — final cut list (in-session, 11-23, after inventory of the
+  post-037/038 tree).**
+  **Cut, whole files/dirs:**
+  - `src-tauri/` (whole dir: main.rs, lib.rs, icons, tauri configs)
+  - `engine-mac/` (whole dir)
+  - root `engine.json`; root `wrangler.jsonc` (kokon.app Pages deploy)
+  - `crates/qls-core/src/{installer,mac_bench,engine_manifest}.rs` + their `mod` lines
+  - `scripts/build-release.ps1`, `scripts/build-release-mac.sh`, `scripts/build-release-linux.sh`,
+    `scripts/release/fetch-bundled.mjs`, `scripts/release/updater.mjs`,
+    `scripts/dev/mac-dev.sh`, `scripts/dev/sidecars.mjs`, `scripts/dev/m1-backend-test.ps1`,
+    `scripts/dev/test-12gb.ps1`, `scripts/dev/test-fresh-setup.ps1`, `scripts/dev/test-model-update.ps1`,
+    `scripts/dev/test-own-models.ps1`, `scripts/dev/test-vae-update.ps1`,
+    `scripts/dev/validate-upscale.ps1`, `scripts/dev/mac-bench/` (dev dir)
+  - `site/`, `marketing/`, `docs/releasing.md`
+  - UI: `src/components/{TitleBar,Setup,OwnModels,WhatsNew}.tsx`, `src/lib/updates.ts`
+  **Cut, internally (bundled path; the EE client stays and becomes the only path):**
+  - `process.rs`: `build_server_args`, `build_mac_engine_args`, `spawn_and_wait`, `launch`,
+    `launch_port`, `wait_port_free`, `kill_pid` (if unused), the owned-server record
+    (read/write/record_path), `free_port` (if unused); `ensure_external` + `adopt_external`
+    become the only `ensure_ready` / `adopt`.
+  - `engine.rs`: the bundled branch of `ensure_ready`, `server_exe`, `missing_files_error`,
+    `uses_mac_engine`, `engine_update_needed`, `remove_unused_old_dit`, the owned
+    stop/restart paths, any bundled model-download/update flow.
+  - `catalog.rs`: the engine download pins (`engine_downloads`, `EngineManifest`,
+    `apply_engine_release`, the tag helpers, `manual_download_hint` if bundled-only).
+    **Keeps:** the lab model pins (MobileSAM/BiRefNet — D-031-4), the upscaler download
+    pins (D-031-4 / D-038: the download route stays and is refused in EE mode), the LoRA pins.
+  - `config.rs`: the bundled-only *helper fns* go (`server_exe`, `missing_files_error`,
+    `uses_mac_engine`, …); the **fields stay** in the struct (zero data loss, dormant).
+  - service `api.rs`: routes `/setup*` (all six), `/models/{scan,inspect,user,use,vae,dit}`,
+    `/mac-engine/*` (all four), `/backend/{start,stop,restart}` go.
+    **Keeps:** `/models` + `/models/switch` (the picker — the external picker `switch` is the
+    product's model control), `/upscalers*`, `/matte*`, `/segment*`, and everything else
+    (jobs, gallery, luts, loras, projects, remote, users, auth, events, diagnostics, logs,
+    plan, inputs, examples, provenance, shutdown).
+  - `diagnostics.rs`: reworked to EE-only checks (the engine check = "the engine answers at
+    the gateway"; the hardware check and its `parse_device_list` consumer go).
+  - `modelfile.rs`: **kept** (the LoRA pipeline uses it); only its bundled-only callers go.
+  - UI internals: `native.ts` → browser-only (all tauri branches cut); `platform.ts` →
+    `inBrowser` drops (it is always true); `store.ts`/`api.ts` → tauri branches cut (the
+    `__KOKON_VERSION__` compare stays — it compares the page against the service, both in
+    the image); `App.tsx` → the `needsSetup` gate goes (a config without `externalEngine`
+    fails at boot with the kind error instead); `Settings.tsx` → the Setup-wizard and
+    bundled-engine sections go; `logic.ts`/`types.ts` → `InstallItem/InstallStatus/
+    ModelsStatus/ModelScan/ModelSlot/SetupReport/HardwareReport/ModelFileInfo`,
+    `whatsNewDue`/`modelOfferDue`/`afterStartScreens`, the `setupComplete` wiring go.
+  - `mcp/src/service.ts` → re-aimed at the box service (endpoint/env discovery, not
+    "Kokon.app/Contents/MacOS"); the not-found error says "start the box service".
+  - `package.json`: the six `@tauri-apps/*` deps, `@tauri-apps/cli`, the `tauri` and
+    `bundled` scripts go; the root `Cargo.toml` workspace loses `src-tauri`.
+  - Docs: `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`, `SECURITY.md` reworded
+    (the product = the box service + the browser UI + the MCP); `docs/platforms.md` and
+    `docs/linux.md` rewritten for the box; `docs/engineering-notes.md` architecture section
+    updated; `docs/fresh-box.md` and `docs/service-on-prod-box.md` stay authoritative
+    (minor updates only).
+- **D-031-3 — Marketing: delete, no tag (11-17; clarified 11-23).** `site/`, `marketing/`,
+  `wrangler.jsonc` are deleted (the git history is the archive). The **root**
+  `index.html` is the app's own HTML shell (vite entry, PWA manifest, boot splash) and is
+  **kept** — the 11-17 mention of `index.html` was the site's landing page, which goes with
+  `site/`. The README keeps the "Derived from Kokon" attribution and links to upstream.
+- **D-031-4 — Lab model downloads stay.** `matting.rs`/`segment.rs`'s hash-pinned
+  MobileSAM/BiRefNet downloads and the upscaler downloads are service features of the
+  shipped product, not standalone-app chaff.
+- **D-031-5 — config migration, schema 16 → 17 (resolved 11-23; the 11-17 note said 15 → 16,
+  which task-037 already used for `visionEngine`).** The migration keeps **every** field of
+  any stock config (zero data loss), records the cut in the config's `migrations` log, and
+  after it a config **without `externalEngine` fails boot with a kind error** ("this version
+  runs against an external engine — point it at your gateway"). The bundled-only fields
+  stay in the struct, dormant. The `externalEngine`/`vlm`/`visionEngine`/`multiUser`/native-PE
+  surface is untouched (the live-box config is the fixture — it must load under 17 unchanged).
 
 ## progress
 
