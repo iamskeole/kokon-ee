@@ -138,17 +138,20 @@ export const api = {
   upscalers: () => call<{ selected: string; active: string | null; items: UpscalerItem[] }>("/upscalers"),
   /** Progress in `installStatus` (preset "upscaler:<name>"). */
   downloadUpscaler: (name: string) => call<InstallStatus>(`/upscalers/${encodeURIComponent(name)}/download`, { method: "POST" }),
-  /** The click-to-select model (MobileSAM, run here in the webview): there or not, and its size. */
-  segmentStatus: () => call<{ installed: boolean; bytes: number }>("/segment"),
+  /** The click-to-select model (MobileSAM): where the box runs it — its own files
+   * (`installed`, the single-box path), a stock GGUF door behind its gateway (`door`, the
+   * split-box path), or neither (a thin box whose door is down: `doorConfigured && !door`). */
+  segmentStatus: () =>
+    call<{ installed: boolean; bytes: number; doorConfigured: boolean; door: boolean }>("/segment"),
   /** Progress in `installStatus` (preset "segment"). */
   downloadSegment: () => call<InstallStatus>("/segment/download", { method: "POST" }),
   /** The lab's click-to-select encoder run in the service (the browser stays thin, D-035-1):
    * once per (image, size) — the embeddings are cached there, so later clicks are just the decoder. */
   segmentEncode: (image: string, width: number, height: number) =>
     call<{ ready: boolean }>("/segment/encode", { method: "POST", body: json({ image, width, height }) }),
-  /** A click (or a box) through the lab's selection model run in the service: the 4 masks as
-   * 0/255 PNGs (base64) at the size asked, plus their predicted IoUs. The same contract as the
-   * in-browser ONNX path (`Segmenter.predict`), which this replaces whenever the service has the files. */
+  /** A click (or a box) through the lab's selection model, run where the box runs it (the
+   * ladder): the 4 masks as 0/255 PNGs (base64) at the size asked, plus their predicted IoUs.
+   * The browser sends no image bytes — the box reads its own copy of `image`. */
   segmentPredict: (
     image: string,
     width: number,
@@ -160,8 +163,11 @@ export const api = {
       method: "POST",
       body: json({ image, width, height, points, box: box ?? null }),
     }),
-  /** The fast-sticker model of the layers lab: there or not, and its download size. */
-  matteStatus: () => call<{ installed: boolean; bytes: number }>("/matte"),
+  /** The fast-sticker model (BiRefNet lite, the layers lab): where the box runs it — its own
+   * files (`installed`), the stock GGUF door behind its gateway (`door`), or a named door not
+   * answering (`doorConfigured && !door`: the box says so plainly). */
+  matteStatus: () =>
+    call<{ installed: boolean; bytes: number; doorConfigured: boolean; door: boolean }>("/matte"),
   /** Progress in `installStatus` (preset "matting"). */
   downloadMatte: () => call<InstallStatus>("/matte/download", { method: "POST" }),
   /** The fast-sticker matte of an image in Kokon ("input:"/"gen:"): a grey PNG at its size. `run`:
@@ -308,9 +314,7 @@ export const urls = {
   /** A LUT on a "gen:"/"input:" source at full strength, at most `max` px on its long side. */
   lutPreview: (name: string, source: string, max: number) => `${base}/luts/${encodeURIComponent(name)}/preview?source=${encodeURIComponent(source)}&max=${max}${tq("&")}`,
   sourcePreview: (s: string) => (s.startsWith("gen:") ? urls.genPreview(s.slice(4)) : urls.inputPreview(s.slice(6))),
-  sourceThumb: (s: string) => (s.startsWith("gen:") ? urls.genThumb(s.slice(4)) : urls.inputThumb(s.slice(6))),
-  /** A MobileSAM file kokon-service downloaded (`segmentStatus`). */
-  segmentModel: (file: string) => `${base}/segment/models/${file}${tq("?")}`,
+  sourceThumb: (s: string) => (s.startsWith("gen:") ? urls.genThumb(s.slice(4)) : urls.inputThumb(s.slice(6)))
 };
 
 /** Server-sent events with automatic reconnect. Returns an unsubscribe function. */

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, urls } from "../lib/api";
 import { addTo, area, dilate, fileSafe, fromLogits, maskOrder, refineEdges, removeFrom, samSelection, union, type Mask } from "../lib/layers";
 import { shortcut } from "../lib/platform";
-import { cancelSamDownload, loadSegmenter, type SamResult, type Segmenter, type ServiceSegmenter } from "../lib/sam";
+import { cancelSamDownload, loadSegmenter, type SamResult, type ServiceSegmenter } from "../lib/sam";
 import type { DocLayer, LayerDoc } from "../lib/layerDoc";
 import { addVersions, setState, toastError, toastInfo, useStore } from "../lib/store";
 import type { InputRecord } from "../lib/types";
@@ -142,7 +142,7 @@ export function LayerSplit({ onSplit, onBack }: { onSplit: (doc: LayerDoc) => vo
   const undoStack = useRef<Change[]>([]);
   const redoStack = useRef<Change[]>([]);
   const last = useRef<LastClick | null>(null);
-  const segmenter = useRef<Segmenter | ServiceSegmenter | null>(null);
+  const segmenter = useRef<ServiceSegmenter | null>(null);
   const full = useRef<Promise<HTMLImageElement> | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stroke = useRef<{ erase: boolean; size: number; points: [number, number][] } | null>(null);
@@ -176,7 +176,7 @@ export function LayerSplit({ onSplit, onBack }: { onSplit: (doc: LayerDoc) => vo
         setSamPct(null);
         if (!s) return setSam("missing");
         setSam("encoding");
-        await s.encode(await full.current!, mw, mh);
+        await s.encode(mw, mh);
         if (gone) return;
         segmenter.current = s;
         setSam("ready");

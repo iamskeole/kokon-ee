@@ -7,7 +7,7 @@
 import { api, urls } from "../lib/api";
 import { centre, type LayerDoc, type Place, type SceneEdit } from "../lib/layerDoc";
 import { dilate, fileSafe, fromLogits, refineEdges } from "../lib/layers";
-import { Segmenter } from "../lib/sam";
+import { loadSegmenter, type ServiceSegmenter } from "../lib/sam";
 import { blendKeep } from "../lib/blend";
 import { alignEdit, attached, blur, changed, darkness, IDENTITY, invertAffine, luminance, MARK_COLOURS, objectAt, scaleAffine, splitShadows, toneCurve, type Affine, type MarkColour } from "../lib/sceneEdit";
 import type { InputRecord } from "../lib/types";
@@ -27,9 +27,6 @@ export interface SceneResult {
   looks: { id: string; src: string }[];
   notes: string[];
 }
-
-let sam: Promise<Segmenter | null> | null = null;
-const segmenter = () => (sam ??= Segmenter.load().catch(() => null));
 
 const canvas = (w: number, h: number) => {
   const c = document.createElement("canvas");
@@ -293,8 +290,12 @@ export async function readScene(doc: LayerDoc, e: SceneEdit, result: string): Pr
   const feet = new Map<string, Uint8Array>();
   for (const id of ids) feet.set(id, await footprint(e.places[id].source, e.places[id], w, h, W, H));
 
-  // New objects: what changed around each colour's marks.
+  // New objects: what changed around each colour's marks. One segmenter for the read: the
+  // service's, over the scene's own image (`result` is a service "gen:") — the box's door or
+  // its own copy; a box with neither runs the read without SAM's outline (the changed pixels
+  // as they are), and says nothing: the lab's other features do not depend on it.
   const news: { colour: MarkColour; m: Uint8Array }[] = [];
+  const seg = await loadSegmenter(result).catch(() => null);
   if (marks.length) {
     const lut = toneCurve(p.lb, p.la, Uint8Array.from(p.valid, (v, i) => (v && !marked![i] ? 1 : 0)));
     const diff = changed(p.before, p.after, lut, w * h);
@@ -309,7 +310,7 @@ export async function readScene(doc: LayerDoc, e: SceneEdit, result: string): Pr
         out.notes.push(`Nothing new was found at the ${mk.colour} marks.`);
         continue;
       }
-      obj = await samOutline(p, obj, w, h);
+      obj = await samOutline(obj, w, h, seg);
       const soft = refineEdges(obj, gray, w, h, Math.max(2, Math.round(Math.max(w, h) * 0.003)));
       full ??= warp(p.img, p.t, W, H, W, H);
       const rec = await upload(soft, w, h, W, H, layerName(mk.what, mk.colour), full);
@@ -438,11 +439,12 @@ function differs(p: Pair, foot: Uint8Array): boolean {
   return n > 0 && sum / (n * 3) > 6;
 }
 
-/** SAM's outline of a new object (box prompt around the changed pixels) when the model is there
- * and agrees with them (IoU >= 0.5); else the changed pixels as they are. */
-async function samOutline(p: Pair, obj: Uint8Array, w: number, h: number): Promise<Uint8Array> {
-  const s = await segmenter();
-  if (!s) return obj;
+/** SAM's outline of a new object (box prompt around the changed pixels) when the box can run
+ * the model and it agrees with them (IoU >= 0.5); else the changed pixels as they are. The
+ * model runs where the box runs it (the door or its own copy — `seg` came from `loadSegmenter
+ * (the scene's service image)`); a box that can't run it gets the pixels as they are, plainly. */
+async function samOutline(obj: Uint8Array, w: number, h: number, seg: ServiceSegmenter | null): Promise<Uint8Array> {
+  if (!seg) return obj;
   let x0 = w;
   let y0 = h;
   let x1 = -1;
@@ -459,10 +461,10 @@ async function samOutline(p: Pair, obj: Uint8Array, w: number, h: number): Promi
   const mx = (x1 - x0) * 0.04 + 2;
   const my = (y1 - y0) * 0.04 + 2;
   try {
-    const c = canvas(w, h);
-    c.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(p.after), w, h), 0, 0);
-    await s.encode(c, w, h);
-    const r = await s.predict([], w, h, { x0: Math.max(0, x0 - mx), y0: Math.max(0, y0 - my), x1: Math.min(w - 1, x1 + mx), y1: Math.min(h - 1, y1 + my) });
+    // The box encodes its own copy of the scene (`result`, the service image `seg` was made
+    // for); the browser sends no pixels.
+    await seg.encode(w, h);
+    const r = await seg.predict([], w, h, { x0: Math.max(0, x0 - mx), y0: Math.max(0, y0 - my), x1: Math.min(w - 1, x1 + mx), y1: Math.min(h - 1, y1 + my) });
     let best: Uint8Array | null = null;
     let bestIou = 0.5;
     for (const logits of r.masks) {

@@ -905,11 +905,16 @@ export function LayerDoc({ projectId, doc, onChange, onNewSplit }: { projectId: 
     commitRef.current({ ...now, ...keepSize(now, l, l.source, src), layers: now.layers.map((x) => (x.id === l.id ? { ...x, source: src, history: [...x.history, src] } : x)), known: [...now.known, src] });
   };
 
-  /** The fast sticker model is downloaded once (224 MB), the first time Fast is used; the % shows.
-   * Aborting `signal` cancels the download (when it is this one) and throws Stopped. */
+  /** The fast sticker model is run by the box (its door, or its own copy — the ladder is the
+   * service's, task-037 P3); a single box without the copy downloads it once (224 MB), the
+   * first time Fast is used, and the % shows. A box whose *named* door is not answering says so
+   * plainly (a thin box is not the model's home; it does not download). Aborting `signal`
+   * cancels the download (when it is this one) and throws Stopped. */
   const [matteDl, setMatteDl] = useState<number | null>(null);
   const ensureMatteModel = async (signal?: AbortSignal) => {
-    if ((await api.matteStatus()).installed) return;
+    const st = await api.matteStatus();
+    if (st.installed || st.door) return;
+    if (st.doorConfigured) throw new Error("The sticker model's engine is not answering (the accelerator's door is down).");
     setMatteDl(0);
     const stop = () => {
       api

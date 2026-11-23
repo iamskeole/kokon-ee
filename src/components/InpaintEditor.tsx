@@ -4,7 +4,7 @@ import { api, urls } from "../lib/api";
 import { area, dilate, fromLogits, maskOrder, samSelection } from "../lib/layers";
 import { withActionVerb } from "../lib/logic";
 import { inBrowser, shortcut } from "../lib/platform";
-import { loadSegmenter, type SamResult, type Segmenter, type ServiceSegmenter } from "../lib/sam";
+import { loadSegmenter, type SamResult, type ServiceSegmenter } from "../lib/sam";
 import { MARK_COLOURS, marksPrompt, type MarkColour } from "../lib/sceneEdit";
 import { closeEditor, focusPrompt, getState, toastError, toastInfo, updateComposer, useStore } from "../lib/store";
 import { IconButton } from "./ui";
@@ -80,7 +80,11 @@ export function InpaintEditor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const current = useRef<Op | null>(null);
-  const segmenter = useRef<Segmenter | ServiceSegmenter | null>(null);
+  const segmenter = useRef<ServiceSegmenter | null>(null);
+  // Why there is no segmenter (the "missing" message): no service at all, a configured door
+  // that is not answering (a thin box whose accelerator is down), or a single box whose own
+  // copy could not be downloaded.
+  const samWhy = useRef<"no-service" | "door-down" | "not-downloaded">("not-downloaded");
   // The last click of Select: the same spot again takes SAM's next output (part -> whole).
   const lastClick = useRef<{ x: number; y: number; result: SamResult; order: number[]; pos: number; op: Op } | null>(null);
 
@@ -201,16 +205,17 @@ export function InpaintEditor() {
     setSam("loading");
     (async () => {
       try {
-        // The service's model when the box has it (the box runs it, D-035-1), else the in-browser one.
+        // The service's model, where the box runs it (its door, or its own copy, D-037-13):
+        // the browser sends no image bytes and runs no model, it just asks.
         const s = await loadSegmenter(ref0?.source ?? null, (pct) => open.current && setSamPct(pct));
         if (!open.current) return;
         setSamPct(null);
-        if (!s) return setSam("missing");
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = src;
-        await img.decode();
-        await s.encode(img, sw, sh);
+        if (!s) {
+          const st = await api.segmentStatus().catch(() => null);
+          samWhy.current = !st ? "no-service" : st.doorConfigured && !st.door ? "door-down" : "not-downloaded";
+          return setSam("missing");
+        }
+        await s.encode(sw, sh);
         if (!open.current) return;
         segmenter.current = s;
         setSam("ready");
@@ -241,7 +246,7 @@ export function InpaintEditor() {
   const select = async (x: number, y: number, remove: boolean) => {
     const s = segmenter.current;
     if (!s) {
-      toastInfo(sam === "missing" ? "The selection model could not be downloaded: paint with the brush." : samPct != null ? `Downloading the selection model… ${samPct}%` : sam === "error" ? "The selection model could not start: paint with the brush." : "The selection model is still getting ready.");
+      toastInfo(sam === "missing" ? samWhy.current === "door-down" ? "The selection engine is not answering (the accelerator's door is down): paint with the brush." : "The selection model is not available on this box: paint with the brush." : samPct != null ? `Downloading the selection model… ${samPct}%` : sam === "error" ? "The selection model could not start: paint with the brush." : "The selection model is still getting ready.");
       return;
     }
     const prev = lastClick.current;
@@ -493,7 +498,7 @@ export function InpaintEditor() {
 
   const selectTitle =
     sam === "missing"
-      ? "Select (S): the selection model could not be downloaded (open the editor again to retry)"
+      ? "Select (S): the selection model is not available on this box (open the editor again to retry)"
       : sam === "loading"
         ? samPct != null
           ? `Select (S): downloading the selection model (44 MB, once)… ${samPct}%`

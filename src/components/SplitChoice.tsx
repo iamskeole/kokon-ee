@@ -19,10 +19,11 @@ const total = (n: number, mode: "fast" | "quality") => {
 };
 
 export function SplitChoice({ count, last, onPick, onCancel }: { count: number; last: StickerMode; onPick: (m: StickerMode) => void; onCancel: () => void }) {
-  // The fast model is downloaded the first time it is used: said on its card.
+  // The fast model is run by the box (its door, or its own copy — the ladder is the
+  // service's); a box that has neither downloads it the first time it is used: said on its card.
   const [missing, setMissing] = useState(false);
   useEffect(() => {
-    api.matteStatus().then((s) => setMissing(!s.installed), () => {});
+    api.matteStatus().then((s) => setMissing(!s.installed && !s.door), () => {});
   }, []);
   const preferred = last === "off" ? "fast" : last;
   const first = useRef<HTMLButtonElement>(null);
