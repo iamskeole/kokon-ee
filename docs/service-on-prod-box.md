@@ -275,31 +275,45 @@ The load-bearing values, and why:
   and nginx picks it up on its next reload (the box's 6-hour loop, or a
   manual one). The open-webui block has the same property.
 
-### DNS / Cloudflare
+### DNS / Cloudflare — **grey cloud, by the owner's choice**
 
-`imagine.unveilx.com`: A → the router (84.232.239.80), **proxied**
-(orange cloud), ttl auto — the same pattern as every other record in the
-zone. Added 11-23 through the box's own token
-(`~/infra/nginx/secrets/cloudflare.ini`, single-line
+`imagine.unveilx.com` and `chat.unveilx.com` both resolve **directly to
+the box** (A → 84.232.239.80, **not proxied**): browsers terminate TLS
+on this box's nginx with the local Let's Encrypt wildcard cert, and
+Cloudflare is out of the data path entirely (verified 11-23: both names
+present the Let's Encrypt `unveilx.com` cert, 200s, login and a full
+job re-proven through the direct path). The reason is the threat model:
+a proxied (orange-cloud) record means Cloudflare terminates the
+client's TLS and therefore **sees the plaintext** of both sites — the
+login password, session cookies, chat prompts and streamed answers,
+prompts, generated images. The owner wants neither to pass through a
+third party readable, so both records were unproxied (`PATCH .../
+dns_records/<id>` with `proxied:false`) while every *other* record in
+the zone stays proxied as before. The box's public IP is now visible on
+DNS (ufw still limits exposure to 22/80/443/51820/8080/9090); CF's
+DDoS/WAF no longer fronts these two names. Re-proxying either is one API
+call if that ever changes. All CF API work from the box uses its own
+token (`~/infra/nginx/secrets/cloudflare.ini`, single-line
 `dns_cloudflare_api_token`), zone `unveilx.com`
-(`c9014d7006ae387e8fcb64e3ce58724f`). The token is **IP-restricted to
-the box's IPv4** (the nginx project's readme records the IPv6 rejection,
-CF error 9109) — so all API calls from the box force IPv4 (`curl -4`).
-It lists zones and edits records; an earlier "zone-scoped, can't even
-list zones" reading was a failed token extraction plus IPv6 egress, not
-a permissions limit.
+(`c9014d7006ae387e8fcb64e3ce58724f`), **forced IPv4** (`curl -4`) —
+the token is IP-restricted to the box's IPv4 (CF error 9109 on IPv6
+egress); it lists zones and edits records.
 
 ### Verification checklist (all four states proven 11-23)
 
 1. **From the internet** (any device outside the house):
    `https://imagine.unveilx.com` → 200, the Kokon UI, in well under a
-   second. (A 526 here = the vhost is missing — the CDN reaches the
-   box's default cert; a 504/499 with fast local responses = the
-   proxy-to-service leg, check the firewall, see the compose note.)
+   second, with the **box's own** certificate (Let's Encrypt
+   `unveilx.com`) — if the browser shows a certificate error, check
+   SNI/cert on the box's 443 (no CDN is in the path anymore); a 504/
+   499 with fast local responses = the proxy-to-service leg, check the
+   firewall, see the compose note.
 2. **Login** with the password → `{"signed_in":true}`, cookie
    `kokon_session` with `Secure`. The service log then shows `browser
-   signed in from <the real client address>` — proof the XFF append
-   survives the CDN.
+   signed in from <the real client address>` — nginx appends the real
+   client IP to `X-Forwarded-For` (`$proxy_add_x_forwarded_for`, the
+   append form so an earlier CDN hop would never be clobbered), and the
+   door believes it only from private peers.
 3. **The lab, from a signed-in browser over the internet**:
    `GET /api/v1/segment` and `GET /api/v1/matte` →
    `{"door": true, "doorConfigured": true, "installed": false}`. That is
@@ -309,7 +323,7 @@ a permissions limit.
    listener keeps a browser allowlist, and a token check passes where a
    browser call is refused; the 11-22 lesson.)
 4. **One real job, from the internet**: a text-to-image job through the
-   whole chain (CDN → nginx → service → gateway → engine → back)
+   whole chain (internet → nginx → service → gateway → engine → back)
    completes and the image downloads from the gallery route; the file
    sits in `gallery/<date>/` on the stable box. On 11-23: 58 s,
    1024×1024, qwen-full. While it runs, the UI shows live progress (the
