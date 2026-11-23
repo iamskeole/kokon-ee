@@ -536,39 +536,49 @@ Before any live use: `…/llama-swap-linux-amd64 -config …/llama-swap.yaml
 -validate` (validates and exits: "N model(s), 0 peer(s)").
 ## 4. The service (this repository)
 
-Build the image (the two-stage `docker/Dockerfile` builds the UI, then
-`kokon-service` release; the engine and models are **not** in the image):
+The image is **published by the repository's CI** to
+`ghcr.io/iamskeole/kokon-ee` on every push to `main` (tags `multiuser-<short sha>`
+and `latest`). The package is public, so a fresh box just pulls it — no ghcr
+login, no build:
 
 ```sh
-# verified: reference host. Tag convention: external-engine-<version>-<commit>.
-git clone <this repo> kokon-ee && cd kokon-ee   # or work in the existing clone
-docker build -f docker/Dockerfile \
-  -t ghcr.io/<org>/kokon:external-engine-0.12.0-<short-commit> .
+docker pull ghcr.io/iamskeole/kokon-ee:multiuser-<short sha>   # or :latest
 ```
 
-Deploy it with a compose file (the live one is `frontends/kokon-ee/compose.yaml`
-on the reference host):
+Build-from-source remains the verifiable route (the two-stage `docker/Dockerfile`
+builds the UI, then `kokon-service` release; the engines and models are **not**
+in the image):
+
+```sh
+# same name and tag convention CI publishes: multiuser-<short commit>
+git clone https://github.com/iamskeole/kokon-ee kokon-ee && cd kokon-ee
+docker build -f docker/Dockerfile -t ghcr.io/iamskeole/kokon-ee:multiuser-<short sha> .
+```
+
+Deploy it with a compose file (the live dev one is `frontends/kokon-ee/compose.yaml`
+on the reference host; the family box's prod one is `docs/service-on-prod-box.md`):
 
 ```yaml
 services:
-  kokon:
-    image: ghcr.io/<org>/kokon:external-engine-0.12.0-<short-commit>
-    container_name: kokon
+  kokon-ee:
+    image: ghcr.io/iamskeole/kokon-ee:multiuser-<short sha>
+    container_name: kokon-ee
     restart: unless-stopped
     network_mode: host          # the service binds 127.0.0.1 and drops
                                 # foreign source addresses: host mode is deliberate
     volumes:
-      - kokon-data:/data        # service-token, asset bundles, logs
-      - kokon-config:/config    # settings (config.json)
-      - kokon-gallery:/gallery  # saved images
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+      - ./data:/data            # gallery + projects DB, service token, lab models, logs
+      - ./config:/config        # settings (config.json: the gateway address + key)
+      - ./gallery:/gallery      # saved images
 ```
 
+No GPU reservation: inference never runs inside this container — the engines
+run on the engine box behind the gateway (where the box *is* the engine box, the
+gateway sits on 127.0.0.1 behind it; the in-process lab models are CPU-only
+where there is no accelerator).
+
 Ports: **39152** web UI (password), **39151** token API (host loopback; the
-MCP server reads the token from `/data/service-token` in the container).
+MCP server reads the token from `/data/service.json` in the container).
 
 A fresh box has no web password yet, so the UI answers but sign-in refuses
 until one is set: `docker exec -it kokon kokon-service --set-password` (asked

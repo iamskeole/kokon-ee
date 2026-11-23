@@ -1,39 +1,32 @@
-# Kokon on an NVIDIA GPU, used from a browser: http://<this computer's address>:39152
-# Needs the NVIDIA Container Toolkit. In the folder with this file, start it, then set the
-# password once:
+# Kokon service box, used from a browser: http://<this box's address>:39152
 #
-#   docker compose up -d
-#   docker exec -it kokon kokon-service --set-password
+# The container is the service + the browser UI. Inference does not run
+# inside it: the engines (stable-diffusion.cpp, the vision door, the
+# assistant) live on the engine box behind its one-door gateway
+# (llama-swap), and this box's config (config/config.json, beside this
+# file) points at that gateway. In single-box mode the lab's in-process
+# models run on CPU, so no GPU is needed on this box at all.
 #
-# Update to a new version: docker compose pull && docker compose up -d
-# Guide: docs/docker.md. For access from outside your home use Tailscale or another VPN
-# (docs/remote-access.md), never port forwarding on your router.
-services:
-  kokon:
-    # Published by each release; ":0.11" stays on 0.11.x instead of following new versions.
-    image: ghcr.io/gabrielelozupone/kokon:latest
-    container_name: kokon
-    restart: unless-stopped
-    ports:
-      # Every network interface of this computer. Docker's published ports skip host firewalls
-      # such as ufw; to reach Kokon only from this computer use "127.0.0.1:39152:39152".
-      - "39152:39152"
-    volumes:
-      - kokon-data:/data        # engine, models (~13 GB), gallery database
-      - kokon-config:/config    # settings
-      - kokon-gallery:/gallery  # the images you save
-      # A folder of your own instead (Kokon runs as uid 1000, so it must own it):
-      #   mkdir -p ~/kokon-gallery && sudo chown 1000:1000 ~/kokon-gallery
-      #   - ~/kokon-gallery:/gallery
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+# In the folder with this file (data/, config/ and gallery/ beside it —
+# the service runs as uid 1000 and must be able to write all three):
+#
+#   docker compose pull && docker compose up -d     # update + (re)start
+#   docker exec -it kokon-ee kokon-service --set-password   # once
+#
+# The image is published by the repo's CI on every push to main (tags
+# multiuser-<sha> and latest); a local build of the same docker/Dockerfile
+# is the verifiable route. Whole stack: docs/fresh-box.md. Split layout
+# (this box family-sized, the engine box elsewhere): docs/service-on-prod-box.md.
 
-volumes:
-  kokon-data:
-  kokon-config:
-  kokon-gallery:
+services:
+  kokon-ee:
+    image: ghcr.io/iamskeole/kokon-ee:latest
+    container_name: kokon-ee
+    restart: unless-stopped
+    network_mode: host          # the service binds 127.0.0.1 (token API) and
+                                # drops foreign source addresses on its LAN
+                                # listener: host mode is deliberate
+    volumes:
+      - ./data:/data            # gallery + projects DB, service token, lab models, logs
+      - ./config:/config        # settings (config.json: the gateway address + key)
+      - ./gallery:/gallery      # the images saved to the gallery

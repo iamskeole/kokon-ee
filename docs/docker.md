@@ -1,78 +1,62 @@
-# Kokon in Docker (NVIDIA)
+# Kokon in Docker
 
-The same Kokon as the Linux packages, without a window: you use it from a browser on any device.
-For NVIDIA graphics cards (CUDA). An image for AMD and Intel cards (Vulkan) will follow once it can
-be tested.
+The box service, without a build step: pull the published image and run it.
+Inference does **not** run inside the container — the engines (the image
+model, the lab's models, the assistant) live on the engine box behind its
+one-door gateway; this box holds the service, the browser UI and the MCP
+server, and its one config file points at that gateway. The whole stack is
+[fresh-box.md](fresh-box.md); the split layout with this box as the
+family-sized one is [service-on-prod-box.md](service-on-prod-box.md).
 
 ## What you need
 
-- Linux with an NVIDIA card and the proprietary driver (`nvidia-smi` works). Windows works too through
-  Docker Desktop with WSL 2.
-- Docker with the Compose plugin, and the
-  [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
-- About 15 GB of disk for the engine and the model.
+- Linux with Docker and the Compose plugin. No GPU on this box: the
+  in-process lab models (single-box mode) run on CPU, and the GPU work
+  happens on the engine box.
+- The engine box's gateway reachable from this one (its address and key
+  go into `config/config.json`).
 
 ## Start it
 
-Each release publishes the image as `ghcr.io/gabrielelozupone/kokon`, so you need only the
-compose file, no clone and no build:
+Each push to the repo's `main` publishes the image as
+`ghcr.io/iamskeole/kokon-ee` (tags `multiuser-<short sha>` and `latest`),
+so you need the compose file — no clone for the image and no build:
 
 ```bash
 mkdir kokon && cd kokon
-curl -fsSLO https://raw.githubusercontent.com/GabrieleLozupone/kokon/master/docker/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/iamskeole/kokon-ee/main/docker/compose.yaml
 docker compose up -d
-docker exec -it kokon kokon-service --set-password   # once; at least 8 characters
+docker exec -it kokon-ee kokon-service --set-password   # once; at least 8 characters
 ```
 
-Open `http://<this computer's address>:39152` in a browser and sign in. The image's settings
-point at the box's gateway ([fresh-box.md](fresh-box.md)); the lab models (MobileSAM, BiRefNet)
-download into the container's data volume on first use, once.
+(Or `git clone https://github.com/iamskeole/kokon-ee kokon-ee && cd kokon-ee/docker`
+and use the compose file that is in the repo. To run a build you made
+yourself instead of the published image, `docker build
+-f docker/Dockerfile -t ghcr.io/iamskeole/kokon-ee:latest ..` from that
+folder first — the verifiable route.)
+
+Open `http://<this box's address>:39152` in a browser and sign in. A fresh
+`config/config.json` must name the gateway (`externalEngine`, and the
+`visionEngine` door for the lab) — the reference host's file is the
+template.
 
 ## Where things are
 
-| Volume | Inside the container | What |
+| Folder (beside `compose.yaml`) | Inside the container | What |
 |---|---|---|
-| `kokon-data` | `/data` | engine, models, gallery database, logs |
-| `kokon-config` | `/config` | settings |
-| `kokon-gallery` | `/gallery` | the images saved to the gallery |
+| `data/` | `/data` | the gallery + projects database, the service token, the lab's in-process models (single-box mode), logs |
+| `config/` | `/config` | settings (`config.json`: the gateway address and key) |
+| `gallery/` | `/gallery` | the images saved to the gallery |
 
-To keep the saved images in a folder of your own, replace the `kokon-gallery` line in
-`compose.yaml` with a folder Kokon can write to (it runs as user id 1000):
-
-```bash
-mkdir -p ~/kokon-gallery && sudo chown 1000:1000 ~/kokon-gallery
-#   - ~/kokon-gallery:/gallery
-```
+The service runs as uid 1000, so the three folders must be writable by it.
 
 ## Everyday use
 
 ```bash
-docker logs -f kokon                                  # what the service is doing
-docker exec -it kokon kokon-service --set-password    # a new password (every browser signs in again)
-docker compose down                                   # stop (the volumes stay)
-docker compose pull && docker compose up -d           # update to a new version
+docker compose pull && docker compose up -d   # update to the published image
+docker logs -f kokon-ee                       # what the service is doing
+docker exec -it kokon-ee kokon-service --set-password   # change the UI password
 ```
 
-The `latest` tag follows every release. To get only the fixes of one version, write for example
-`ghcr.io/gabrielelozupone/kokon:0.11` in `compose.yaml` (it stays on 0.11.x); each release also
-has its exact tag, such as `:0.11.0`.
-
-## Build the image yourself
-
-From a clone of this repository (takes a while: it compiles the UI and `kokon-service`):
-
-```bash
-docker build -f docker/Dockerfile -t ghcr.io/gabrielelozupone/kokon:latest .
-docker compose -f docker/compose.yaml up -d
-```
-
-## Security
-
-- Nothing is reachable until a password is set. The password is stored as a hash, and 5 wrong tries
-  in a row make that device wait.
-- The port is published on every network interface. Docker's published ports bypass host firewalls
-  such as ufw; to use Kokon only from the computer itself, change the port line to
-  `"127.0.0.1:39152:39152"`.
-- The connection is plain HTTP: use it on your home network, and through Tailscale or another VPN from
-  anywhere else. Never forward the port on your router. See [remote-access.md](remote-access.md).
-- Kokon's local API with its token (used by scripts and the MCP server) stays inside the container.
+For access from outside your home use Tailscale or another VPN
+([remote-access.md](remote-access.md)), never port forwarding on your router.

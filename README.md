@@ -175,10 +175,12 @@ one machine, all inference on the accelerator box through its one-door gateway:
 In short:
 
 ```bash
-git clone <this repo> && cd kokon-ee
-docker build -f docker/Dockerfile -t kokon-service .
+# the published image (the repo's CI pushes it to ghcr on every push to main;
+# the package is public — no login, no build step):
+docker pull ghcr.io/iamskeole/kokon-ee:latest
+
 docker compose up -d
-docker exec -it kokon kokon-service --set-password   # once
+docker exec -it kokon-ee kokon-service --set-password   # once
 ```
 
 Open `http://<the box>:39152`, sign in, and edit.
