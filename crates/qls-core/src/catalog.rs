@@ -262,119 +262,19 @@ const LINUX_VULKAN_SHA256: &str = "9c085070da4ea07356f92bddfb5882133de40ef36de30
 const MACOS_METAL_SIZE: u64 = 36_981_824;
 const MACOS_METAL_SHA256: &str = "0cba039a1ce063daa977e3ea927dab0a0bf1414002e74e80902afdf0ef6bb274";
 
-/// The engine files of a backend, in download order: the engine manifest's release when one
-/// newer than the built-in pins was applied ([`apply_engine_release`]), else the pins.
+/// The engine files of a backend, in download order.
 pub fn engine_downloads(backend: GpuBackend) -> Vec<Download> {
-    let o = *ENGINE_OVERRIDE.read().unwrap();
-    let (cuda, vulkan, metal) = o.map(|r| (r.cuda, r.vulkan, r.metal)).unwrap_or((ENGINE_CUDA, ENGINE_VULKAN, ENGINE_METAL));
     match backend {
-        GpuBackend::Cuda => vec![cuda, CUDA_RUNTIME],
-        GpuBackend::Vulkan => vec![vulkan],
-        GpuBackend::Metal => vec![metal],
+        GpuBackend::Cuda => vec![ENGINE_CUDA, CUDA_RUNTIME],
+        GpuBackend::Vulkan => vec![ENGINE_VULKAN],
+        GpuBackend::Metal => vec![ENGINE_METAL],
     }
 }
 
-/// The engine release the app wants installed: the manifest's, or [`ENGINE_TAG`].
+/// The engine release the pins are checked against (`ENGINE_TAG`); the box's engine itself is a
+/// pinned stock build, named in the fresh-box doc — it is not updated from here.
 pub fn engine_tag() -> &'static str {
-    ENGINE_OVERRIDE.read().unwrap().map(|r| r.tag).unwrap_or(ENGINE_TAG)
-}
-
-#[derive(Debug, Clone, Copy)]
-struct EngineRelease {
-    tag: &'static str,
-    cuda: Download,
-    vulkan: Download,
-    metal: Download,
-}
-
-static ENGINE_OVERRIDE: std::sync::RwLock<Option<EngineRelease>> = std::sync::RwLock::new(None);
-
-/// Tests that change or depend on the engine override take this lock.
-#[cfg(test)]
-pub(crate) static ENGINE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// One engine build in the manifest.
-#[derive(Debug, Clone, PartialEq, serde::Deserialize, Serialize)]
-pub struct ManifestAsset {
-    pub url: String,
-    pub size: u64,
-    pub sha256: String,
-}
-
-/// A release of Kokon's engines (`kokon-<n>-<commit>` in Kokon's stable-diffusion.cpp fork).
-#[derive(Debug, Clone, PartialEq, serde::Deserialize, Serialize)]
-pub struct KokonEngines {
-    pub tag: String,
-    /// Oldest app version the release works with (older apps ignore it).
-    pub min_app: String,
-    pub win_cuda: ManifestAsset,
-    pub win_vulkan: ManifestAsset,
-    pub linux_cuda: ManifestAsset,
-    pub linux_vulkan: ManifestAsset,
-    pub macos: ManifestAsset,
-}
-
-/// `engine.json` in the Kokon repository: the newest engine release tested with Kokon. Lets a
-/// tested engine reach users without an app release. Apps from 0.10 read only the `kokon` entry;
-/// the file's other keys (an upstream release) serve apps up to 0.9.4, which ignore this one.
-#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize, Serialize)]
-pub struct EngineManifest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kokon: Option<KokonEngines>,
-}
-
-/// Build number of a Kokon engine release tag (`kokon-1013-1814814` -> 1013).
-pub fn release_number(tag: &str) -> Option<u32> {
-    tag.strip_prefix("kokon-")?.split('-').next()?.parse().ok()
-}
-
-fn version_tuple(v: &str) -> Option<(u32, u32, u32)> {
-    let mut it = v.trim().trim_start_matches('v').split(['.', '-']).map(|p| p.parse::<u32>().ok());
-    Some((it.next()??, it.next()??, it.next().flatten().unwrap_or(0)))
-}
-
-/// Uses the manifest's Kokon release as the engine release when it is valid, meant for
-/// `app_version`, and newer than the built-in pins (an app update that pins a newer engine is
-/// never downgraded by an old manifest). Returns whether it is now in use.
-pub fn apply_engine_release(m: &EngineManifest, app_version: &str) -> Result<bool, String> {
-    let Some(k) = &m.kokon else {
-        *ENGINE_OVERRIDE.write().unwrap() = None;
-        return Ok(false);
-    };
-    let (Some(n), Some(builtin)) = (release_number(&k.tag), release_number(ENGINE_TAG)) else {
-        return Err(format!("not a Kokon engine release tag: {}", k.tag));
-    };
-    if version_tuple(app_version) < version_tuple(&k.min_app) || version_tuple(&k.min_app).is_none() {
-        return Ok(false);
-    }
-    if n <= builtin {
-        *ENGINE_OVERRIDE.write().unwrap() = None;
-        return Ok(false);
-    }
-    let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
-    let tag = leak(k.tag.clone());
-    let commit = k.tag.rsplit('-').next().unwrap_or_default();
-    let release = format!("https://github.com/GabrieleLozupone/stable-diffusion.cpp/releases/download/{}/", k.tag);
-    let page = leak(format!("https://github.com/GabrieleLozupone/stable-diffusion.cpp/releases/tag/{}", k.tag));
-    let prefix = format!("sd-kokon-{commit}-bin-");
-    let build = |a: &ManifestAsset, base: Download, folder: &str| -> Result<Download, String> {
-        let file = a
-            .url
-            .strip_prefix(&release)
-            .filter(|f| f.starts_with(&prefix) && f.ends_with(".zip") && !f.contains(['/', '\\']))
-            .ok_or_else(|| format!("unexpected engine URL: {}", a.url))?;
-        if a.sha256.len() != 64 || !a.sha256.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) || a.size == 0 {
-            return Err(format!("bad size or SHA-256 for {}", a.url));
-        }
-        Ok(Download { url: leak(a.url.clone()), page, size: a.size, sha256: leak(a.sha256.clone()), dest: leak(format!("{folder}{file}")), engine_tag: Some(tag), ..base })
-    };
-    // Every build is checked, whatever the platform: a manifest is good or ignored as a whole.
-    let win = (build(&k.win_cuda, ENGINE_CUDA, "")?, build(&k.win_vulkan, ENGINE_VULKAN, "engine-vulkan/")?);
-    let linux = (build(&k.linux_cuda, ENGINE_CUDA, "")?, build(&k.linux_vulkan, ENGINE_VULKAN, "engine-vulkan/")?);
-    let metal = build(&k.macos, ENGINE_METAL, "engine-metal/")?;
-    let (cuda, vulkan) = if cfg!(target_os = "linux") { linux } else { win };
-    *ENGINE_OVERRIDE.write().unwrap() = Some(EngineRelease { tag, cuda, vulkan, metal });
-    Ok(true)
+    ENGINE_TAG
 }
 
 const QWEN_TE: &str = "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/tree/main";
@@ -904,95 +804,6 @@ mod tests {
             assert!(vk.iter().all(|d| d.id != "engine_cuda" && d.id != "cuda_runtime"));
         }
     }
-
-    fn manifest(n: u32) -> EngineManifest {
-        let asset = |f: &str| ManifestAsset {
-            url: format!("https://github.com/GabrieleLozupone/stable-diffusion.cpp/releases/download/kokon-{n}-abcdef0/sd-kokon-abcdef0-bin-{f}.zip"),
-            size: 1,
-            sha256: "0".repeat(64),
-        };
-        EngineManifest {
-            kokon: Some(KokonEngines {
-                tag: format!("kokon-{n}-abcdef0"),
-                min_app: "0.10.0".into(),
-                win_cuda: asset("win-cuda12-x64"),
-                win_vulkan: asset("win-vulkan-x64"),
-                linux_cuda: asset("Linux-Ubuntu-22.04-x86_64-cuda12"),
-                linux_vulkan: asset("Linux-Ubuntu-22.04-x86_64-vulkan"),
-                macos: asset("Darwin-macOS-15.0-universal"),
-            }),
-        }
-    }
-
-    fn edit(n: u32, f: impl FnOnce(&mut KokonEngines)) -> EngineManifest {
-        let mut m = manifest(n);
-        f(m.kokon.as_mut().unwrap());
-        m
-    }
-
-    #[test]
-    fn engine_manifest_overrides_only_newer_releases() {
-        let _guard = ENGINE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        assert_eq!(release_number(ENGINE_TAG), Some(1013));
-        assert_eq!(apply_engine_release(&manifest(1013), "0.10.0"), Ok(false), "same as built in");
-        assert_eq!(engine_tag(), ENGINE_TAG);
-        assert_eq!(apply_engine_release(&manifest(1100), "0.9.4"), Ok(false), "too old an app");
-        assert_eq!(apply_engine_release(&manifest(1100), "0.10.0"), Ok(true));
-        assert_eq!(engine_tag(), "kokon-1100-abcdef0");
-        let cuda = &engine_downloads(GpuBackend::Cuda);
-        assert_eq!(cuda[0].engine_tag, Some("kokon-1100-abcdef0"));
-        assert_eq!(cuda[0].provides, ENGINE_CUDA.provides);
-        assert!(cuda[0].page.ends_with("/kokon-1100-abcdef0"));
-        assert_eq!(cuda[1].id, "cuda_runtime");
-        let vulkan = engine_downloads(GpuBackend::Vulkan)[0];
-        if cfg!(target_os = "linux") {
-            assert_eq!(cuda[0].dest, "sd-kokon-abcdef0-bin-Linux-Ubuntu-22.04-x86_64-cuda12.zip");
-            assert_eq!(vulkan.dest, "engine-vulkan/sd-kokon-abcdef0-bin-Linux-Ubuntu-22.04-x86_64-vulkan.zip");
-        } else {
-            assert_eq!(cuda[0].dest, "sd-kokon-abcdef0-bin-win-cuda12-x64.zip");
-            assert_eq!(vulkan.dest, "engine-vulkan/sd-kokon-abcdef0-bin-win-vulkan-x64.zip");
-        }
-        assert_eq!(engine_downloads(GpuBackend::Metal)[0].dest, "engine-metal/sd-kokon-abcdef0-bin-Darwin-macOS-15.0-universal.zip");
-        // Only that release's downloads in the fork, with a real hash; any bad build rejects it all.
-        assert!(apply_engine_release(&edit(1101, |k| k.win_cuda.url = "https://example.com/sd.zip".into()), "0.10.0").is_err());
-        assert!(apply_engine_release(&edit(1101, |k| k.macos.sha256 = "xyz".into()), "0.10.0").is_err());
-        let other_commit = "https://github.com/GabrieleLozupone/stable-diffusion.cpp/releases/download/kokon-1101-abcdef0/sd-kokon-1234567-bin-win-vulkan-x64.zip";
-        assert!(apply_engine_release(&edit(1101, |k| k.linux_vulkan.url = other_commit.into()), "0.10.0").is_err(), "another commit's build");
-        assert!(apply_engine_release(&edit(1101, |k| k.tag = "master-1101-abcdef0".into()), "0.10.0").is_err());
-        assert_eq!(engine_tag(), "kokon-1100-abcdef0", "a bad manifest keeps the last good release");
-        // An app that pins a newer engine drops an older manifest release.
-        assert_eq!(apply_engine_release(&manifest(980), "0.10.0"), Ok(false));
-        assert_eq!(engine_tag(), ENGINE_TAG);
-        // engine.json as published: the upstream keys for apps up to 0.9.4 next to Kokon's.
-        let json = include_str!("../../../engine.json");
-        let m: EngineManifest = serde_json::from_str(json).unwrap();
-        assert!(apply_engine_release(&m, "0.10.0").is_ok());
-        assert_eq!(apply_engine_release(&EngineManifest::default(), "0.10.0"), Ok(false));
-        assert_eq!(engine_tag(), ENGINE_TAG);
-    }
-
-    #[test]
-    fn published_engine_json_matches_the_built_in_pins() {
-        // engine.json on master and the app's pins name the same release and the same files, so a
-        // release never ships pins its own manifest disagrees with.
-        let m: EngineManifest = serde_json::from_str(include_str!("../../../engine.json")).unwrap();
-        let k = m.kokon.expect("engine.json has a kokon entry");
-        assert_eq!(k.tag, ENGINE_TAG);
-        assert!(version_tuple(env!("CARGO_PKG_VERSION")) >= version_tuple(&k.min_app), "min_app {} above this app", k.min_app);
-        assert_eq!((k.macos.size, k.macos.sha256.as_str()), (MACOS_METAL_SIZE, MACOS_METAL_SHA256));
-        assert_eq!(k.macos.url, ENGINE_METAL.url);
-        #[cfg(not(target_os = "linux"))]
-        {
-            assert_eq!((k.win_cuda.url.as_str(), k.win_cuda.size, k.win_cuda.sha256.as_str()), (ENGINE_CUDA.url, WIN_CUDA_SIZE, WIN_CUDA_SHA256));
-            assert_eq!((k.win_vulkan.url.as_str(), k.win_vulkan.size, k.win_vulkan.sha256.as_str()), (ENGINE_VULKAN.url, WIN_VULKAN_SIZE, WIN_VULKAN_SHA256));
-        }
-        #[cfg(target_os = "linux")]
-        {
-            assert_eq!((k.linux_cuda.url.as_str(), k.linux_cuda.size, k.linux_cuda.sha256.as_str()), (ENGINE_CUDA.url, LINUX_CUDA_SIZE, LINUX_CUDA_SHA256));
-            assert_eq!((k.linux_vulkan.url.as_str(), k.linux_vulkan.size, k.linux_vulkan.sha256.as_str()), (ENGINE_VULKAN.url, LINUX_VULKAN_SIZE, LINUX_VULKAN_SHA256));
-        }
-    }
-
     #[test]
     fn engines_of_another_release_need_updating() {
         let dir = tempfile::tempdir().unwrap();

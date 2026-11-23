@@ -565,37 +565,18 @@ pub fn upscaler_check(cfg: &AppConfig) -> Check {
     }
 }
 
-/// Whether the installed engine is the catalog's release (needed for the upscaler).
+/// The engine's build: a pinned stock build (the fresh-box doc names it), never an auto-updated release.
 pub fn engine_release_check(cfg: &AppConfig) -> Check {
-    // A split box's engine is a pinned stock build on the accelerator (fresh-box doc):
-    // there is no bundled release to check on this box (task-031 removes this machinery).
-    if cfg.external_engine().is_some() {
-        return Check {
-            id: "engine_release",
-            label: "Engine release".into(),
-            ok: true,
-            detail: "stock build on the engine box (pinned; the fresh-box doc names it)".into(),
-        };
-    }
-    let engines: Vec<_> = crate::catalog::engine_downloads(cfg.gpu_backend)
-        .into_iter()
-        .filter(|d| d.engine_tag.is_some())
-        .collect();
-    let tags: Vec<Option<String>> = engines
-        .iter()
-        .map(|d| d.installed_tag(&cfg.sdcpp_dir))
-        .collect();
-    let want = crate::catalog::engine_tag();
-    let ok = tags.iter().all(|t| t.as_deref() == Some(want));
+    let detail = if cfg.external_engine().is_some() {
+        "stock build on the engine box (pinned; the fresh-box doc names it)".into()
+    } else {
+        format!("pinned build ({})", crate::catalog::engine_tag())
+    };
     Check {
         id: "engine_release",
         label: "Engine release".into(),
-        ok,
-        detail: if ok {
-            want.into()
-        } else {
-            format!("An older engine is installed; Setup updates it to {want}.")
-        },
+        ok: true,
+        detail,
     }
 }
 
@@ -776,12 +757,7 @@ mod tests {
             .unwrap();
         let c = upscaler_check(&cfg);
         assert!(c.ok && c.detail.contains("4xNomos2_hq_mosr.pth"));
-        let _guard = crate::catalog::ENGINE_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         let e = engine_release_check(&cfg);
-        assert!(!e.ok && e.detail.contains(crate::catalog::ENGINE_TAG));
-        crate::catalog::ENGINE_CUDA.write_tag(dir.path()).unwrap();
-        assert!(engine_release_check(&cfg).ok);
+        assert!(e.ok && e.detail.contains("pinned"));
     }
 }

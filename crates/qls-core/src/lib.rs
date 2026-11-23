@@ -4,7 +4,6 @@ pub mod catalog;
 pub mod config;
 pub mod diagnostics;
 pub mod engine;
-pub mod engine_manifest;
 pub mod enhancer;
 pub mod error;
 pub mod examples;

@@ -341,7 +341,6 @@ async fn run(args: Vec<String>) {
     tokio::spawn(engine.clone().run_worker());
     tokio::spawn(lifecycle(state.clone()));
     tokio::spawn(server_watch(state.clone()));
-    tokio::spawn(qls_core::engine_manifest::run(APP_VERSION));
     tokio::spawn(stop_on_signal(state.clone()));
 
     let app = api::router(state.clone(), false).into_make_service_with_connect_info::<SocketAddr>();

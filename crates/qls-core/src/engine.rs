@@ -575,25 +575,6 @@ impl Engine {
         }
     }
 
-    /// The installed engine is from another release than the catalog's (or the engine
-    /// manifest's): Setup offers the update. An engine without a release marker (built by hand,
-    /// an external server) only needs it when it cannot run the upscaler.
-    pub fn engine_update_needed(&self) -> bool {
-        let cfg = self.config();
-        // A split box cannot update its engine box: the accelerator's engine is a pinned
-        // upstream build, and whether it has the upscaler is what the Settings' engine-sourced
-        // list (and the job's notes) say — not a bundled-engine update (task-038).
-        if cfg.external_engine().is_some() {
-            return false;
-        }
-        let engines = crate::catalog::engine_downloads(cfg.gpu_backend);
-        if engines.iter().all(|d| d.is_present(&cfg.sdcpp_dir)) {
-            return false;
-        }
-        let managed = engines.iter().any(|d| d.engine_tag.is_some() && d.installed_tag(&cfg.sdcpp_dir).is_some());
-        managed || !self.server.capabilities().is_some_and(|c| c.has_upscaler(crate::catalog::UPSCALER_NAME, true))
-    }
-
     /// The store holding generation `id`: the gallery, or the private-mode store.
     pub fn gen_store(&self, id: &str) -> &Arc<Store> {
         if self.store.get_generation(id).is_err() && self.private_store.get_generation(id).is_ok() { &self.private_store } else { &self.store }

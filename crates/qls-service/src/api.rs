@@ -267,7 +267,8 @@ async fn status(State(s): St) -> Json<Value> {
     let queued = jobs.iter().filter(|j| j.status == qls_core::engine::JobStatus::Queued).count();
     let cfg = s.engine.config();
     let e = s.engine.clone();
-    let engine_update = tokio::task::spawn_blocking(move || e.engine_update_needed()).await.unwrap_or(false);
+    // The engine is a pinned stock build (the fresh-box doc names it): there is no in-app update.
+    let engine_update = false;
     // task-038: with an external engine the upscaler lives on the engine box; `available`
     // is its last reported list (null = the engine has not been queried yet), never this
     // box's copies.
