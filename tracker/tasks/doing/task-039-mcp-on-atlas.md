@@ -789,3 +789,39 @@ honest pairing is turbo or klein (or full with no brain).
 
 The one remaining acceptance item is still the owner's own chat turn
 (acceptance #1).
+
+### The 14:41 "Extra data" — a raw string in OWUI's JSON column (11-25, ~17:00, fixed in minutes)
+
+The owner's first test after the imgpeak window — "a realistic,
+beautiful illustration of the sun shining brightly in the sky" in the
+tuxedo-cat chat — died with `Extra data: line 1 column 3 (char 2)`,
+and **no request ever reached the gateway** (apollo was idle; his chat
+traffic was fine). The traceback pinned it inside OWUI before the HTTP
+call: the built-in `generate_image` tool (no model arg) →
+`resolve_image_model` → `Config.get('image_generation.default_model')`
+→ the `config.value` column is a **SQLAlchemy JSON column** whose stored
+text must be a valid JSON document, and the stored row was not one.
+Root cause: an earlier direct-DB write of the default-model ref
+(`88ffe010-…:kokon-qwen-image-2.1-full`) stored it as a **bare string**,
+forgetting the JSON encoding. The ref begins with `88` — a valid
+two-character JSON *number* — so the parser consumed `88` and choked on
+the following `f`: exactly "Extra data: char 2" (the 14:41 error, which
+the WAL byte scan showed has been the only stored form since it was
+written — no later re-writes, no `{}` variant, no race: no process or
+cron on atlas touches this DB but the OWUI process itself, and its ORM
+always JSON-encodes). The morning green test (owui-img-039) never
+surfaced it because it passed an explicit model, which
+`resolve_image_model` returns on **before reading the default ref**;
+the built-in tool path (no model) is the only reader. The fix: rewrote
+both rows (`image_generation.default_model`, `images.edit.default_model`)
+as properly JSON-encoded strings via a raw UPDATE — the app's own
+`Config.upsert` cannot be the repair, because it `db.get`s the existing
+row first and chokes on the broken value (bootstrap trap) — then
+verified through the ORM itself: upsert/get round-trip, and
+`get_image_models` + `find` on the stored ref matches exactly for the
+owner's real user (`id = f'{connection_id}:{model_id}'` is OWUI's own
+ref format). Lesson for any future raw writes to this box: the OWUI
+`config.value` column is JSON — raw writes must store the
+JSON-encoded form (strings double-quoted), and a broken row is
+repairable only by raw UPDATE, not through the ORM. The owner is about
+to re-test the chat turn (acceptance #1).
