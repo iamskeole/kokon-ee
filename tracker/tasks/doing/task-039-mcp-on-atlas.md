@@ -985,3 +985,15 @@ staging buffers instead of 15 GB of CPU staging) — no swap
 storm, faster load. That is a `llama-swap.yaml`/script edit =
 config reload = a vLLM bounce = a GPU-window-class operation
 (the owner's session rides on vLLM and is down for the load).
+
+**11-26 close (tiling).** Owner decision: remove VAE tiling from all
+image boot scripts (ml repo, committed after this note). The doors
+boot un-tiled again — the pre-11-25 state: 512²/1024² are one
+seam-free pass each, the quality path the owner had and preferred.
+Consequence (measured 11-25, mcp-e2e-039, now re-applied by choice):
+1536²/2048² OOM on the Q8_0 doors, for every path (OWUI-native and
+service alike — with the flag gone the boot script is the only
+tiling authority, and the service defers to it by sending nothing).
+The 256 (14:30) and 512 (19:30) tile states and the imgpeak-039
+measurements stay on record. The service config needed no change
+(vaeTileSize 768 = its own default, the >0 test still holds).
