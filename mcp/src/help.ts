@@ -5,14 +5,19 @@
 export function helpText(version: string): string {
   return `kokon-ee-mcp ${version}
 
-MCP server for Kokon EE. It speaks the Model Context Protocol over stdio, so an MCP client
-(Claude Code, Cursor, Claude Desktop...) starts it; running it by hand just waits for input.
-It talks to the running Kokon EE service (the box: docker image + browser UI) through the
-service's own service.json (port + token); against a bare-binary install it starts the
-local engine on demand instead.
+MCP server for Kokon EE. Two entry points:
+  - stdio (the default): an MCP client (Claude Code, Cursor, Claude Desktop...) starts
+    this process; running it by hand just waits for input.
+  - "serve": the same server over Streamable HTTP (one session per client), for HTTP
+    clients such as Open WebUI. Needs QLS_MCP_HTTP_SECRET; on the box it runs as a
+    small sidecar that shares the service's network namespace.
+It talks to the running Kokon EE service (the box: docker image + browser UI) through
+the service's own service.json (port + token); against a bare-binary install it starts
+the local engine on demand instead.
 
 Usage:
   kokon-ee-mcp             start the MCP server on stdio
+  kokon-ee-mcp serve       start the MCP server over Streamable HTTP (needs a secret)
   kokon-ee-mcp --version   print the version and exit
   kokon-ee-mcp --help      print this text and exit
 
@@ -24,6 +29,14 @@ Environment variables:
   QLS_SERVICE_EXE       path to kokon-service, if Kokon is installed in an unusual place
   QLS_DATA_DIR          the service's data folder (holds service.json: port + token;
                         default: the service's data folder)
+  QLS_MCP_MODEL         the model this MCP's jobs run on: a gateway model id or a picker
+                        label from the service's model list. Before each job the server
+                        aligns the service to it (the browser UI is free to wander; the
+                        next chat job re-aligns). Unset: follow the service's active model.
+  QLS_MCP_HTTP_PORT     port "serve" listens on (default 39153)
+  QLS_MCP_HTTP_HOST     interface "serve" binds (default 0.0.0.0; on the box the sidecar
+                        sits on the docker network, not on the internet)
+  QLS_MCP_HTTP_SECRET   required by "serve": the Bearer secret HTTP clients present
   CLAUDE_PROJECT_DIR    project folder the tools may use (set by Claude Code; default: the
                         working directory)
 `;
