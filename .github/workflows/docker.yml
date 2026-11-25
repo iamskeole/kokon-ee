@@ -3,7 +3,9 @@ name: Docker image
 # Builds docker/Dockerfile and publishes it as ghcr.io/iamskeole/kokon-ee: on every push to
 # main (tag <short sha>), plus latest; or on demand with a commit. The image holds no image
 # models — those live on the box's engines; the lab models download into the data volume on
-# first use. Guide: docs/fresh-box.md.
+# first use. Guide: docs/fresh-box.md. The second job publishes the MCP sidecar image
+# (mcp/Dockerfile, serve mode) as ghcr.io/iamskeole/kokon-ee-mcp for the box's Open WebUI
+# chat; the sidecar shares the service's network namespace (docs/service-on-prod-box.md).
 on:
   push:
     branches: [main]
@@ -49,6 +51,40 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  mcp-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/iamskeole/kokon-ee-mcp
+          tags: |
+            type=sha,prefix=mcp-
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=Kokon EE MCP
+            org.opencontainers.image.description=MCP server for Kokon EE (serve mode): Streamable HTTP, for Open WebUI and the like
+            org.opencontainers.image.licenses=AGPL-3.0-only
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: mcp/Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
