@@ -355,7 +355,10 @@ explicit 768² per-request tiles (≈0.6 MP, ~2 GB of activations; fits
 even beside E2B) instead of trusting the server. The i2i door shares
 the same Q8_0+VAE set (same ceiling); turbo's 6.6 GB set fits all
 areas. Not an MCP defect — the chat chain reached the engine, sampled,
-and reported the failure cleanly.
+and reported the failure cleanly. **Status: applied the same evening
+(owner's call, all three doors + the config's number set to 256 for
+consistency) — see the imgpeak-039 section below for the measured
+result; the 2MP/4MP question is closed.**
 
 **E2E window (02:03, 11-25 — `mcp-e2e-039`, DONE in ~2 min):**
 the OWUI-container-path E2E (openwebui container → bridge → kokon-ee
@@ -707,17 +710,62 @@ capture was needed or possible (no sudo for tcpdump; the service does
 not log the plan at info level) — the code path plus the complete
 ledger leaves no other reading.
 
-**Fix proposals (owner's call; either suffices, both = belt and
-braces):** (a) `--vae-tiling` in the two Q8_0 boot scripts (apollo;
-256² tiles — the reference implementation's default and the size
-pair-039 measured safe with E2B co-resident); (b) `"vaeTileSize": 0`
-in the atlas service config (the planner then sends explicit 768²
-per-request tiles, ~0.6 MP each, which fit even beside the chat
-brain). After (a) the service's "trust the server" behavior is
-*correct*, which is why (a) is the cleaner fix; (b) additionally makes
-the service honest about what it sends regardless of how the door was
-booted. On adoption, a ~10-minute window proves the family path at
-2MP (and 4MP if wanted): the same balanced job through
-OWUI→sidecar→service→gateway→door that died at 01:47 and 08:57, now
-expected to land in the family gallery, vllm revived before the
-marker.
+**Fix — applied (11-25, owner: "do it"); and the owner corrected the
+scope from two doors to three.** The stock doors' VAEs are all the
+big ones (the qwen texture-fix VAE and the flux-3 AE), so all **three**
+image boot scripts (apollo, ml repo `3171f75`) now pass `--vae-tiling`
+(256² tiles, 50% overlap — the reference default) next to `--max-vram
+0`, and the atlas service config's `"vaeTileSize"` was set to **256**
+(was 768; any non-zero value keeps the service from sending per-request
+overrides, so this one is the honest number rather than a behavior
+change — it takes effect on the service's next restart, and even now
+the doors tile on every path because the service stays silent). Note
+this supersedes the earlier variant (b) ("vaeTileSize: 0" — which would
+have made the service send 768² per-request and *override* the boot
+scripts' 256²): the boot script is the real 256, the config only has
+to stop lying.
+
+### imgpeak-039 — every image model measured at 2MP and 4MP, solo (11-25, 14:15–14:27, 12.5 min, DONE)
+
+The owner's request: with only the image model on the card (no chat
+brain — vLLM evicted for the window, revived canonically at the end),
+measure **peak VRAM and start-to-end time** for each of the three image
+models at both 2MP (1536²) and 4MP (2048²), so he can decide which chat
+models can co-reside with which image models. Fired through the
+gateway's native OpenAI route (`/v1/images/generations`, `size:
+"1536x1536"`/`"2048x2048"` — the same route OWUI's native path uses)
+with the **exact per-model sample params the atlas service sends**
+(from the service config's `models[]`: full 40 steps, turbo 8, klein
+16 — all euler, cfg 1), injected via the door's
+`<sd_cpp_extra_args>` hook, so the times are what a real request
+costs. All 9 requests HTTP 200; every 2MP/4MP image decoded (the first
+1536²/2048² to have ever survived on this card, in any configuration);
+images verified by dimensions + sha256 (`r/images-validated.txt`).
+
+| model (steps) | idle | 2MP time / peak | 4MP time / peak | headroom at 4MP peak |
+|---|---|---|---|---|
+| qwen full (40) | 13.7 GB | 142 s / 17.4 GB | 282 s / 17.4 GB | 7.1 GB |
+| qwen turbo (8) | 10.4 GB | 40 s / 14.1 GB | 77 s / 14.1 GB | 10.4 GB |
+| flux klein (16) | 8.8 GB | 37 s / 10.7 GB | 77 s / 12.1 GB | 12.5 GB |
+
+(card 24.6 GB; peaks from the 2 Hz nvidia-smi sampler, ±1 s phase windows;
+boot times 10/5/5 s; times are on a warm door.) Two findings: **with
+tiling on, 4MP costs almost no extra VRAM over 2MP** (the decode working
+set is tile-bound, not area-bound — full: 17,376 vs 17,418 MiB) — the
+cost of bigger pictures is only *time* (roughly linear in pixel count). And
+**the above-idle deltas are small** (full/turbo ~3.7 GB, klein 1.9–3.3 GB),
+which is the number to add to any chat model's footprint.
+
+**Co-residency verdict (the owner's actual question):** with the 5.9 GB
+E2B as the chat brain — **turbo: both sizes fine** (pair ≈ 20 GB);
+**klein: both sizes comfortably** (pair ≈ 18 GB); **full: 2MP borderline**
+(pair ≈ 23.2 GB on a 24.6 GB card — pair-039's real pair peak was 21.9 GB
+on the same shape, so it works, with little margin for content variance)
+**and 4MP risky** (predicted pair ≈ 23.3 GB). vLLM 27B (23.5 GB) fits
+beside nothing, as before. A mid-size chat model (~12 GB) fits beside
+turbo/klein at 2MP only. The default stays `kokon-qwen-image-2.1-full`
+(D-039-7); if the chat brain is E2B and the family wants 4MP, the
+honest pairing is turbo or klein (or full with no brain).
+
+The one remaining acceptance item is still the owner's own chat turn
+(acceptance #1).
