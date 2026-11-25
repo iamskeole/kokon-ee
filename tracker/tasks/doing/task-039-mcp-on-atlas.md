@@ -997,3 +997,15 @@ tiling authority, and the service defers to it by sending nothing).
 The 256 (14:30) and 512 (19:30) tile states and the imgpeak-039
 measurements stay on record. The service config needed no change
 (vaeTileSize 768 = its own default, the >0 test still holds).
+
+**11-26 (afternoon): tiling restored at 256, owner's call +
+observation.** The un-tiled state did exactly what the 11-25
+measurements said it would: his Kokon test at 4K OOM'd. Tiling
+restored in all three image boot scripts at **256** (the maker's
+default, made explicit) — the only measured state (imgpeak-039:
+2MP/4MP all pass, peaks ~14.9-16.4 GB of 24.6; 4MP@512 unmeasured
+and near the ceiling, so it stays a one-line switch until his
+visual verdict). Sequence on record: 256 (14:30 OOM cure) → 512
+(19:30, my seam-reduction) → removed (owner) → 256 (owner, after
+his 4K OOM). His 4K test now runs on the restored flag; the door
+picks it up on its next boot (it was down).
