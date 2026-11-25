@@ -879,64 +879,50 @@ objects and verified by readback. The 27B row has no custom system
 prompt (its chat-template default) and was left alone — the owner's
 call if he sees the echo there.
 
-### The gateway matrix: E2B and the image doors no longer evict each other (11-25, 17:49)
+### The sidekick (CPU E2B) — the door that must stay up (11-25 evening, owner)
 
-**Owner observation:** during his OWUI image tests, (1) the E2B chat
-brain was evicted for the image door "when math says they can
-co-reside", and (2) the CPU sidekick "wasn't loaded or responding —
-no titles were generated".
+**Owner correction:** both of his gateway observations were about the
+CPU sidekick (`sidekick`, 9119) — the zero-VRAM task model that is a
+member of every matrix set and generates OWUI's titles — not the
+CUDA E2B (9108). He does not want the CUDA E2B co-resident with the
+image doors. The matrix change I made that evening on the misread
+(`e` in the qwen sets, `(qf | qt)` in the e2b set — ml `722b2bc`) is
+**reverted** (ml `8e36518`, live since 18:10:23; the file
+is back to its pre-edit sets, hq033 vLLM line intact).
 
-**(2) first — the sidekick is fine.** It has been running since
-14:40 (healthy, 7 min of CPU work), and the OWUI `chat` table shows
-titles on *every* image chat of the test window ("generate an image
-of the sun" ×3, "Image generation", "Image Generation Request") — the
-sidekick did its job during the tests. One title came back as the
-literal `'...'` (an E2B quirk); if that pattern repeats, the one-line
-fix is a `task.title.prompt_template` ("3–5 words, no ellipses").
-`task.model.default` / `task.model.external` both correctly point at
-`sidekick`, titles enabled.
+What the journal and the OWUI DB actually show:
 
-**(1) is a real config gap, now fixed.** The daemon journal shows the
-exact see-saw: 15:11:51 E2B boots → 15:11:54 (3 s later) a qf request
-`evict=[g4-e2b-cuda]` → 15:12:14 E2B request `evict=[kokon-
-qwen-image-2.1-full]` → and so on. Root cause: the llama-swap matrix
-is pure set logic with no VRAM awareness — it keeps a running model if
-and only if *some set* permits it beside the requested one, and no set
-contained both `e` (g4-e2b-cuda) and a qwen image door. Every request
-in either direction therefore evicted the other, even though pair-039
-measured that exact pair at 21.9 GB peak of 24.6 with zero swaps.
-(That window's co-residency ran through `/upstream/`, which bypasses
-the matrix — the Kokon service path; OWUI uses the main route, which
-is matrix-arbited. Same card, two routing paths.) **Fix (ml repo
-`722b2bc`):** `e` joins `qwen-t` and `qwen-f`; the `e2b` set gains
-`(qf | qt)`, so a chat request keeps a warm image door. Subset
-semantics (documented in the solver) make both directions
-eviction-free: a request never boots a door it didn't name. klein
-stays `k & p` (k + p + e is not measured to fit); vllm / small /
-voiced stay exclusive to E2B (23.5 / ~18 / 23.1 GB pairs don't fit).
-Validated with `-validate`; the daemon hot-reloaded at 17:49:33,
-vLLM serving throughout. Caveat: a 2MP/4MP decode with E2B
-co-resident leaves ~0.5 GB of card headroom — if a big image ever
-OOMs while the brain is warm, that is the line (remove `e` from
-`qwen-f`). The uncommitted `hq033` vLLM-0.33 swap in the same file was
-recorded separately (ml `cd9f8e1`) — it has been the live config
-since the 11-24 daemon restart.
+- The sidekick has **never been matrix-evicted** (0 `evict=[…]`
+  events since the 11-24 daemon start) — the never-evicted design
+  holds.
+- It boots on demand (24 h TTL once up). This day: booted 08:11,
+  that instance then **died silently** before 14:40 — no crash
+  trace, no kernel or cgroup OOM, no config reload in the window,
+  no eviction. The daemon only health-checks at boot, so the door
+  stayed dead until the 14:40:54 request booted a fresh one, which
+  has been up and answering continuously since.
+- During the owner's 15:11–15:22 image-test window it was up and
+  answered every title job: the OWUI `chat` table carries titles on
+  all five image chats of that window (one came back as the literal
+  `'…'`). "No titles in my img tests" = the 08:11→14:40 dead
+  window and/or a cold boot after a gap (the first request pays the
+  10–30 s CPU boot).
+- **Fix deployed:** `ml-sidekick-watch` user timer (every 120 s)
+  runs `backends/_scripts/sidekick-watch.sh` — a 1-token completion
+  through the gateway; a live door answers in milliseconds, a dead
+  one gets booted on demand by the daemon. Reversible with
+  `systemctl --user disable --now ml-sidekick-watch.timer`. If
+  `'…'` titles recur, the one-line knob is
+  `task.title.prompt_template` ("3–5 words, no ellipses").
 
-**Owner question (pending his test):** would a *non-tool-calling*
-brain — the Qwen i2i PUP, which can co-reside with any image door —
-be the most elegant setup for the legacy (forced image) path, since
-it would be resident and the prompt could be controlled natively in
-OWUI's image settings? Answer: the elegance is real, but (a) the
-PUP is a prompt-enhancement fine-tune — the i2i probe showed it
-holds a short exchange but regurgitates its PE system prompt and
-cannot call tools, so as the family's all-day chat brain it is
-weaker than E2B (the one he picked in brain-039); (b) its
-enhancement behavior is driven by a specific PE system prompt the
-*service* sends as first message — OWUI sends its own, so the door
-behaves as a plain 9B LLM, not "the proven PUP"; (c) the legacy
-forced path is a coarse message intercept (new-image only, no edit /
-multi-image tool args). And the template that path uses runs on the
-*sidekick* (the task model), not the brain. The same zero-swap
-property is now available to E2B through the matrix fix above, with
-the native tool call keeping its precision — which is the version of
-his idea that keeps the conversationalist.
+**Lesson (box discipline):** this daemon's config-reload path
+SIGTERMs running models. Both of my 17:49 and 18:10 edits to
+`llama-swap.yaml` bounced the live vLLM (cold re-boot ~75–90 s; one
+in-flight request dropped at 17:49:33) — the second time my own
+session was mid-turn. Editing that file is a GPU-window-class
+operation on this box: never casual while a session rides on vLLM.
+
+**Pending (owner's call, his point 3):** the CUDA E2B stays the
+family chat brain with plain eviction semantics (no co-residency).
+If he later swaps in a proper 9B or a Gemma E4B as the brain, it is
+one OWUI model row + one set line in this file.
