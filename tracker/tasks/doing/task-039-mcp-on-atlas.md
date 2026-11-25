@@ -1,4 +1,4 @@
-# Task-039 (PARKED — owner-triggered) — MCP on atlas: the family's OWUI drives Kokon through its MCP (design re-visited 11-24 late: a native streamable-HTTP mode)
+# Task-039 (DOING) — MCP on atlas: the family's OWUI drives Kokon through its MCP (design settled 11-24 late: a native streamable-HTTP mode; un-parked 11-25)
 
 **Created:** 2026-11-23 — the owner asked how to wire Kokon as an MCP
 source into Open WebUI on the family box now that both boxes run the
@@ -273,6 +273,52 @@ not, E2B-cuda takes the seat. D-039-7 and D-039-8 compose: the **hand**
 the OWUI model) both run on the qwen family in the same set — the
 refine conversation is with the very model that rewrites the prompt
 for the DiT.
+
+**Probe window (2026-11-25, apollo — `i2i-probe-039`, DONE in 11 min).
+Verdicts:** the window booted the i2i door in 7 s (the router evicted
+vLLM; the journal proves the choreography), ran the battery, ran the
+full-stack A/B, and revived vLLM in ~65 s (16-token smoke clean).
+
+- **Plain chat: passes** (obeyed the "keep answers short" system
+  prompt). **Vision: passes** (a 64×64 red square, sent as a data-URL
+  image part, answered "a solid, uniform bright red color"; 1,058
+  image tokens in the prompt). **Envelope leakage: none** (asked to
+  repeat its system instructions, it repeated exactly the trivial one
+  it was given and nothing else).
+- **Tool calling: fails — and this is the disqualifier.** The door
+  given a standard OpenAI `tools` array and "make me a picture of a
+  lighthouse at dusk" never returned a tool call: it hit the 1,024
+  token cap (`finish: length`, empty content) *writing a prompt
+  rewrite* ("this is a change-scope (A) case … I'll freely construct
+  a new scene") — the PE fine-tune's role dominates over tool
+  calling, whether or not its llama.cpp template carries a tool
+  format. A door that cannot call a tool cannot drive the MCP from a
+  chat, which is this task's whole purpose. **The i2i PUP is
+  rejected as the OWUI chat brain.**
+- **Zero-swap variant (b) — declined, for two reasons.** (1) The MCP
+  flow never calls the PUP at all: `runJob` sends `enhance: false`
+  (the calling model writes the final prompt and Kokon uses it as
+  is); the PUP doors only run on the UI's Prompt+ path. (2) The
+  A/B-as-planned turned out to be a no-op on the job itself (both
+  arms generated from the raw prompt — 274 s vs 262 s, no
+  difference), and the maker built separate t2i/i2i fine-tunes for a
+  reason (the 11-13 battery measured each door in its own mode only).
+  **The maker's split stays:** UI Prompt+ t2i rewrites go to the t2i
+  door, image-grounded rewrites to the i2i door. (What the arms did
+  prove: a fresh service + the MCP's serve mode against a live
+  service — initialize, sessions, a long `tools/call` answered over
+  SSE, the image saved, the lease released, clean shutdown.)
+- **D-039-8 resolved: the family chat's brain stays `g4-e2b-cuda`**
+  (the registered, ON "Kokon — vision door": `tools: true`, ~6–7 GB,
+  fast boot). The VRAM story the owner wanted still holds via the
+  matrix — chat on the E2B door and image jobs on the DiT alternate
+  (the 600 s idle TTL keeps whichever just ran warm), and vLLM is
+  evicted by either; the brain decision is about capability
+  (tool-calling), not VRAM.
+- **D-039-7 value (owner, 11-25): `kokon-qwen-image-2.1-full`** —
+  "default to qwen full". The sidecar's `QLS_MCP_MODEL` gets that id
+  on atlas (apollo host installs stay unset = follow the active
+  model).
 
 ## Owner re-visit reminder (2026-11-24 — fired the same night; settled below)
 
