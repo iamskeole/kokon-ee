@@ -382,6 +382,39 @@ the small-GPU caveat with the default at fast (the generic lever a
 client has); a per-model area cap in the service planner is the
 remaining product-level fix (owner's call). **The owner's retry:
 select "Gemma 4 E2B" in the tuxedo-cat chat and send again.**
+
+**The native OWUI image path — the UX question settled (11-25 late,
+`owui-img-039`).** The owner's first native attempt (the image feature
+with `kokon-qwen-image-2.1-full`) 404'd twice: without `/v1` in the
+connection URL ("404 page not found") and with it ("no router for
+requested model") — because this OWUI build auto-detects image models
+only through a **LiteLLM-specific `/model/info` endpoint that
+llama-swap does not serve**, so it silently fell back to OpenAI's
+default model name (`gpt-image-2`), which the gateway has no router
+for. The owner was not doing anything wrong; the box's gateway just
+doesn't speak LiteLLM's metadata dialect. The fix was config, not
+code: the saved connection (renamed "Kokon (image engine)") now has
+the `/v1`-suffixed URL, an explicit `model_ids: [kokon-qwen-image-2.1-
+full]` (explicit entries need no capability labeling — the code
+defaults them on), the family's all-users read grant, and both
+`image_generation.default_model` and `images.edit.default_model` set
+to the connection ref. **Proven by window `owui-img-039` (57 s, 1024²
+tuxedo-cat-with-crown PNG through gateway → the sdcpp door, which
+implements OpenAI's `/v1/images/generations` *and* `/v1/images/edits`
+natively — routes_openai.cpp — returning the exact `b64_json` shape
+OWUI consumes).** Consequence for the MCP: OWUI's **built-in image
+tools are on by default for every model row** (they were all along —
+`meta.builtinTools`/`meta.capabilities` default true) and they render
+the result **inline in the chat bubble** (`chat:message:files`), not
+as a link — so for one-shot generation and iteration the native path
+is the better UX and the MCP is redundant for it (the built-in
+`edit_image` covers "make it bluer" through `/v1/images/edits`); the
+MCP remains the tool for agent-style multi-image/reference flows.
+Whether the `kokon-mcp` tool stays attached to the E2B row is now
+the owner's call. Caveats carried over: the composer's default size
+is 512² (safe on this card); 1024² is the safe ceiling for Q8_0
+(1536²/2048² OOM — D-039-9); an image job evicts vllm for the door's
+5-min warm TTL, which briefly suspends the assistant session.
 ## Owner re-visit reminder (2026-11-24 — fired the same night; settled below)
 
 The owner asked to be reminded, once the surrounding work (PUP ctx,
