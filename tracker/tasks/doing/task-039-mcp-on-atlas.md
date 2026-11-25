@@ -1,4 +1,4 @@
-# Task-039 (DOING) — MCP on atlas: the family's OWUI drives Kokon through its MCP (design settled 11-24 late: a native streamable-HTTP mode; un-parked 11-25)
+# Task-039 (DOING) — MCP on atlas: the family's OWUI drives Kokon through its MCP (design settled 11-24 late: a native streamable-HTTP mode; un-parked 11-25; sidecar live on atlas + OWUI-path E2E green 11-25 — only the owner's own chat turn remains)
 
 **Created:** 2026-11-23 — the owner asked how to wire Kokon as an MCP
 source into Open WebUI on the family box now that both boxes run the
@@ -320,6 +320,40 @@ full-stack A/B, and revived vLLM in ~65 s (16-token smoke clean).
   on atlas (apollo host installs stay unset = follow the active
   model).
 
+**D-039-9 — the Q8_0 “full” door OOMs at balanced/quality on the 24GB
+card** (e2e window 01:47, 11-25 — the same failure as the unexplained
+01:19 browser job): the door boots clean (5 s; 13.8 GB of params, fit
+budget fine), the 40-step Q8_0 sample completes (124.8 s), then the
+VAE decode of the 1536×1536 latent hits `ggml: CUDA error: out of
+memory` and the engine dies mid-job (the service fails the job
+honestly: “The inference server lost track of the job (it may have
+restarted)”). The boot script
+(`_scripts/serve-kokon-qwen-image-2.1-full.sh`, ml repo) passes
+`--max-vram 0` with no decode headroom. So on this card: **qwen full =
+fast-area (1024²) images only** — the i2i door shares the same
+Q8_0+VAE set, same ceiling; turbo’s 6.6 GB set fits all areas. That is
+an engine-capacity defect in the box’s matrix (owner’s call: decode
+reserve, smaller VAE tile, or per-area caps in the planner), not an
+MCP defect — the chat chain reached the engine, sampled, and reported
+the failure cleanly.
+
+**E2E window (02:03, 11-25 — `mcp-e2e-039`, DONE in ~2 min):**
+the OWUI-container-path E2E (openwebui container → bridge → kokon-ee
+netns → sidecar 39153, Bearer → the atlas service pinned to `kokon-
+qwen-image-2.1-full` → apollo gateway → the Q8_0 door) ran
+initialize → tools/list (all 8) → one `generate_image` (fast, 1M px):
+the image `gallery/2026-11-25/020442-a-red-lighthouse-…png` (1024²,
+1.1 MB) landed in the family gallery on atlas (57.8 s generation),
+vLLM revived canonically and smoking. Two side notes: (1) the 0.12.1
+service does not log client identity (zero “mcp” strings in the log) —
+“the MCP as a separate client” stands on the sidecar’s own token-door
+connection (the job exists, the browser was not open), not on a log
+line; (2) the job log warns “The AI watermark model is not
+installed” — images generated on this box carry no visual AI
+watermark (a pre-existing box gap, owner’s call). **The one remaining
+acceptance item is the owner’s own chat turn** (ask for a picture in
+the family chat → the tool is called → the image in the gallery →
+the reply references it).
 ## Owner re-visit reminder (2026-11-24 — fired the same night; settled below)
 
 The owner asked to be reminded, once the surrounding work (PUP ctx,
