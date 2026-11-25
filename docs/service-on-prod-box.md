@@ -115,6 +115,10 @@ Guardrails:
     config.json           # mode 600 — the accelerator's config, addresses remapped
   data/                   # → /data    gallery + projects DB, service token, sessions, logs
   gallery/                # → /gallery saved images, dated folders
+
+/home/p/infra/kokon-mcp/  # added 11-25 — the MCP sidecar (the family chat → Kokon)
+  compose.yaml            # the sidecar container (the reference shape below)
+  .env                    # mode 600 — the MCP's Bearer secret (QLS_MCP_HTTP_SECRET)
 ```
 
 The repo is **not** cloned on the box (this box is a consumer, not a
@@ -177,6 +181,68 @@ form) sets the password without a restart; it is stored as an Argon2id
 hash in `data/remote-auth.json` (sessions: `data/remote-sessions.json`).
 The token API (39151) binds the container's loopback — with no
 published ports it is reachable only from inside the container.
+
+### The MCP sidecar (added 11-25)
+
+The family chat (Open WebUI, `chat.unveilx.com`) drives Kokon through a
+small sidecar container. The Kokon MCP speaks the Model Context Protocol
+over HTTP natively (`kokon-ee-mcp serve`, the spec's Streamable HTTP
+transport); the sidecar is the MCP's published image
+(`ghcr.io/iamskeole/kokon-ee-mcp` — the repo's CI publishes it in the
+same run as the service image): a Node process, no models, no engine, no
+GPU.
+
+```yaml
+# ~/infra/kokon-mcp/compose.yaml (the deployed shape)
+services:
+  kokon-mcp:
+    image: ghcr.io/iamskeole/kokon-ee-mcp:latest
+    container_name: kokon-mcp
+    restart: unless-stopped
+    # Shares the service's network namespace: its 127.0.0.1 IS the
+    # service's, so it reaches the service's loopback-only token door
+    # without any change to the service. (The opposite of the host
+    # finding above: the door is reached from inside the shared netns,
+    # and nothing is published — the one new listener, 39153, is
+    # visible only on the shared bridge.)
+    network_mode: "container:kokon-ee"
+    # The service's data volume, read-only: the sidecar reads
+    # service.json (the token door's port + token) from it.
+    volumes:
+      - ../kokon/data:/data:ro
+    environment:
+      QLS_DATA_DIR: /data
+      QLS_MCP_HTTP_PORT: "39153"
+      QLS_MCP_HTTP_HOST: "0.0.0.0"
+      QLS_MCP_HTTP_SECRET: ${QLS_MCP_HTTP_SECRET}   # from .env (mode 600)
+      QLS_MCP_MODEL: kokon-qwen-image-2.1-full      # the owner's pick, 11-25
+```
+
+- **One new listener, on the bridge only**: port 39153 on the shared
+  netns = the service's bridge IP, port 39153. Reachable from co-located
+  containers (open-webui, nginx) and nowhere else — verified from the
+  LAN and from the host's loopback (refused), and the sidecar itself
+  publishes no ports. The service's own doors are unchanged.
+- **The door**: every request must present `QLS_MCP_HTTP_SECRET` as a
+  Bearer token; the same secret lives in Open WebUI's tool-server row
+  (below). Generate it with `openssl rand -hex 32`.
+- **The model** (`QLS_MCP_MODEL`, the owner's pick `kokon-qwen-image-2.1-full`):
+  the service is shared with the browser, whose active model follows the
+  last switch, so before each job the sidecar reads the service config
+  and, on a mismatch, posts the matching picker entry (`POST
+  /models/switch` — the same shape the UI's picker sends; no new service
+  endpoint). The browser is free to wander; the next chat job
+  re-aligns.
+- **Open WebUI holds the connection** in its config store — the
+  `tool_server.connections` row in `webui.db` (type `mcp`, url
+  `http://kokon-ee:39153/mcp` — the service's container name on the
+  shared bridge, so it survives IP changes — auth `bearer`, the same
+  secret, an all-users read grant). The family's chat model can then
+  call Kokon's tools in an ordinary conversation; a job from the chat
+  lands in the same gallery as the browser's, and the service log shows
+  the MCP as a separate client (its heartbeat) from the web clients.
+- **Rollback**: `docker compose down` in `~/infra/kokon-mcp/` and delete
+  the OWUI row. The service, the browser and the engines are untouched.
 
 ### config/config.json (how it was seeded)
 
@@ -366,11 +432,12 @@ egress); it lists zones and edits records.
   generation, keep agent sessions on the accelerator's direct vLLM port
   (qwen-direct), per the autonomy protocol — never through the
   gateway.
-- **MCP (optional, later)**: the token API now lives on the container's
-  own loopback, so an MCP for this service must run *inside* the
-  container's network (a sidecar that joins it, or a tool run via
-  `docker exec`). It was not installed on atlas — the family uses the
-  browser, and the dev box keeps its own MCP.
+- **MCP (installed 11-25)**: the family chat drives Kokon through the
+  sidecar above (`~/infra/kokon-mcp/`): one more small container on the
+  box, sharing the service's network namespace, one Bearer-guarded
+  listener on the shared bridge, and an Open WebUI tool-server row with
+  the same secret. The sidecar section has the shape, the model pin and
+  the rollback.
 
 ### Dev on the accelerator, prod on the stable box — the workflow
 
