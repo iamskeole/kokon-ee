@@ -104,21 +104,39 @@ endpoint). A command line, not code.
 
 ## Acceptance
 
-1. From a chat in OWUI (chat.unveilx.com, the family model via the
-   apollo gateway) asking for a picture, a Kokon tool is invoked and
-   the image appears in atlas's gallery (and the reply references it).
-2. `mcp/` suite green (35 + 3 skipped) on the current tree.
-3. The supergateway listener is unreachable from outside the docker
-   network (no published ports; a LAN curl to atlas on that port
-   fails).
-4. The browser product path (imagine.unveilx.com) is unaffected; the
-   service log shows the MCP heartbeat as a separate client.
-5. Docs: `service-on-prod-box.md` gains the MCP section (sidecar
-   placement, the OWUI connection, rollback = down the sidecar + delete
-   the OWUI connection); `atlas.md` updated; the `mcp/` README notes
-   the box sidecar variant.
-6. No GPU window needed (pure CPU/network work) — but if the box
-   happens to be mid-window, do nothing that touches the engines.
+(Revised 11-25 to the task's final shape: the in-chat image flow is
+OWUI's built-in image tool since the native path was fixed; the
+MCP→gallery variant was proven on the mechanism but is not the in-chat
+path any more.)
+
+1. **The owner's own chat turn — the only outstanding item.** In the
+   family chat (tuxedo cat, Gemma 4 E2B) ask for a picture → the
+   built-in image tool fires through the "Kokon (image engine)"
+   connection (OWUI → gateway → the door) → **the image appears in the
+   chat** (inline in the bubble; OWUI's own media, not the family
+   gallery) and the reply references it. The MCP variant of this item
+   was already proven on the mechanism (`mcp-e2e-039`: the job in the
+   family gallery with no browser open), but the MCP was detached from
+   the row once the native path rendered the result inline — the MCP
+   stays installed for the agent-style multi-image flows.
+2. `mcp/` suite green — done (49 passed + 3 platform skips on the
+   current tree).
+3. The sidecar is unreachable from outside the docker network — done
+   (no published ports: `Ports=map[]`; a LAN curl to atlas on 39153
+   is refused; host loopback 000). The original wording said
+   "supergateway listener" — that component is gone (the native serve
+   mode replaced it; this item tracks the sidecar's port).
+4. The browser product path is unaffected; the MCP is a separate
+   client — done, with the 0.12.1 caveat: the service does not log
+   client identity, so "a separate client" stands on the sidecar
+   connection's job existing in the service while no browser session
+   was open (`mcp-e2e-039`), not on a log line.
+5. Docs — done (`service-on-prod-box.md` MCP section incl. rollback =
+   down the sidecar + delete the OWUI connection; `atlas.md`; the
+   `mcp/` README's box sidecar variant).
+6. No GPU window needed — superseded: the final E2E and the later
+   measurement windows (brain-039, pair-039, imgpeak-039) ran as proper
+   GPU windows (vLLM revived canonically in each; the 11-03 protocol).
 
 ## blockers
 
@@ -374,9 +392,11 @@ connection (the job exists, the browser was not open), not on a log
 line; (2) the job log warns “The AI watermark model is not
 installed” — images generated on this box carry no visual AI
 watermark (a pre-existing box gap, owner’s call). **The one remaining
-acceptance item is the owner’s own chat turn** (ask for a picture in
-the family chat → the tool is called → the image in the gallery →
-the reply references it).
+acceptance item is the owner's own chat turn** (acceptance #1, revised
+to the final shape: a picture asked for in the family chat comes back
+**in the chat** — OWUI's built-in image tool, inline in the bubble; the
+family-gallery destination was the MCP path's and is no longer this
+flow's).
 
 **Chat brain settled, measured (`brain-039` window, 08:24 — 80 s; and
 the owner's 08:11 POST error on the way in).** The owner's first chat
@@ -640,14 +660,14 @@ closing step.
   the `mcp/` README's serve section already documents the netns
   sidecar.
 
-**Remaining:** (1) the final E2E as a proper mini-window on apollo
-(generation through the sidecar → the image in atlas's gallery + the
-service log showing the MCP as a separate client; vLLM revived
-canonically before the marker — it will be evicted by the image job,
-and the 11-03 lesson says the revival belongs in the job); (2) the
-owner's own OWUI chat confirmation (acceptance 1: a picture asked for
-in chat, the tool invoked, the image in the gallery, the reply
-referencing it); then the done move.
+**Remaining (11-25 state):** (1) ~~the final E2E~~ — done (`mcp-e2e-039`:
+generation through the sidecar → the image in the family gallery, no
+browser open; vLLM revived canonically before the marker); (2) the
+owner's own OWUI chat confirmation (acceptance #1 as revised: a picture
+asked for in the family chat comes back **in the chat** via OWUI's
+built-in image tool — inline in the bubble, not the gallery; the
+MCP→gallery path behind it was proven in (1), then detached from the
+row once the native path was fixed); then the done move.
 
 ### VRAM pairing settled, measured (pair-039 window, 12:13 — 6.5 min)
 
