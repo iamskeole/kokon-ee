@@ -878,3 +878,65 @@ style) instead of a bare restatement. `model.params` is a JSON column
 objects and verified by readback. The 27B row has no custom system
 prompt (its chat-template default) and was left alone — the owner's
 call if he sees the echo there.
+
+### The gateway matrix: E2B and the image doors no longer evict each other (11-25, 17:49)
+
+**Owner observation:** during his OWUI image tests, (1) the E2B chat
+brain was evicted for the image door "when math says they can
+co-reside", and (2) the CPU sidekick "wasn't loaded or responding —
+no titles were generated".
+
+**(2) first — the sidekick is fine.** It has been running since
+14:40 (healthy, 7 min of CPU work), and the OWUI `chat` table shows
+titles on *every* image chat of the test window ("generate an image
+of the sun" ×3, "Image generation", "Image Generation Request") — the
+sidekick did its job during the tests. One title came back as the
+literal `'...'` (an E2B quirk); if that pattern repeats, the one-line
+fix is a `task.title.prompt_template` ("3–5 words, no ellipses").
+`task.model.default` / `task.model.external` both correctly point at
+`sidekick`, titles enabled.
+
+**(1) is a real config gap, now fixed.** The daemon journal shows the
+exact see-saw: 15:11:51 E2B boots → 15:11:54 (3 s later) a qf request
+`evict=[g4-e2b-cuda]` → 15:12:14 E2B request `evict=[kokon-
+qwen-image-2.1-full]` → and so on. Root cause: the llama-swap matrix
+is pure set logic with no VRAM awareness — it keeps a running model if
+and only if *some set* permits it beside the requested one, and no set
+contained both `e` (g4-e2b-cuda) and a qwen image door. Every request
+in either direction therefore evicted the other, even though pair-039
+measured that exact pair at 21.9 GB peak of 24.6 with zero swaps.
+(That window's co-residency ran through `/upstream/`, which bypasses
+the matrix — the Kokon service path; OWUI uses the main route, which
+is matrix-arbited. Same card, two routing paths.) **Fix (ml repo
+`722b2bc`):** `e` joins `qwen-t` and `qwen-f`; the `e2b` set gains
+`(qf | qt)`, so a chat request keeps a warm image door. Subset
+semantics (documented in the solver) make both directions
+eviction-free: a request never boots a door it didn't name. klein
+stays `k & p` (k + p + e is not measured to fit); vllm / small /
+voiced stay exclusive to E2B (23.5 / ~18 / 23.1 GB pairs don't fit).
+Validated with `-validate`; the daemon hot-reloaded at 17:49:33,
+vLLM serving throughout. Caveat: a 2MP/4MP decode with E2B
+co-resident leaves ~0.5 GB of card headroom — if a big image ever
+OOMs while the brain is warm, that is the line (remove `e` from
+`qwen-f`). The uncommitted `hq033` vLLM-0.33 swap in the same file was
+recorded separately (ml `cd9f8e1`) — it has been the live config
+since the 11-24 daemon restart.
+
+**Owner question (pending his test):** would a *non-tool-calling*
+brain — the Qwen i2i PUP, which can co-reside with any image door —
+be the most elegant setup for the legacy (forced image) path, since
+it would be resident and the prompt could be controlled natively in
+OWUI's image settings? Answer: the elegance is real, but (a) the
+PUP is a prompt-enhancement fine-tune — the i2i probe showed it
+holds a short exchange but regurgitates its PE system prompt and
+cannot call tools, so as the family's all-day chat brain it is
+weaker than E2B (the one he picked in brain-039); (b) its
+enhancement behavior is driven by a specific PE system prompt the
+*service* sends as first message — OWUI sends its own, so the door
+behaves as a plain 9B LLM, not "the proven PUP"; (c) the legacy
+forced path is a coarse message intercept (new-image only, no edit /
+multi-image tool args). And the template that path uses runs on the
+*sidekick* (the task model), not the brain. The same zero-swap
+property is now available to E2B through the matrix fix above, with
+the native tool call keeping its precision — which is the version of
+his idea that keeps the conversationalist.
