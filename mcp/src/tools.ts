@@ -7,7 +7,7 @@ import { ServiceClient, ServiceError } from "./service.js";
 
 const quality = z
   .enum(["fast", "balanced", "quality"])
-  .describe("The box's quality presets (all run the box's default model): fast = ~1 MP (the default, fastest); balanced = ~1.5K; quality = native 2K (slowest; edits share 2K with their references)");
+  .describe("The box's quality presets (all run the box's default model): fast = 1024×1024 (the default, fastest); balanced = 1536×1536; quality = 2048×2048 native 2K (slowest; edits share 2K with their references). The larger presets need more GPU memory to finish and can fail mid-job on a small home GPU — default to fast unless the user asks for a larger picture.");
 const seed = z.number().int().min(-1).max(2_147_483_647).describe("Seed for reproducible results; omit or -1 for random");
 // The seed that made the source, at the same size, is the same starting noise: the edit comes
 // out over-sharpened and ignores the prompt (the service also swaps such a seed, with a note).
