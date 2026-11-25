@@ -1110,3 +1110,35 @@ only remaining diff is the reference-preprocess flags
 (image_preprocess target=ref,mode=none / ref_image_args
 resize_before_vae=false, sent by the service, absent from the
 shim).
+
+**11-26 (final): SUCCESS — owner verdict: "flawless edit" after the
+seed fix; the two-reference chat image (two cats) came out right
+too (1536x1024, random seed, verified in its PNG metadata). The
+OWUI-native image path is now a working product: generation at
+parity with Kokon, single- and multi-reference edits, fresh
+random seeds, the sidekick kept alive, titles on a compact
+template. Close-out follow-ups (owner, same message): (1)
+512x512 fast-iteration defaults applied — OWUI connection
+size + edit_size, and the three image doors' boot fallback
+(--width/--height 512; a replacement default, not a clamp).
+Kokon itself is NOT affected by the boot fallback (the service
+always sends explicit sizes) and its canvas presets (fast = 1MP
+etc.) are a product decision in planner.rs — deliberately left
+untouched (the pristine baseline stays pristine); the one-line
+revert to 1024 is recorded in the boot comment if a 512
+edit ever shows artifacts (with the seed now random, a 512
+artifact would finally be a clean size signal). (2) The
+sidekick's ctx 131072 -> 2048 (KV pool ~0.45 GB -> ~8 MB,
+q8_0): trims its pre-allocated footprint at big-model-load
+time, the first-load title theory; the 1024-token image
+budget now takes half the pool (direct vision prompts
+through the sidekick are limited to short text; OWUI tasks
+strip images, unaffected). Revived through the watchdog's
+gateway ping (~5 s, probe 200, ctx 2048 in the new
+process's cmdline). Corrected record: the "512 = below the
+native bucket floor" size theory is downgraded — the pinned
+seed 42 explains the burnt edits at BOTH 512 and 1024; the
+size effect was never isolated and no 512 artifact has
+appeared since the seed was randomized. MCP remains parked
+(its own parked copy); this file closes the OWUI-native
+half, which absorbed the task. Task done.
