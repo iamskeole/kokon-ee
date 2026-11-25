@@ -1074,3 +1074,16 @@ variable: the enhanced prompt (the clean edit ran on a raw
 5-word prompt because the service's enhancer failed) — if a
 1024x1024 chat edit is still burnt, next single-variable test
 is a verbatim edit prompt via a one-line system-prompt rule.
+
+**11-26 (late): boot-level 1024x1024 size fallback pinned on
+all three image doors (owner: "wouldn't it make sense to have
+1024 in the boot to avoid other footguns, assuming requests can
+override").** Verified from the shim: the 512 was a replacement
+default, not a clamp (routes_openai.cpp:38 initial value, line
+44 replaces it when the body carries a size); the edit path
+inherits boot params but immediately overwrites width/height
+with the form value (−1 → reference-image dimensions), so the
+pin affects only size-less generate requests. Kokon is
+unaffected (always explicit). Committed in the ml repo;
+applies at next door boot (the daemon re-runs the script; no
+YAML change, no daemon reload, no vLLM bounce).
