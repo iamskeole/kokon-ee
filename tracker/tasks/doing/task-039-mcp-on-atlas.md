@@ -1009,3 +1009,29 @@ visual verdict). Sequence on record: 256 (14:30 OOM cure) → 512
 (19:30, my seam-reduction) → removed (owner) → 256 (owner, after
 his 4K OOM). His 4K test now runs on the restored flag; the door
 picks it up on its next boot (it was down).
+
+**11-26 (evening): the chat-vs-Kokon quality gap — root cause,
+proven, fixed.** Owner: same model "pristine in Kokon, shit in
+chat", stop chasing prompt+. Evidence: (1) OWUI resolves to the
+same door (kokon-qwen-image-2.1-full via the gateway); (2) the
+door's OpenAI shim (routes_openai.cpp) builds the request from the
+boot defaults and only reads prompt/n/size from the body — it
+sends no guidance, no negative, no sampler overrides; (3) the boot
+scripts pinned steps/sampler (parity fix) but never `--cfg-scale`,
+whose sdcpp default is 7.0; (4) the Kokon service hardcodes
+`cfg = 1.0` for every profile (planner.rs:963, "official: no CFG");
+(5) decisive: the chat PNGs carry the door's own embedded metadata
+— every one of the ugly sun/corona images is stamped
+`CFG scale: 7.0, "txt_cfg":7.0`, Steps/Sampler/Scheduler/Size/
+Model/VAE identical to the pristine Kokon ones. CFG 7 on a
+flow model trained without CFG conditioning = the overcooked
+"4-years-ago" look. Fix applied: `--cfg-scale 1.0` in the three
+image boot scripts (stock flag; the service's per-request guidance
+always overrides, so its path is byte-identical). Verification:
+owner re-runs a chat generation (same prompt, door now boots at 1.0)
+and compares against the stamped 7.0 images already in the chat.
+Remaining structural gap (edits only, documented, not fixed): the
+shim passes the raw upload as the reference (no canvas
+preprocessing, no mask, output = input size) vs the service's
+planned canvas — chat edits stay best-effort; the product edit
+path is the Kokon UI.
