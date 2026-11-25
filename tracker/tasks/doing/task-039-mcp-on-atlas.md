@@ -926,3 +926,62 @@ operation on this box: never casual while a session rides on vLLM.
 family chat brain with plain eviction semantics (no co-residency).
 If he later swaps in a proper 9B or a Gemma E4B as the brain, it is
 one OWUI model row + one set line in this file.
+
+## OWUI native path: edit artifacts and titles (2026-11-25, late)
+
+Owner re-tested the native OWUI image path (in-chat built-in
+tools, not MCP): "the image looks ugly, burnt, with scratch
+marks after an edit." Clarified by him: this is a visual
+defect (burnt colour, scratches), not prompt non-following;
+Prompt+/PUP is settled as not a valid path for the OWUI chat
+experience (do not re-propose); the MCP is parked — do not
+reopen it (the `enhance`-param draft from that session was
+reverted, working tree clean).
+
+**Edit artifacts — root-caused and fixed (engine side).** His
+18:51–19:04 session (chat `5483fcf6`: sun → "not realistic,
+want astrophotography" → "zoom in to the corona on this
+image") reconstructed from OWUI `uploads/` + `chat_message`:
+the edit input was the just-generated 512² image and the
+output 512² — no crop/resize (same size and aspect), and the
+runs already carried the parity flags (committed 16:08, before
+his boots). The only remaining engine-level difference from
+his Kokon reference was **VAE tiling**: the 256px tiles from
+the morning's OOM cure (committed 14:30) apply to both the
+reference **encode** and the output **decode** (the CLI flag
+is "tile size for vae encode and decode") — 512² ran as
+2×2 tiles both ways: seam lines in the decode (his
+"scratch marks") and seam-degraded reference latents feeding
+the DiT (his "burnt"). The Kokon service path sends explicit
+`vae_tiling_params` per request (disabled for small jobs),
+which is why its small edits never showed this. Fix:
+`--vae-tile-size 512` in all three image boot scripts (ml
+repo) — 512² becomes one circular (seam-free) tile in encode
+and decode; 1024² is 2×2; 1536²/2048² stay tiled (the OOM
+cure stands). The doors are down (journal: nothing since
+19:30), so his next image job picks the flag up on boot. The
+service path is untouched (it always sends its own tiling).
+
+**Titles — owner's hunch confirmed with box data.** The
+sidekick is CPU-resident and never loads (his correction was
+right). What actually happens: the box has 15 GB RAM, ~2 GB
+free at idle, a 64 GB swap file with ~7 GB in use at rest.
+The vLLM (W4A16 27B, ~15 GB weights) cold load stages the
+whole file through CPU first — the journal notes a 16-minute
+cold load (`healthCheckTimeout: 1200` exists for that tail).
+During that window the sidekick's 4.8 GB gets paged out, its
+title calls crawl, OWUI's internal task call times out, and
+the title is silently lost (no retry in the middleware; the
+user-message fallback only fires when the response came
+back). The second chat (load done) titles fine — exactly his
+observation. Fixes: (a) applied tonight — the OWUI
+`task.title.prompt_template` shortened to a compact
+strict-JSON template (was the ~400-token default), verified
+through the ORM; (b) pending his GO — the root-cause fix:
+the 033 venv has fastsafetensors 0.5.0 installed but the
+boot script never uses it; adding `--load-format
+fastsafetensors` streams the weights direct-to-GPU (small
+staging buffers instead of 15 GB of CPU staging) — no swap
+storm, faster load. That is a `llama-swap.yaml`/script edit =
+config reload = a vLLM bounce = a GPU-window-class operation
+(the owner's session rides on vLLM and is down for the load).
