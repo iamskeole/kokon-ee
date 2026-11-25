@@ -354,6 +354,34 @@ watermark (a pre-existing box gap, owner’s call). **The one remaining
 acceptance item is the owner’s own chat turn** (ask for a picture in
 the family chat → the tool is called → the image in the gallery →
 the reply references it).
+
+**Chat brain settled, measured (`brain-039` window, 08:24 — 80 s; and
+the owner's 08:11 POST error on the way in).** The owner's first chat
+attempt failed with a gateway 404 — he had selected the registry row
+`kokon-vision`, whose display name ("Kokon — vision door (MobileSAM +
+BiRefNet-lite, CPU)") is the lab's click-to-select segmentation
+engine: no chat endpoint exists, so the gateway answered "Unknown
+route: POST /v1/chat/completions" (his tool wiring was fine — it just
+landed on a model that cannot talk; the row is now renamed "Kokon —
+lab: click-to-select (no chat)" and de-tooled). The battery then
+settled the seat on evidence: **`g4-e2b-cuda` (Gemma 4 E2B QAT — the
+family's everyday small model) passes all three**: tool-calling (the
+tuxedo cat + the MCP's `generate_image` schema → `finish_reason:
+tool_calls`, a well-formed prompt), vision (the lighthouse PNG → "Red"
+in one word, as instructed), and chat (the fixed reply). The door
+booted in 5 s at 5.9 GB, and its matrix set co-resides with the kokon
+image doors — the owner's VRAM story with a model that actually calls
+tools (the i2i PUP's `tools` declaration proved false this morning;
+the 27B passed its tool test live too, zero-eviction, and stays the
+big brain). OWUI: the MCP tool is attached to the E2B row
+(`toolIds: [web-native, server:mcp:kokon-mcp]`). One behavioural
+finding: calling models reach for the largest preset by instinct (27B
+asked balanced, E2B asked quality) — both OOM on Q8_0 (D-039-9) — so
+the MCP's `quality` description now advertises the exact sizes plus
+the small-GPU caveat with the default at fast (the generic lever a
+client has); a per-model area cap in the service planner is the
+remaining product-level fix (owner's call). **The owner's retry:
+select "Gemma 4 E2B" in the tuxedo-cat chat and send again.**
 ## Owner re-visit reminder (2026-11-24 — fired the same night; settled below)
 
 The owner asked to be reminded, once the surrounding work (PUP ctx,
