@@ -477,3 +477,56 @@ Whichever is chosen, the standing invariant holds: the service token
 and its door stay out of every published/LAN-visible place; the web
 password is never part of the MCP path.
 
+
+## Atlas wiring (2026-11-25 — the sidecar is live)
+
+The deployment half is done; the owner's own chat confirmation is the
+closing step.
+
+- **Sidecar live** at `~/infra/kokon-mcp/` on atlas (`compose.yaml` +
+  `.env`, mode 600): image `ghcr.io/iamskeole/kokon-ee-mcp:latest`
+  (the CI second artifact), `network_mode: "container:kokon-ee"`,
+  read-only bind of `../kokon/data` as `QLS_DATA_DIR`, listener on
+  39153 in the shared netns, `QLS_MCP_HTTP_SECRET` (fresh
+  `openssl rand -hex 32`), and **D-039-7's value in the deployment:
+  `QLS_MCP_MODEL=kokon-qwen-image-2.1-full`** (the owner's 11-25
+  "default to qwen full").
+- **OWUI holds the connection**: `tool_server.connections` in
+  `webui.db` — one row (type `mcp`, url `http://kokon-ee:39153/mcp`,
+  auth `bearer` with the same secret, all-users read grant). Written
+  into the DB config store (the box's idiom — the terminal row is the
+  same shape) and loaded across a container restart. This build
+  (`:main`, alembic `9f6c2a8d1b43`) resolves MCP rows **per chat** from
+  that key (`ENABLE_TOOL_SERVERS = ENABLE_PLUGINS and env`, both true
+  by default; the startup "Initialized 0 tool server(s)" line counts
+  only the `openapi`-type import — an MCP row is expected not to show
+  there); `build_tool_server_headers` sends the row's `key` as the
+  Bearer, which is exactly the sidecar's door.
+- **Verified from the OWUI container (the exact path the chat uses):**
+  initialize → session id, server `kokon 0.12.1`; tools/list → all 8
+  tools; Bearer enforced (401 without it); `get_generator_status` and
+  the validation path answer through the service. No published ports
+  (the sidecar's own `Ports=map[]`); from the LAN IP and the host's
+  loopback the port is refused. `imagine.unveilx.com` 200 throughout.
+- **One transient observed, not ours:** a service job
+  (`job_33ce1357cca3`) failed at 01:19 with "the inference server lost
+  track of the job (it may have restarted)" — the engine had just come
+  down after the probe window's evictions; the failure is the box's
+  ordinary honest mid-job line, the gallery is untouched, and the next
+  job re-probes the engine. The final E2E (below) is the check that
+  the engine answers cleanly now.
+- **Docs:** `docs/service-on-prod-box.md` gained the sidecar section
+  (deployed compose, the one-listener story, the model pin, the OWUI
+  row, rollback) and the old "MCP (optional, later)" note now points at
+  it; the ml repo's `atlas.md` carries the `~/infra/kokon-mcp/` entry;
+  the `mcp/` README's serve section already documents the netns
+  sidecar.
+
+**Remaining:** (1) the final E2E as a proper mini-window on apollo
+(generation through the sidecar → the image in atlas's gallery + the
+service log showing the MCP as a separate client; vLLM revived
+canonically before the marker — it will be evicted by the image job,
+and the 11-03 lesson says the revival belongs in the job); (2) the
+owner's own OWUI chat confirmation (acceptance 1: a picture asked for
+in chat, the tool invoked, the image in the gallery, the reply
+referencing it); then the done move.
