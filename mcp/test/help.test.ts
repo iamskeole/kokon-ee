@@ -12,11 +12,21 @@ describe("helpText", () => {
   it("says what the program is and how to register it", () => {
     expect(text).toContain("kokon-ee-mcp 1.2.3");
     expect(text).toContain("stdio");
+    expect(text).toContain("serve");
     expect(text).toContain("npx -y kokon-ee-mcp");
   });
 
   it("lists every environment variable the server reads", () => {
-    for (const name of ["QLS_MCP_ALLOWED_DIRS", "QLS_SERVICE_EXE", "QLS_DATA_DIR", "CLAUDE_PROJECT_DIR"]) {
+    for (const name of [
+      "QLS_MCP_ALLOWED_DIRS",
+      "QLS_SERVICE_EXE",
+      "QLS_DATA_DIR",
+      "QLS_MCP_MODEL",
+      "QLS_MCP_HTTP_PORT",
+      "QLS_MCP_HTTP_HOST",
+      "QLS_MCP_HTTP_SECRET",
+      "CLAUDE_PROJECT_DIR",
+    ]) {
       expect(text).toContain(name);
     }
   });
