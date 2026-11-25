@@ -1087,3 +1087,26 @@ pin affects only size-less generate requests. Kokon is
 unaffected (always explicit). Committed in the ml repo;
 applies at next door boot (the daemon re-runs the script; no
 YAML change, no daemon reload, no vLLM bounce).
+
+**11-26 (evening, after the 1024 size fix): the chat edit is
+STILL burnt with verbatim prompt at 1024x1024 (owner's A/B) —
+and the audit found the constant factor all along: a pinned
+seed. All six chat PNGs on the box (both days, both scenes)
+carry Seed 42: no --seed in the boot scripts → struct default
+42 (common.h:219) in the door's default params → the shim
+copies them into every request (no seed in the OpenAI body) →
+resolve_seed keeps >=0 (request.cpp:72). The service's no-mask
+Edit branch was verified to be ref-only (no init/mask) — same
+structural class as the shim — so both edits are
+reference-steered re-renders whose texture is re-rolled from
+the initial noise; a single fixed noise pattern repeats on
+every chat image and reads overcooked, while Kokon's per-job
+random seed (2002833215 in the clean tabby's record) gives
+fresh rolls. Fix: --seed -1 (negative = random per request) on
+the three image doors; Kokon's explicit seeds still win.
+srand(time) 1s granularity noted. Verdict: owner's next 2-3
+chat edits; if clean, closed; if not, seed exonerated and the
+only remaining diff is the reference-preprocess flags
+(image_preprocess target=ref,mode=none / ref_image_args
+resize_before_vae=false, sent by the service, absent from the
+shim).
