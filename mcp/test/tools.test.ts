@@ -46,6 +46,7 @@ describe("input validation", () => {
   it("sends the caller's prompt as written: Kokon's Prompt+ never runs for MCP", async () => {
     const sent: Record<string, unknown>[] = [];
     const client = {
+      alignModel: async () => {},
       call: async (method: string, _path: string, body?: Record<string, unknown>) => {
         if (method === "POST" && body) sent.push(body);
         return { id: "j", status: "failed", error: { code: "x", message: "stop here" }, results: [], notes: [], queue_position: 0, plan: null, stage: null, step: null };
@@ -66,6 +67,7 @@ describe("input validation", () => {
     fs.mkdirSync(extra);
     const sent: Record<string, unknown>[] = [];
     const client = {
+      alignModel: async () => {},
       call: async (method: string, p: string, body?: Record<string, unknown>) => {
         if (p === "/config") return { outputDir: path.join(tmp, "out") };
         if (method === "POST" && body) sent.push(body);

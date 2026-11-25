@@ -7,7 +7,7 @@ import { ServiceClient, ServiceError } from "./service.js";
 
 const quality = z
   .enum(["fast", "balanced", "quality"])
-  .describe("All run Qwen-Image 2.1 Turbo (8 steps): fast = ~1 MP (the default, fastest); balanced = ~1.5K; quality = native 2K (slowest; edits share 2K with their references)");
+  .describe("The box's quality presets (all run the box's default model): fast = ~1 MP (the default, fastest); balanced = ~1.5K; quality = native 2K (slowest; edits share 2K with their references)");
 const seed = z.number().int().min(-1).max(2_147_483_647).describe("Seed for reproducible results; omit or -1 for random");
 // The seed that made the source, at the same size, is the same starting noise: the edit comes
 // out over-sharpened and ignores the prompt (the service also swaps such a seed, with a note).
@@ -177,6 +177,8 @@ export function label(j: JobView): string {
 
 async function runJob(ctx: ToolContext, body: Record<string, unknown>, includePreview: boolean): Promise<ToolResult> {
   // The calling model writes the prompt: Kokon's own prompt writer (Prompt+) never runs for MCP.
+  // QLS_MCP_MODEL pins the model this MCP's jobs run on (a no-op when unset).
+  await ctx.client.alignModel();
   const out = typeof body.output_path === "string" ? body.output_path : undefined;
   const workspace = out ? jobWorkspace(out, ctx.cwd, await roots(ctx)) : ctx.cwd;
   const job = await ctx.client.call<JobView>("POST", "/jobs", { ...body, enhance: false, workspace, client: "mcp" });

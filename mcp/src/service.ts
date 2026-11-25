@@ -10,6 +10,40 @@ import path from "node:path";
 const WIN = process.platform === "win32";
 const SERVICE_EXE = WIN ? "kokon-service.exe" : "kokon-service";
 
+// The shapes of the service config fields the MCP reads (camelCase on the wire;
+// crates/qls-core/src/config.rs).
+interface VlmEndpointShape {
+  entrypoint: string;
+  model: string;
+  apiKey?: string;
+}
+interface ExternalEngineShape {
+  gateway: string;
+  apiKey?: string;
+  model: string;
+  modelName: string;
+  sample?: Record<string, unknown>;
+  vlm?: VlmEndpointShape | null;
+  vlmVision?: VlmEndpointShape | null;
+  promptBundle?: string;
+}
+interface ExternalModelShape {
+  label: string;
+  sub?: string | null;
+  model: string;
+  modelName: string;
+  sample?: Record<string, unknown>;
+  gateway?: string | null;
+  vlm?: VlmEndpointShape | null;
+  vlmVision?: VlmEndpointShape | null;
+  promptBundle?: string;
+}
+interface ConfigShape {
+  outputDir?: string;
+  externalEngine?: ExternalEngineShape | null;
+  models?: ExternalModelShape[];
+}
+
 export interface ServiceInfo {
   port: number;
   token: string;
@@ -147,6 +181,48 @@ export class ServiceClient {
     } catch {
       /* service already gone */
     }
+  }
+
+  /**
+   * The MCP's default model (QLS_MCP_MODEL): the model this MCP's jobs run on. The
+   * service is shared with the browser UI, and its active model follows whoever
+   * switched it last — so before each job the MCP aligns the service to the
+   * configured value: it reads the service config (GET /config already carries the
+   * picker's `models` list, each entry a complete pipeline spec) and posts the
+   * matching entry through the same POST /models/switch the UI picker sends (a
+   * config write — the engine loads on the job itself, so aligning is free).
+   * Contract: a chat conversation is pinned to the configured model; the browser
+   * is free to wander; the next chat job re-aligns. Unset (or the service has no
+   * external engine, or the name matches no picker entry) = follow whatever model
+   * the service has active, as before.
+   */
+  async alignModel(): Promise<void> {
+    const target = (process.env.QLS_MCP_MODEL ?? "").trim();
+    if (!target) return;
+    let cfg: ConfigShape;
+    try {
+      cfg = await this.call<ConfigShape>("GET", "/config");
+    } catch {
+      return; // the service will be reached again by the job itself, with a real error
+    }
+    const active = cfg.externalEngine;
+    if (!active || active.model === target) return;
+    const entries = cfg.models ?? [];
+    const entry = entries.find((m) => m.model === target) ?? entries.find((m) => m.label === target);
+    if (!entry) return; // unknown to this service: leave it, and the status tool tells the truth
+    const req: Record<string, unknown> = {
+      // The entry may carry its own gateway; otherwise keep the active engine's.
+      // The key is engine-level, not per model: keep the active engine's.
+      gateway: entry.gateway ?? active.gateway,
+      apiKey: active.apiKey ?? "",
+      model: entry.model,
+      modelName: entry.modelName,
+      sample: entry.sample ?? {},
+    };
+    if (entry.vlm) req.vlm = entry.vlm;
+    if (entry.vlmVision) req.vlmVision = entry.vlmVision;
+    if (entry.promptBundle) req.promptBundle = entry.promptBundle;
+    await this.call("POST", "/models/switch", req);
   }
 
   async call<T = unknown>(method: string, route: string, body?: unknown, retry = true): Promise<T> {
