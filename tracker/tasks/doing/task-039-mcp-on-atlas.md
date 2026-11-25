@@ -320,22 +320,42 @@ full-stack A/B, and revived vLLM in ~65 s (16-token smoke clean).
   on atlas (apollo host installs stay unset = follow the active
   model).
 
-**D-039-9 — the Q8_0 “full” door OOMs at balanced/quality on the 24GB
+**D-039-9 — the Q8_0 "full" door OOMs at balanced/quality on the 24GB
 card** (e2e window 01:47, 11-25 — the same failure as the unexplained
-01:19 browser job): the door boots clean (5 s; 13.8 GB of params, fit
-budget fine), the 40-step Q8_0 sample completes (124.8 s), then the
-VAE decode of the 1536×1536 latent hits `ggml: CUDA error: out of
-memory` and the engine dies mid-job (the service fails the job
-honestly: “The inference server lost track of the job (it may have
-restarted)”). The boot script
-(`_scripts/serve-kokon-qwen-image-2.1-full.sh`, ml repo) passes
-`--max-vram 0` with no decode headroom. So on this card: **qwen full =
-fast-area (1024²) images only** — the i2i door shares the same
-Q8_0+VAE set, same ceiling; turbo’s 6.6 GB set fits all areas. That is
-an engine-capacity defect in the box’s matrix (owner’s call: decode
-reserve, smaller VAE tile, or per-area caps in the planner), not an
-MCP defect — the chat chain reached the engine, sampled, and reported
-the failure cleanly.
+01:19 browser job and the owner's 08:57 chat attempt): the door boots
+clean (5 s; 13.8 GB of params, fit budget fine), the 40-step Q8_0 sample
+completes (124.8 s), then the VAE decode of the 1536×1536 latent hits
+`ggml: CUDA error: out of memory` and the engine dies mid-job (the
+service fails the job honestly: "The inference server lost track of the
+job (it may have restarted)"). 1024² (fast) decodes fine in every
+configuration — the entire death ledger (01:19, 01:47, 08:57) is
+1536²-untiled, the entire survival ledger (02:04, the tuxedo cat) is
+1024². **Root cause (settled 11-25 evening by reading the deployed
+0.12.1 code path, not a narrative):** it is *not* a missing feature —
+the service has a full VAE-tiling planner (in since 10-16, present in
+the 11-23 image), and on a card without a locally visible GPU (atlas
+has none → `vram_total_mib = None`) its fallback branch computes
+`auto_tiling = area > 1.6MP` → **true** for 1536². But the planner's
+final step is `vae_tiling_params(tiling, server_tile, job_tile)` and the
+service config on atlas still carries the bundled-server-era
+`"vaeTileSize": 768` — so `server_vae_tiling = true`, no per-job tile
+is computed (the large-GPU tile branch needs a known VRAM), and the
+`match` arm `(true, server-tile>0) → None` means **the service sends no
+tiling parameters at all: it trusts the door to tile at boot**. The
+door's boot script (stock, in the ml repo) has *no* tiling flag — so
+the trust is misplaced and the decode runs un-tiled. One-word mismatch
+between two machines, invisible from either side alone. **The fix (one
+or two one-line changes, either suffices; owner's call):** (a) add
+`--vae-tiling` to the Q8_0 boot scripts (default 256² tiles — the size
+the reference diffusers VAE uses by default and the one pair-039
+measured safe: 16.0 GB solo / 21.9 GB with E2B, seam-free) — makes the
+service's trust true, fixes every client at once; (b) set
+`"vaeTileSize": 0` in the atlas service config — the planner then sends
+explicit 768² per-request tiles (≈0.6 MP, ~2 GB of activations; fits
+even beside E2B) instead of trusting the server. The i2i door shares
+the same Q8_0+VAE set (same ceiling); turbo's 6.6 GB set fits all
+areas. Not an MCP defect — the chat chain reached the engine, sampled,
+and reported the failure cleanly.
 
 **E2E window (02:03, 11-25 — `mcp-e2e-039`, DONE in ~2 min):**
 the OWUI-container-path E2E (openwebui container → bridge → kokon-ee
@@ -658,3 +678,46 @@ Measured, not estimated (window: ml repo `backends/_jobs/pair-039/`):
 - E2B boot cost inside the pair: 3 s warm-adjacent; it never leaves the
   card during the image job, so the next chat turn has zero model
   latency.
+
+### The standard-UI 2MP/4MP question — answered by code, no window needed (11-25 evening)
+
+Owner's question: the standard Kokon UI offers 2MP and 4MP output sizes
+— is that an afterthought with no VAE knobs, i.e. do those sizes just
+crash on this box? Answer: **not an afterthought, but yes, they do
+crash — and the reason is a one-word mismatch between two machines,
+now pinned to the exact code path.** The deployed 0.12.1 service has
+the full VAE-tiling planner (`planner.rs`, in since 10-16; the running
+image built from `b0a3919`, 11-23, contains it). Atlas has no local
+GPU, so the planner takes its no-VRAM branch: `auto_tiling =
+area > 1.6MP` → **true** for 2MP/4MP, and it computes tiling. But the
+final serialization step is `vae_tiling_params(tiling, server_tile,
+job_tile)`: the atlas service config still carries the bundled-server-
+era `"vaeTileSize": 768`, so `server_vae_tiling = true`; the no-VRAM
+branch computes no per-job tile (`large_gpu` needs a known VRAM); and
+the `(true, server-tile>0)` arm returns **None — the service sends no
+tiling parameters at all**, by design, because it believes the engine
+tiles at boot (`pipeline.rs`: "when the server already tiles
+(`--vae-tiling --vae-tile-size N`) nothing is sent"). The stock door on
+apollo (boot scripts in the ml repo) has **no tiling flag** — the
+trust is misplaced, so 1536²/2048² decodes run un-tiled and OOM
+(01:19, 01:47, 08:57); 1024² fits (02:04, the tuxedo cat, every
+survivor). The PUP was never a factor in any of it (the 08:57/08:58
+control pair had no PUP resident; the deaths are area-only). No wire
+capture was needed or possible (no sudo for tcpdump; the service does
+not log the plan at info level) — the code path plus the complete
+ledger leaves no other reading.
+
+**Fix proposals (owner's call; either suffices, both = belt and
+braces):** (a) `--vae-tiling` in the two Q8_0 boot scripts (apollo;
+256² tiles — the reference implementation's default and the size
+pair-039 measured safe with E2B co-resident); (b) `"vaeTileSize": 0`
+in the atlas service config (the planner then sends explicit 768²
+per-request tiles, ~0.6 MP each, which fit even beside the chat
+brain). After (a) the service's "trust the server" behavior is
+*correct*, which is why (a) is the cleaner fix; (b) additionally makes
+the service honest about what it sends regardless of how the door was
+booted. On adoption, a ~10-minute window proves the family path at
+2MP (and 4MP if wanted): the same balanced job through
+OWUI→sidecar→service→gateway→door that died at 01:47 and 08:57, now
+expected to land in the family gallery, vllm revived before the
+marker.
