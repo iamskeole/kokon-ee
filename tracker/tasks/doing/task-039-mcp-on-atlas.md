@@ -825,3 +825,56 @@ ref format). Lesson for any future raw writes to this box: the OWUI
 JSON-encoded form (strings double-quoted), and a broken row is
 repairable only by raw UPDATE, not through the ORM. The owner is about
 to re-test the chat turn (acceptance #1).
+
+### OWUI-path parity + the JSON echo — both fixed (11-25 evening, parity-039, 2 min)
+
+The owner's next reports: (1) pictures through OWUI's built-in tools
+are "ugly as shit" while the exact same prompt is perfect through the
+Kokon UI on the same qwen full door; (2) the chat models (E2B, Gemma
+31B) sometimes echo the tool result's raw JSON in the chat after the
+image shows.
+
+**[1] Settled by code, fixed at the boot-script level (the owner's own
+proposal).** OWUI's built-in tools send a plain OpenAI body (model,
+prompt, n, size) — no sample params — so the door fell back to
+sdcpp's built-in defaults: **20 steps** (`--steps` default) where the
+service always sends **40 (full) / 8 (turbo) / 16 (klein)**, euler. A
+knob-by-knob check of this sdcpp build found everything else already
+identical on both paths: euler and the FLUX scheduler and the 3.0
+distilled guidance all come from the model *definition* (the service's
+`SampleParams` struct has no field to override those — its `guidance`
+carries only the classical `txt_cfg`/`img_cfg`, and that CFG branch is
+inert on both paths: img mirrors txt → no unconditioned branch, so
+7.0-vs-1.0 changes nothing; `clear_sigmas` doesn't exist in this
+build at all). Steps were the only real difference. Second, structural
+factor: Kokon's UI has Prompt+ (the PUP rewrite — *off by default*; the
+owner's "perfect" run may have used it), while the native OWUI path has
+no rewrite stage — the chat model's wording is the DiT's prompt,
+full stop. **Fix:** all three image boot scripts now pin
+`--steps 40/8/16` + `--sampling-method euler` (matching the service's
+model config); the service path is unchanged (it always sends its own
+`sample_params` per request, and request JSON overrides the boot
+globals — the same merge semantics as the tiling fix). `parity-039`
+(2 min, DONE) proved all three doors boot clean on the new flags and
+run the owner's exact prompt at 512² on the bare OWUI body (qf 26 s,
+qt 6 s, k 7 s, all HTTP 200) — `r/after-*.png` beside the owner's
+20-step before-batch (pulled from OWUI's uploads, also 512²), so his
+next OWUI picture is the A/B; the doors pick the flags up on their
+600 s re-boot, so the fix was live for it. The PUP factor is met in
+the system prompt below (the brain writes a full, vivid prompt — on
+the native path the chat model is the prompt enhancer).
+
+**[2] The JSON echo is model behavior, not an error** — OWUI renders
+the image from the tool result's media, and the model *additionally*
+regurgitates the same raw JSON as text. Fixed through the model
+registry: the E2B and Gemma 31B rows' `params.system` (the
+model-level system prompt; OWUI's tool flow reads it first, before
+user/interface defaults) now carries two rules — never repeat or
+paste a tool's raw output in the reply (the image appears on its own;
+one sentence + invite the follow-ups), and write the image prompt as
+a full, vivid description (medium, subject, composition, lighting,
+style) instead of a bare restatement. `model.params` is a JSON column
+— the same 14:41 trap — so the rows were written as valid JSON
+objects and verified by readback. The 27B row has no custom system
+prompt (its chat-template default) and was left alone — the owner's
+call if he sees the echo there.
