@@ -1035,3 +1035,24 @@ shim passes the raw upload as the reference (no canvas
 preprocessing, no mask, output = input size) vs the service's
 planned canvas — chat edits stay best-effort; the product edit
 path is the Kokon UI.
+
+**11-26 (late evening): per-model CFG audit + reference-image
+path, settled (owner: settle before he tests, don't knock the
+agent down for tests).** (1) CFG 1.0 verified for all three image
+doors: the live service config pins `externalEngine.sample =
+{cfg: 1, steps: 40, euler, clear_sigmas: true}` for the qwen-full
+door (the service's actual per-job values); the Turbo card
+(= provenance.md + code comment) says 8-step distilled "CFG 1";
+FLUX.3 klein is distilled (no CFG by BFL convention), and the
+sdcpp model definitions show neither Qwen-2.1 nor FLUX.3 accepts
+a guidance embedding (only txt_cfg), with FLOW shift 3.0 / 6.93
+and Euler defaults. So the single boot flag `--cfg-scale 1.0` is
+the correct default for all three. (2) Chat reference images:
+OWUI's edit tool passes every attached image as multipart
+image[]; the door's shim turns each into a ref_images entry —
+multi-reference generation/edit works through the edit route
+(generations has no image field, structurally). Edit remains a
+full re-render (no mask/strength in the API); edit_size in the
+connection config is the geometry lever for large-photo inputs.
+Owner to test: one chat generation (same prompt as a stamped
+7.0-cfg image) + one chat edit with 1-2 attached references.
