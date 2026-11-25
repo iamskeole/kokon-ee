@@ -1056,3 +1056,21 @@ full re-render (no mask/strength in the API); edit_size in the
 connection config is the geometry lever for large-photo inputs.
 Owner to test: one chat generation (same prompt as a stamped
 7.0-cfg image) + one chat edit with 1-2 attached references.
+
+**11-26 (evening, after the CFG fix): chat generation now
+comparable to Kokon (owner verdict, image verified). Chat edit
+still "burnt" while the Kokon cat->orange-tabby edit is clean —
+same door/weights/cfg (the chat edit's PNG is stamped CFG 1.0,
+40 steps, euler: CFG exonerated). Root cause isolated to size:
+the OpenAI branch of OWUI's image router never sends the global
+image_generation.size for openai connections — only the
+connection's own size/edit_size (both were ""), so every chat
+image ran at the door's built-in 512 default (32x32 latent,
+below the maker's native 1MP bucket floor; t2i at 512 reads OK,
+edit conditioning at 512 shows overcooked texture). Kokon edits
+run 1024x1024. Fixed by setting the connection's size and
+edit_size to 1024x1024 (the real levers). Remaining open
+variable: the enhanced prompt (the clean edit ran on a raw
+5-word prompt because the service's enhancer failed) — if a
+1024x1024 chat edit is still burnt, next single-variable test
+is a verbatim edit prompt via a one-line system-prompt rule.
