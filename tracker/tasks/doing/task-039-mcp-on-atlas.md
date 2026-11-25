@@ -625,3 +625,36 @@ and the 11-03 lesson says the revival belongs in the job); (2) the
 owner's own OWUI chat confirmation (acceptance 1: a picture asked for
 in chat, the tool invoked, the image in the gallery, the reply
 referencing it); then the done move.
+
+### VRAM pairing settled, measured (pair-039 window, 12:13 — 6.5 min)
+
+Owner's question (11-25 late): which *chat model* + *image model* can hold
+the 24 GB card together so the family chat never waits for a swap?
+Measured, not estimated (window: ml repo `backends/_jobs/pair-039/`):
+
+| state (via the gateway) | idle VRAM | 1536² peak (VAE tiled 256) | 1536² job |
+|---|---|---|---|
+| Q8_0 "full" door alone | 13,716 MiB | 16,024 MiB | 200, 138 s |
+| Q8_0 + **E2B (Gemma 4 E2B QAT)** | **19,673 MiB** | **21,869 MiB** | **200, 139 s — zero switching** |
+| (reference: vLLM 27B alone) | 23,536 MiB | — | can't share with any image door |
+
+- The card is 24,564 MiB: the **pair peaks at 21.9 GB → ~2.7 GB headroom**.
+  E2B booted *on top of* the warm Q8_0 door in 3 s (the solver's new set
+  `qwen-f: qf & (p|pt|pi|e) & s & kv` keeps it — one-line DSL change,
+  validated with `-validate`, hot-reloaded; the window restored the
+  original matrix after measuring, so the box is unchanged until the
+  owner adopts it).
+- The tiling is the enabler: un-tiled 1536² decode OOMs the door (the
+  01:47 and 11:24 deaths, both = this). With 256px VAE tiles the decode
+  adds only ~2.2–2.3 GB and the image shows no seams. The door has a
+  first-class flag for it: `--vae-tiling` (+`--vae-tile-size`, default
+  256x256) — it just isn't in the boot scripts today.
+- **The two standing changes this unlocks (owner's call):** (1) add `e`
+  to the qwen-t/qwen-f PUP groups (zero-switching chat+full-quality
+  image jobs); (2) add `--vae-tiling` to the two Q8_0 boot scripts
+  (retires the "full = fast area only" rule for 1536²; 2048² untested —
+  1.8× the pixels, would be its own window). vLLM 27B still can't share
+  with anything (23.5 GB) — it remains the swap case.
+- E2B boot cost inside the pair: 3 s warm-adjacent; it never leaves the
+  card during the image job, so the next chat turn has zero model
+  latency.
