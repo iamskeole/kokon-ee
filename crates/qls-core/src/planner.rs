@@ -569,12 +569,42 @@ const OFFICIAL_2K: &[(f64, u32, u32)] = &[
     (9.0 / 16.0, 1536, 2752),
 ];
 
-/// Output size for an aspect ratio and pixel area: the official 2K bucket when one matches,
-/// else the closest aligned size.
+/// Output size for an aspect ratio and pixel area: the model's native bucket
+/// when one matches (the Qwen 2.1 table; models without a bucket table size by
+/// area and alignment alone), else the closest aligned size.
 fn size_for_aspect(aspect: f64, area: u64, rec: &RecommendedSettings) -> Size {
-    match OFFICIAL_2K.iter().find(|(a, w, h)| (a / aspect - 1.0).abs() < 0.01 && (*w as u64 * *h as u64) as f64 <= area as f64 * 1.02 && area >= 2048 * 2048) {
-        Some((_, w, h)) => Size::new(*w, *h),
-        None => dims_for_area(aspect, area as f64, rec.align, 256, rec.max_side),
+    if rec.buckets {
+        if let Some((_, w, h)) = OFFICIAL_2K.iter().find(|(a, w, h)| (a / aspect - 1.0).abs() < 0.01 && (*w as u64 * *h as u64) as f64 <= area as f64 * 1.02 && area >= 2048 * 2048) {
+            return Size::new(*w, *h);
+        }
+    }
+    dims_for_area(aspect, area as f64, rec.align, 256, rec.max_side)
+}
+
+/// A size for a `W:H` ratio at an already VRAM-capped pixel area: the closest
+/// aligned size for the model's row (the bucket table never applies here — it
+/// would cap a large tier at its 2K bucket).
+pub fn size_for_ratio(ratio: &str, area: u64, rec: &RecommendedSettings) -> Option<Size> {
+    let (aspect, _label) = parse_aspect(ratio)?;
+    Some(dims_for_area(aspect, area as f64, rec.align, 256, rec.max_side))
+}
+
+/// The MiniMax H3-Image's row (the model card: works about 4–20 MP, best around
+/// 16 MP; 16× VAE × 2×2 patch → 32-px alignment; the card's 21:9 max width;
+/// the makers' 16-reference max). Presets: 4 MP / 8 MP / 16 MP. No bucket table
+/// — H3 sizes continuously. The 16 MP quality preset stands or falls on the
+/// box's VRAM measurement (task-041's window); if the card cannot hold it, the
+/// preset drops to 12 MP with a note here.
+pub fn h3_recommended() -> RecommendedSettings {
+    RecommendedSettings {
+        sampler: "euler".into(),
+        area_fast: 4 * 1024 * 1024,
+        area_balanced: 8 * 1024 * 1024,
+        area_quality: 16 * 1024 * 1024,
+        align: 32,
+        max_side: 6272,
+        max_references: 16,
+        buckets: false,
     }
 }
 

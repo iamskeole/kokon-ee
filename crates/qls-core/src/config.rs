@@ -176,6 +176,15 @@ pub struct RecommendedSettings {
     /// (the makers' max — 10 for the current models). Enforced at job submit and in the
     /// planner; the UI reads the same number, so the composer stops at it.
     pub max_references: u32,
+    /// The model's native size buckets (the official 2K table), when it has them:
+    /// Auto sizes snap to the nearest bucket at or under the tier area. Models without
+    /// a bucket table (H3 — continuous 4–20 MP) size by area and alignment alone.
+    #[serde(default = "default_true")]
+    pub buckets: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for RecommendedSettings {
@@ -191,6 +200,7 @@ impl Default for RecommendedSettings {
             align: 32,
             max_side: 4096,
             max_references: 10,
+            buckets: true,
         }
     }
 }
