@@ -590,11 +590,13 @@ pub fn size_for_ratio(ratio: &str, area: u64, rec: &RecommendedSettings) -> Opti
 }
 
 /// The MiniMax H3-Image's row (the model card: works about 4–20 MP, best around
-/// 16 MP; 16× VAE × 2×2 patch → 32-px alignment; the card's 21:9 max width;
-/// the makers' 16-reference max). Presets: 4 MP / 8 MP / 16 MP. No bucket table
-/// — H3 sizes continuously. The 16 MP quality preset stands or falls on the
-/// box's VRAM measurement (task-041's window); if the card cannot hold it, the
-/// preset drops to 12 MP with a note here.
+/// 16 MP; 16× VAE × 2×2 patch → 32-px alignment; the makers' 16-reference max).
+/// Presets: 4 MP / 8 MP / 16 MP. No bucket table — H3 sizes continuously. The
+/// card's 21:9 examples reach 6272, but the 52491bd build's definition caps the
+/// door at 4096 per side (capabilities' limits, measured 11-26), so the planner
+/// does too. The 16 MP quality preset stands or falls on the box's VRAM
+/// measurement (task-041's window); if the card cannot hold it, the preset
+/// drops to 12 MP with a note here.
 pub fn h3_recommended() -> RecommendedSettings {
     RecommendedSettings {
         sampler: "euler".into(),
@@ -602,7 +604,7 @@ pub fn h3_recommended() -> RecommendedSettings {
         area_balanced: 8 * 1024 * 1024,
         area_quality: 16 * 1024 * 1024,
         align: 32,
-        max_side: 6272,
+        max_side: 4096,
         max_references: 16,
         buckets: false,
     }

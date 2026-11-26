@@ -257,3 +257,26 @@ gateway id = llama alias = service `model` field = boot-script name).
   sending those fields (the 395/245/49 tests pass without them); qwen/flux
   edit/inpaint lose the `resize_before_vae=false` override — the definition's
   resize applies (stock-build behaviour, not overridable from the API).
+- **D-041-18 (11-26, why every H3 job was 1760²)** — the service container
+  has no nvidia-smi, so the planner's GPU detection is blind and falls back
+  to the unknown-VRAM budget (12288 tokens × 256 px = 3 MP → 1760²): fast
+  (4 MP) and quality (16 MP) were both clamped to the same 1760². The
+  deployment fixes it with the documented escape hatch for split boxes:
+  `vramOverrideMib: 24576` in config.json (the accelerator's total; the
+  override path skips detection entirely). On 24576 the budget is 22528
+  tokens ≈ 5.8 MP, so balanced and quality converge there until the
+  measurement window decides the quality tier (B2).
+- **D-041-19 (11-26, the mixed active state)** — `absorb_secrets` rule (4)
+  inherits the stored `vlm`/`vlmVision` whenever an incoming config names
+  none (stock 0.12 UIs carry no such fields; an explicit `null` is
+  indistinguishable from absent through `Option<T>`), so switching from
+  arm B back to arm A stranded the 9B qwen i2i door as arm A's `vlmVision`
+  and H3 edits would have routed to the wrong PUP. Fix is deployment-side,
+  matching the rule's own invariant (a named door is explicit state): arm
+  A's picker entry now names the makers' PE door for **both** `vlm` and
+  `vlmVision` — the PE serves both modes (the request shape is mode-driven,
+  not door-driven), so the vision door falls back to nothing it needs.
+- **D-041-20 (11-26)** — H3 `max_side` 6272 → 4096: the card's 21:9 examples
+  reach 6272, but the 52491bd build caps the door at 4096 per side
+  (capabilities' limits), and the planner must not hand the door a size it
+  rejects (the explicit width/height validation uses the same bound).
