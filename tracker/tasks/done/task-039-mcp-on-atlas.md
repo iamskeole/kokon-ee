@@ -1130,12 +1130,13 @@ edit ever shows artifacts (with the seed now random, a 512
 artifact would finally be a clean size signal). (2) The
 sidekick's ctx 131072 -> 2048 (KV pool ~0.45 GB -> ~8 MB,
 q8_0): trims its pre-allocated footprint at big-model-load
-time, the first-load title theory; the 1024-token image
-budget now takes half the pool (direct vision prompts
-through the sidekick are limited to short text; OWUI tasks
-strip images, unaffected). Revived through the watchdog's
-gateway ping (~5 s, probe 200, ctx 2048 in the new
-process's cmdline). Corrected record: the "512 = below the
+time, the first-load title theory — then BUMPED TO 16384
+the same evening, the owner's catch: the 1024-token image
+budget x 10 images (the makers' card) plus text needs the
+room (16k pool = ~55 MB, the load-time relief stands; the
+gateway yaml's context metadata and the script's comments
+synced). Revived twice through the watchdog's gateway ping
+(final process: ctx 16384 in its cmdline, probe 200). Corrected record: the "512 = below the
 native bucket floor" size theory is downgraded — the pinned
 seed 42 explains the burnt edits at BOTH 512 and 1024; the
 size effect was never isolated and no 512 artifact has
