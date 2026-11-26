@@ -181,6 +181,12 @@ pub struct RecommendedSettings {
     /// a bucket table (H3 — continuous 4–20 MP) size by area and alignment alone.
     #[serde(default = "default_true")]
     pub buckets: bool,
+    /// Measured full-run VRAM peak of the model's largest tier, plus headroom. When a
+    /// card holds it, the tiers stand on their own and the Qwen-calibrated token budget
+    /// (which would clamp them) is waived for single-image jobs. `None` for models the
+    /// budget describes well.
+    #[serde(default)]
+    pub measured_peak_mib: Option<u64>,
 }
 
 fn default_true() -> bool {
@@ -201,6 +207,7 @@ impl Default for RecommendedSettings {
             max_side: 4096,
             max_references: 10,
             buckets: true,
+            measured_peak_mib: None,
         }
     }
 }

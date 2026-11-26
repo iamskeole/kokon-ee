@@ -607,6 +607,12 @@ pub fn h3_recommended() -> RecommendedSettings {
         max_side: 4096,
         max_references: 16,
         buckets: false,
+        // Measured 2026-11-26 on this 24 GB card (the 52491bd build, quantized H3):
+        // a full 4096×4096 job — the card's 6-step schedule plus the VAE decode —
+        // peaked at 22152 MiB, 2.4 GB under the card; a 2048×2048 job at 19180 MiB.
+        // The Qwen-calibrated token budget over-clamps this model (its per-token
+        // activations are lighter), so the tiers stand on the measured peak.
+        measured_peak_mib: Some(23_552),
     }
 }
 
@@ -994,7 +1000,18 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
     // Turbo: its fixed 8-step schedule without CFG (model card).
     let cfg = 1.0;
     let budget_tokens = planning_token_budget(inputs.vram_total_mib, inputs.unified_memory);
-    let budget_area = budget_tokens * PIXELS_PER_TOKEN;
+    let budget_area = if let Some(peak) = rec.measured_peak_mib {
+        // This model's tiers are measured, not budgeted: a card that holds the largest
+        // tier's measured peak (single-image jobs only — reference jobs keep the shared
+        // budget) holds every tier, so the Qwen-calibrated token budget is waived.
+        if inputs.image_sizes.is_empty() && inputs.vram_total_mib.map(|v| v >= peak).unwrap_or(false) {
+            rec.area_quality
+        } else {
+            budget_tokens * PIXELS_PER_TOKEN
+        }
+    } else {
+        budget_tokens * PIXELS_PER_TOKEN
+    };
     let tier_area = resolution_area(req.resolution, quality, rec);
     let adv = &req.advanced;
     let mut steps = TURBO_STEPS;
@@ -1349,6 +1366,27 @@ mod tests {
         let rec = RecommendedSettings { max_references: 3, ..RecommendedSettings::default() };
         let four = PlanInputs { image_sizes: vec![Size::new(1024, 1024); 4], ..Default::default() };
         assert_eq!(plan(&r, &four, &rec).unwrap_err().message, "Use at most 3 reference images.");
+    }
+
+    #[test]
+    fn h3_tiers_stand_on_their_measured_peak() {
+        let h3 = h3_recommended();
+        let req = |q: Quality| GenerationRequest { prompt: "a red bicycle".into(), quality: q, ..Default::default() };
+        // This box's card (the 24 GB override): the 16 MP quality tier stands, even
+        // though the Qwen-calibrated budget would clamp it to ~6.4 MP.
+        let big = PlanInputs { vram_total_mib: Some(24_576), ..Default::default() };
+        let q = plan(&req(Quality::Quality), &big, &h3).unwrap();
+        assert_eq!((q.output.width, q.output.height), (4096, 4096), "the measured peak fits this card");
+        assert!(q.notes.iter().all(|n| !n.contains("Resolution reduced")), "{:?}", q.notes);
+        // A card that cannot hold the measured peak keeps the generic budget.
+        let small = PlanInputs { vram_total_mib: Some(16_303), ..Default::default() };
+        let s = plan(&req(Quality::Quality), &small, &h3).unwrap();
+        assert!(s.output.area() < 16 * 1024 * 1024, "clamped on the smaller card: {}x{}", s.output.width, s.output.height);
+        // Reference-bearing jobs keep the shared budget even on the big card.
+        let with_ref = PlanInputs { vram_total_mib: Some(24_576), image_sizes: vec![Size::new(1024, 1024)], ..Default::default() };
+        let e = plan(&GenerationRequest { prompt: "change the sky".into(), quality: Quality::Quality, ..Default::default() }, &with_ref, &h3).unwrap();
+        assert_eq!(e.mode, ResolvedMode::Edit);
+        assert!(e.output.area() < 16 * 1024 * 1024, "the shared budget still clamps edits: {}x{}", e.output.width, e.output.height);
     }
 
     #[test]
