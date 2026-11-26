@@ -159,6 +159,150 @@ pub fn bfl_pup(model: &str) -> bool {
     model.contains("klein")
 }
 
+/// The H3 pipeline, by the gateway model id (the namespace is ours; the only
+/// model carrying "h3" is the MiniMax H3 door). Like BFL, a contract model:
+/// it runs on the makers' PE captions, so its prompt bundle is mandatory and
+/// its PE door is required.
+pub fn h3_pup(model: &str) -> bool {
+    model.contains("h3")
+}
+
+/// One reference of the H3 editing assembly: the image the door sees
+/// (base64, as prepared for the job) and the source image's original display
+/// size (EXIF-oriented, before any preview resize) — the card's ratio
+/// metadata is computed from that size, not the prepared one.
+pub type H3Ref = (String, crate::geometry::Size);
+
+/// Reduce `W`:`H` (or `W`x`H` / `W`/`H`) to the exact lowest positive-integer
+/// ratio the card's editing contract asks for; None when the selection is not
+/// a pair of positive integers (auto, words, …).
+fn reduce_ratio(sel: &str) -> Option<String> {
+    let parts: Vec<&str> = sel
+        .trim()
+        .split([':', 'x', 'X', '/'])
+        .collect();
+    let [w, h] = parts.as_slice() else {
+        return None;
+    };
+    let (w, h): (u32, u32) = (w.trim().parse().ok()?, h.trim().parse().ok()?);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let mut a = w;
+    let mut b = h;
+    while b != 0 {
+        let t = a % b;
+        a = b;
+        b = t;
+    }
+    Some(format!("{}:{}", w / a, h / a))
+}
+
+/// The H3 PE's request for a mode: the makers' contract, assembled exactly as
+/// the card's own client does.
+///
+/// T2I: the released system prompt, and the user instruction spliced into the
+/// task template's single placeholder (the client's `.format(user_query)`) —
+/// one user message, no images, the card's sampling row.
+///
+/// Editing (and every other image-bearing mode: the door's one editing task
+/// covers multi-reference and compositions): one user message with the parts
+/// the card names — the fixed task prompt first (the shared prefix), the
+/// reference count, each image's `Reference Media` label (the source ratio)
+/// immediately before the image, and the final part with the instruction as a
+/// JSON string and the user's aspect-ratio selection (`adaptive` when the
+/// user left it on auto).
+pub fn h3_request(
+    bundle: &crate::pup::PupBundle,
+    mode: ResolvedMode,
+    prompt: &str,
+    refs: &[H3Ref],
+    aspect: Option<&str>,
+    seed: i64,
+) -> crate::error::AppResult<crate::vlm::VlmTurn> {
+    use crate::error::{AppError, ErrorCode};
+    use crate::vlm::{VlmPart, VlmTurn};
+    let row = bundle.h3_sampling_for(mode);
+    let sampling = TextSampling {
+        temperature: row.temperature,
+        top_p: row.top_p,
+        top_k: row.top_k,
+        presence_penalty: 0.0,
+        seed,
+    };
+    if mode == ResolvedMode::Generate {
+        let system = bundle
+            .h3_t2i_system
+            .as_ref()
+            .ok_or_else(|| AppError::new(ErrorCode::InvalidConfig, "internal: the H3 bundle carries no T2I system prompt"))?;
+        let task = bundle
+            .h3_t2i_task
+            .as_ref()
+            .ok_or_else(|| AppError::new(ErrorCode::InvalidConfig, "internal: the H3 bundle carries no T2I task template"))?;
+        let spliced = crate::pup::format_one(task, prompt.trim()).ok_or_else(|| {
+            AppError::new(
+                ErrorCode::InvalidConfig,
+                "the H3 bundle's T2I task template is not the makers' format shape",
+            )
+        })?;
+        return Ok(VlmTurn {
+            system: Some(system.clone()),
+            parts: vec![VlmPart::Text(spliced)],
+            max_tokens: row.max_tokens,
+            sampling,
+        });
+    }
+    if refs.is_empty() {
+        return Err(AppError::new(
+            ErrorCode::InvalidConfig,
+            "internal: the H3 editing assembly has no reference image",
+        ));
+    }
+    let task = bundle
+        .h3_edit_task
+        .as_ref()
+        .ok_or_else(|| AppError::new(ErrorCode::InvalidConfig, "internal: the H3 bundle carries no editing task prompt"))?;
+    let n = refs.len();
+    let mut parts = vec![
+        VlmPart::Text(task.clone()),
+        VlmPart::Text(format!(
+            "Reference Image Count:\n{n} input image(s), labeled <Picture 1> through <Picture {n}>."
+        )),
+    ];
+    for (i, (img, size)) in refs.iter().enumerate() {
+        let mut a = size.width;
+        let mut b = size.height;
+        while b != 0 {
+            let t = a % b;
+            a = b;
+            b = t;
+        }
+        let ratio = if a > 0 { format!("{}:{}", size.width / a, size.height / a) } else { "unavailable".into() };
+        parts.push(VlmPart::Text(format!(
+            "Reference Media:\n- <Picture {}> [aspect_ratio {ratio}]",
+            i + 1
+        )));
+        parts.push(VlmPart::Image(img.clone()));
+    }
+    // The card's final part: the instruction as a JSON string, and the user's
+    // selection — an explicit ratio preserved exactly (reduced to the card's
+    // W:H form), or `adaptive` when the user left it to the model.
+    let sel = match aspect {
+        Some(a) => reduce_ratio(a).unwrap_or_else(|| a.trim().to_string()),
+        None => "adaptive".into(),
+    };
+    let instruction = serde_json::to_string(prompt).unwrap_or_default();
+    parts.push(VlmPart::Text(format!(
+        "\nUser Editing Instruction (JSON string):\n{instruction}\n\nUser Aspect Ratio Selection:\n{sel}\n\nApply the instructions above to the supplied inputs and reference images. Output only the required two-field JSON object."
+    )));
+    Ok(VlmTurn {
+        system: None,
+        parts,
+        max_tokens: row.max_tokens,
+        sampling,
+    })
+}
+
 /// BFL's PUP sampling: the reference runs greedy (temperature 0), long output budget, and a
 /// presence penalty on the text-to-image task only.
 pub const BFL_SAMPLING: TextSampling = TextSampling {
