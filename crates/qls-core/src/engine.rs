@@ -1325,6 +1325,23 @@ impl Engine {
     }
 
     /// Dry run: the plan a request would get (used by the UI to show working sizes).
+    /// The sizing row the planner uses for the active pipeline: the H3 door
+    /// takes the card's own row (D-041-3), every other pipeline the active
+    /// profile's row (bundled engines and the qwen models alike).
+    fn effective_rec(&self, cfg: &crate::config::AppConfig) -> crate::config::RecommendedSettings {
+        let profile = cfg.profile();
+        let active_model: String = cfg
+            .external_engine
+            .as_ref()
+            .map(|e| e.model.clone())
+            .unwrap_or_else(|| profile.diffusion_model.to_string_lossy().into_owned());
+        if enhancer::h3_pup(&active_model) {
+            planner::h3_recommended()
+        } else {
+            profile.recommended_settings.clone()
+        }
+    }
+
     pub fn preview_plan(
         &self,
         req: &GenerationRequest,
@@ -1338,7 +1355,7 @@ impl Engine {
         let mut inputs = plan_inputs(&cfg, sizes, mask, vram);
         inputs.speed_factor = self.speed_factor(&cfg);
         inputs.unified_memory = self.gpu().is_some_and(|g| g.unified);
-        planner::plan(req, &inputs, &cfg.profile().recommended_settings)
+        planner::plan(req, &inputs, &self.effective_rec(&cfg))
     }
 
     async fn run_job(self: Arc<Self>, id: &str) -> AppResult<()> {
@@ -1388,12 +1405,16 @@ impl Engine {
         // 2. Plan.
         let cfg = self.config();
         let profile = cfg.profile().clone();
+        // Sizes decided by code, per model (the product rule): the H3 door gets
+        // the card's own row (4/8/16 MP, 32-px alignment, the makers' 16
+        // references); every other pipeline keeps the active profile's row.
+        let rec = self.effective_rec(&cfg);
         let vram = self.planning_vram(&cfg);
         let mask_info = mask.as_ref().map(|(m, _)| (Size::new(m.width(), m.height()), imaging::mask_bbox(m, 16), imaging::mask_coverage(m, 16)));
         let mut plan_inputs = plan_inputs(&cfg, images.iter().map(|i| i.size()).collect(), mask_info, vram);
         plan_inputs.speed_factor = self.speed_factor(&cfg);
         plan_inputs.unified_memory = self.gpu().is_some_and(|g| g.unified);
-        let plan = planner::plan(&request, &plan_inputs, &profile.recommended_settings)?;
+        let plan = planner::plan(&request, &plan_inputs, &rec)?;
         let mut seed = request.seed.unwrap_or_else(random_seed);
         let mut notes = plan.notes.clone();
         // A seed the user chose that made one of the references (see `avoid_reference_seeds`).
@@ -1452,6 +1473,18 @@ impl Engine {
         }
         let quick_upscale = plan.upscale.is_some();
         let icc = images.first().and_then(|i| i.icc_profile.clone());
+        // The original display sizes (EXIF-oriented, before any preview resize):
+        // the H3 PE's editing metadata carries the source ratio computed from
+        // them (the card's row), while the door sees the prepared images.
+        let ref_sizes: Vec<crate::geometry::Size> = images.iter().map(|i| i.size()).collect();
+        // The active pipeline's model id (bundled: the diffusion file; external:
+        // the gateway's id) — the upsampler routing and the H3 contract keys off
+        // it.
+        let model_name: String = cfg
+            .external_engine
+            .as_ref()
+            .map(|e| e.model.clone())
+            .unwrap_or_else(|| profile.diffusion_model.to_string_lossy().into_owned());
         let mut enhanced: Option<String> = None;
         let mut loras: Vec<AppliedLora> = Vec::new();
 
@@ -1509,18 +1542,64 @@ impl Engine {
                         pipeline::EnhancerKind::Area { action, color } => enhancer::area_request(*action, color, &request.prompt, v.image.clone(), seed),
                         pipeline::EnhancerKind::Expand { sides } => enhancer::expand_request(sides, &request.prompt, v.image.clone(), seed),
                     };
-                    enhanced = self.enhance_prompt(id, &client, &caps, &cfg, cfg.external_engine.as_ref().map(|e| e.model.as_str()).unwrap_or(""), plan.mode, &request.prompt, &[], None, seed, Some(req), request.enhance_detail).await?;
+                    enhanced = self.enhance_prompt(id, &client, &caps, &cfg, &model_name, plan.mode, &request.prompt, &[], &[], None, None, seed, Some(req), request.enhance_detail).await?;
                     if let Some(text) = &enhanced {
                         sd_req.prompt = v.prompt(&plan, text);
                     }
                 } else {
                     // Marks: an edit of the marked region (its one reference).
                     let as_mode = if plan.marks { ResolvedMode::Edit } else { plan.mode };
-                    enhanced = self.enhance_prompt(id, &client, &caps, &cfg, cfg.external_engine.as_ref().map(|e| e.model.as_str()).unwrap_or(""), as_mode, &request.prompt, &sd_req.ref_images, None, seed, None, request.enhance_detail).await?;
+                    enhanced = self.enhance_prompt(id, &client, &caps, &cfg, &model_name, as_mode, &request.prompt, &sd_req.ref_images, &ref_sizes, None, request.aspect_ratio.as_deref(), seed, None, request.enhance_detail).await?;
                     if let Some(text) = &enhanced {
-                        sd_req.prompt = pipeline::enhanced_prompt(&request.prompt, text);
+                        if enhancer::h3_pup(&model_name) {
+                            // The H3 DiT runs on the PE's expanded caption, whole: the makers'
+                            // pipeline sends exactly it. The user's words stay the job's record
+                            // (and the stage's display), not the DiT's prompt.
+                            sd_req.prompt = text.clone();
+                        } else {
+                            sd_req.prompt = pipeline::enhanced_prompt(&request.prompt, text);
+                        }
                         // The rewrite understood a transparency request the keywords missed: keep the alpha.
                         post.keep_alpha |= pipeline::rewrite_wants_transparency(text);
+                    }
+                }
+            }
+            // D-041-4: the PE's ratio drives a pure t2i's size when the user left the
+            // aspect on auto — the makers' pipeline uses the recommendation for
+            // generation, and this box has no bucket table to round it back to
+            // square. An explicit selection (a ratio or a custom size) always wins;
+            // image-bearing modes keep the planned canvas (their ratio is recorded
+            // on the view, as qwen's is).
+            if enhancer::h3_pup(&model_name)
+                && plan.mode == ResolvedMode::Generate
+                && request.images.is_empty()
+                && request.mask.is_none()
+                && request.marks.is_none()
+                && request.outpaint.is_none()
+                && request.vary.is_none()
+                && request.width.is_none()
+                && request.height.is_none()
+                && request
+                    .aspect_ratio
+                    .as_deref()
+                    .map(|a| a.is_empty() || a.eq_ignore_ascii_case("auto"))
+                    .unwrap_or(true)
+            {
+                let ratio = self.job(id).and_then(|v| v.suggested_ratio.clone());
+                if let (Some(ratio), Some(size)) = (ratio.as_deref(), ratio.as_deref().and_then(|r| planner::size_for_ratio(r, plan.output.area(), &rec))) {
+                    if size != plan.output {
+                        sd_req.width = size.width;
+                        sd_req.height = size.height;
+                        post.working = size;
+                        post.content = crate::geometry::Rect::new(0, 0, size.width, size.height);
+                        post.output = size;
+                        self.update(id, |j| {
+                            if let Some(p) = &mut j.view.plan {
+                                p.working = size;
+                                p.output = size;
+                            }
+                            j.view.notes.push(format!("The upsampler's {ratio} choice sizes this image (your aspect is auto)."));
+                        });
                     }
                 }
             }
@@ -1780,7 +1859,9 @@ impl Engine {
         mode: ResolvedMode,
         prompt: &str,
         images: &[String],
+        ref_sizes: &[crate::geometry::Size],
         canvas: Option<(u32, u32)>,
+        aspect: Option<&str>,
         seed: i64,
         own: Option<TextGenRequest>,
         detail: bool,
@@ -1830,6 +1911,15 @@ impl Engine {
             }
             None => None,
         };
+        // D-FB, contract edition: the H3 door runs on the makers' PE captions,
+        // so it needs its PE door — without one the job fails instead of
+        // running the DiT on the user's raw words (BFL's rule, same family).
+        if enhancer::h3_pup(model) && vlm.is_none() {
+            return Err(AppError::new(
+                ErrorCode::InvalidConfig,
+                "this model runs on its prompt-upsampler door (the makers' PE fine-tune): set its vlm entry and its promptBundle in the config",
+            ));
+        }
         if vlm.is_none() && !caps.text_generation {
             self.update(id, |j| j.view.notes.push("This inference engine has no prompt enhancer (update it in Setup); your prompt was used as written.".into()));
             return Ok(None);
@@ -1848,6 +1938,22 @@ impl Engine {
                     AppError::new(
                         ErrorCode::InvalidConfig,
                         "this pipeline has no prompt bundle configured: set its promptBundle to the BFL bundle (the deployment ships the bundle in its data dir's assets folder)",
+                    )
+                })?;
+            Some(crate::pup::load(&dir)?)
+        } else if enhancer::h3_pup(model) {
+            // The H3 door runs on the makers' PE captions (a contract model):
+            // its bundle is mandatory, and it is the pipeline's own (the picker
+            // entry's promptBundle), like the qwen bundles.
+            let dir = cfg
+                .models
+                .iter()
+                .find(|m| m.model == model)
+                .and_then(|m| m.prompt_bundle_path())
+                .ok_or_else(|| {
+                    AppError::new(
+                        ErrorCode::InvalidConfig,
+                        "this model runs on the makers' PE captions: set its promptBundle (the deployment ships the pup-h3 bundle in its data dir's assets folder)",
                     )
                 })?;
             Some(crate::pup::load(&dir)?)
@@ -1903,11 +2009,24 @@ impl Engine {
         // The native one-shot style skips the dance: its I2I door is fine-tuned on exactly
         // this task, so the references go in with the request as one call.
         let own_present = own.is_some();
+        // The H3 contract (D-041): the door answers the makers' JSON envelope
+        // (an expanded caption and a ratio), so its turn is assembled from the
+        // bundle's own files and the reply is decoded before use. One call,
+        // one path — the engine-API shape and the native decode never apply.
+        // Own (area/Expand) requests carry Kokon's own words, not the makers'
+        // contract: they go through the ordinary path below and stay raw.
+        if !own_present
+            && bundle.as_ref().is_some_and(|b| b.minimax_h3)
+            && let Some(v) = vlm.as_ref()
+        {
+            return self.enhance_h3(id, v, bundle.as_ref().expect("the H3 bundle was loaded above"), mode, prompt, images, ref_sizes, aspect, seed).await;
+        }
         let req = if let Some(r) = own {
             // A painted area or an expansion: its request is made with its own view.
             r
         } else if mode == ResolvedMode::Compose
             && !enhancer::bfl_pup(model)
+            && !enhancer::h3_pup(model)
             && !bundle.as_ref().is_some_and(|b| b.native && b.compose_one_shot)
         {
             let mut labels = Vec::with_capacity(images.len());
@@ -2174,6 +2293,112 @@ impl Engine {
             j.view.notes.push(format!("The prompt enhancer failed ({}); your prompt was used as written.", failure.trim_end_matches('.')));
         });
         Ok(None)
+    }
+
+    /// The H3 PE's turn (D-041): the makers' contract end to end. The door's
+    /// answer is its fine-tune's envelope — a reasoning block, then exactly
+    /// one JSON object (`expanded_caption` and a ratio); the decode extracts
+    /// both (the ratio lands on the job view's suggestion, where the t2i size
+    /// re-resolution reads it). Out of contract: one warm retry; out of
+    /// contract twice: the raw (think-stripped) answer is kept, noted — the
+    /// native decode's discipline. A down door fails the job (D-FB): this
+    /// method only receives [`crate::vlm::VlmClient`] errors.
+    async fn enhance_h3(
+        &self,
+        id: &str,
+        vlm: &crate::vlm::VlmClient,
+        bundle: &crate::pup::PupBundle,
+        mode: ResolvedMode,
+        prompt: &str,
+        images: &[String],
+        ref_sizes: &[crate::geometry::Size],
+        aspect: Option<&str>,
+        seed: i64,
+    ) -> AppResult<Option<String>> {
+        self.update(id, |j| {
+            j.view.status = JobStatus::EnhancingPrompt;
+            j.view.stage = None;
+            j.view.enhanced_prompt = Some(String::new());
+        });
+        let started = Instant::now();
+        let refs: Vec<enhancer::H3Ref> = images
+            .iter()
+            .zip(ref_sizes)
+            .map(|(b, s)| (b.clone(), *s))
+            .collect();
+        let mut turn = enhancer::h3_request(bundle, mode, prompt, &refs, aspect, seed)?;
+        let mut done = vlm.chat_turn(&turn, Duration::from_secs(300)).await?;
+        self.update(id, |j| j.view.enhanced_prompt = Some(done.text.clone()));
+        let decoded = crate::vlm::decode_h3(&done.text, mode);
+        let decoded = match decoded {
+            Some(h) => Some(h),
+            None => {
+                tracing::info!("prompt enhancer: the H3 reply was out of contract; retrying once");
+                // Greedy sampling with the same seed would write the same
+                // answer — nudge the seed so the warm retry can differ.
+                turn.sampling.seed += 1;
+                done = vlm.chat_turn(&turn, Duration::from_secs(300)).await?;
+                self.update(id, |j| j.view.enhanced_prompt = Some(done.text.clone()));
+                match crate::vlm::decode_h3(&done.text, mode) {
+                    Some(h) => {
+                        tracing::info!("prompt enhancer: the H3 retry answered in contract");
+                        Some(h)
+                    }
+                    None => {
+                        // The door ran and answered, just out of contract twice:
+                        // keep the raw answer, noted (the native decode's D-PE9 rule).
+                        self.update(id, |j| {
+                            j.view.notes.push(
+                                "The prompt upsampler did not answer in its expected JSON form; its raw answer was used."
+                                    .into(),
+                            );
+                        });
+                        let raw = crate::vlm::strip_think(&done.text);
+                        done.text = if raw.trim().is_empty() { done.text } else { raw };
+                        None
+                    }
+                }
+            }
+        };
+        let written = match decoded {
+            Some(h) => {
+                if let Some(r) = &h.ratio {
+                    self.update(id, |j| j.view.suggested_ratio = Some(r.clone()));
+                }
+                tracing::info!(
+                    "prompt enhancer: H3 reply decoded ({} chars answer -> {} chars caption, {:.1} s, {} thinking chars)",
+                    h.caption.len(),
+                    h.caption.len(),
+                    started.elapsed().as_secs_f32(),
+                    done.reasoning_chars
+                );
+                Some(h.caption)
+            }
+            None => enhancer::clean(&done.text),
+        };
+        match written {
+            Some(t) => {
+                tracing::info!(
+                    "prompt enhancer: {} completion tokens in {:.1} s ({})",
+                    done.completion_tokens,
+                    started.elapsed().as_secs_f32(),
+                    done.finish_reason
+                );
+                let cut = done.finish_reason == "length";
+                self.update(id, |j| {
+                    j.view.enhanced_prompt = Some(t.clone());
+                    j.enhanced = Some(t.clone());
+                    if cut {
+                        j.view.notes.push("The prompt enhancer reached its length limit; its prompt may end abruptly.".into());
+                    }
+                });
+                Ok(Some(t))
+            }
+            None => Err(AppError::new(
+                ErrorCode::Upsampler,
+                "the prompt upsampler wrote nothing usable",
+            )),
+        }
     }
 
     /// Label of an upscale request that has no prompt: the source's own prompt, if any.
@@ -2818,7 +3043,7 @@ mod tests {
         let id = submit();
         let mut events = e.events.subscribe();
         let (port, body) = fake_server(200, "text/event-stream", sse_answer(&["Change the cat's", " fur to black."], "stop"), Duration::from_millis(150)).await;
-        let out = e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Edit, "rendi il gatto nero", &images, None, 42, None, false).await.unwrap();
+        let out = e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Edit, "rendi il gatto nero", &images, &[], None, None, 42, None, false).await.unwrap();
         assert_eq!(out.as_deref(), Some("Change the cat's fur to black."));
         let mut partial = false;
         while let Ok(ev) = events.try_recv() {
@@ -2833,31 +3058,31 @@ mod tests {
         assert_eq!((sent["images"][0].as_str(), sent["sampling"]["seed"].as_i64()), (Some("PNG1"), Some(42)), "the references and the job's seed");
         assert_eq!(sent["system_prompt"], enhancer::EDIT_SYSTEM_PROMPT);
         // A retry (out of memory) keeps that prompt without asking the server again.
-        let again = e.enhance_prompt(&id, &SdcppClient::new(1), &caps, &cfg, "kokon-turbo", ResolvedMode::Edit, "rendi il gatto nero", &images, None, 43, None, false).await.unwrap();
+        let again = e.enhance_prompt(&id, &SdcppClient::new(1), &caps, &cfg, "kokon-turbo", ResolvedMode::Edit, "rendi il gatto nero", &images, &[], None, None, 43, None, false).await.unwrap();
         assert_eq!(again, out);
 
         // A failure keeps the user's prompt, with a note.
         let id = submit();
         let chunks = vec!["event: delta\ndata: {\"text\":\"Chan\"}\n\n".into(), "event: error\ndata: {\"error\":\"out of memory\"}\n\n".into()];
         let (port, _) = fake_server(200, "text/event-stream", chunks, Duration::from_millis(1)).await;
-        assert_eq!(e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Generate, "un gatto", &[], None, 1, None, false).await.unwrap(), None);
+        assert_eq!(e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Generate, "un gatto", &[], &[], None, None, 1, None, false).await.unwrap(), None);
         let v = e.job(&id).unwrap();
         assert_eq!(v.enhanced_prompt, None);
         assert!(v.notes.last().is_some_and(|n| n.contains("prompt enhancer failed") && n.contains("out of memory") && n.ends_with("used as written.")), "{:?}", v.notes);
         // An empty answer too.
         let id = submit();
         let (port, _) = fake_server(200, "text/event-stream", sse_answer(&["  "], "stop"), Duration::ZERO).await;
-        assert_eq!(e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Generate, "un gatto", &[], None, 1, None, false).await.unwrap(), None);
+        assert_eq!(e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Generate, "un gatto", &[], &[], None, None, 1, None, false).await.unwrap(), None);
         assert!(e.job(&id).unwrap().notes.last().unwrap().contains("wrote nothing"));
         // A cut-off answer is used, with a note.
         let id = submit();
         let (port, _) = fake_server(200, "text/event-stream", sse_answer(&["A cat on a"], "length"), Duration::ZERO).await;
-        assert_eq!(e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Generate, "un gatto", &[], None, 1, None, false).await.unwrap().as_deref(), Some("A cat on a"));
+        assert_eq!(e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Generate, "un gatto", &[], &[], None, None, 1, None, false).await.unwrap().as_deref(), Some("A cat on a"));
         assert!(e.job(&id).unwrap().notes.last().unwrap().contains("length limit"));
 
         // An engine without text generation (official builds): note, no request.
         let id = submit();
-        assert_eq!(e.enhance_prompt(&id, &SdcppClient::new(1), &Capabilities::default(), &cfg, "kokon-turbo", ResolvedMode::Generate, "un gatto", &[], None, 1, None, false).await.unwrap(), None);
+        assert_eq!(e.enhance_prompt(&id, &SdcppClient::new(1), &Capabilities::default(), &cfg, "kokon-turbo", ResolvedMode::Generate, "un gatto", &[], &[], None, None, 1, None, false).await.unwrap(), None);
         assert!(e.job(&id).unwrap().notes.last().unwrap().contains("no prompt enhancer"));
         assert_eq!(e.job(&id).unwrap().status, JobStatus::Queued, "status untouched");
 
@@ -2869,7 +3094,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(300)).await;
             e2.cancel(&id2).unwrap();
         });
-        let err = e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Generate, "un gatto", &[], None, 1, None, false).await.unwrap_err();
+        let err = e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Generate, "un gatto", &[], &[], None, None, 1, None, false).await.unwrap_err();
         assert_eq!(err.code, ErrorCode::Cancelled);
     }
 
@@ -2919,7 +3144,7 @@ mod tests {
         let id = e.submit(GenerationRequest { prompt: "lei sul divano con il gatto".into(), enhance: true, ..Default::default() }, None).unwrap().id;
         let (port, seen) = fake_text_server(vec!["person, female, long brown hair.\n", "cat, orange tabby", "A photograph of the woman from <image1> on a sofa."]).await;
         let images = vec!["PNG1".to_string(), "PNG2".to_string()];
-        let out = e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Compose, "lei sul divano con il gatto", &images, None, 9, None, false).await.unwrap();
+        let out = e.enhance_prompt(&id, &SdcppClient::new(port), &caps, &cfg, "kokon-turbo", ResolvedMode::Compose, "lei sul divano con il gatto", &images, &[], None, None, 9, None, false).await.unwrap();
         assert_eq!(out.as_deref(), Some("A photograph of the woman from <image1> on a sofa."));
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 3);
@@ -3015,6 +3240,8 @@ mod tests {
                 ResolvedMode::Edit,
                 ECHO,
                 &["PNG1".to_string()],
+                &[],
+                None,
                 None,
                 9,
                 None,
@@ -3528,6 +3755,8 @@ mod tests {
                 ResolvedMode::Edit,
                 "rendi il gatto nero",
                 &images,
+                &[],
+                None,
                 None,
                 42,
                 None,
@@ -3581,6 +3810,8 @@ mod tests {
                 ResolvedMode::Generate,
                 "a red ceramic mug",
                 &[],
+                &[],
+                None,
                 None,
                 7,
                 None,
@@ -3633,6 +3864,8 @@ mod tests {
                 ResolvedMode::Edit,
                 "rendi il gatto nero",
                 &["PNG1".to_string()],
+                &[],
+                None,
                 None,
                 42,
                 None,
@@ -3705,6 +3938,8 @@ mod tests {
                 ResolvedMode::Edit,
                 "rendi il gatto nero",
                 &["PNG1".to_string()],
+                &[],
+                None,
                 None,
                 42,
                 None,
@@ -3890,6 +4125,8 @@ mod tests {
                 ResolvedMode::Generate,
                 "a red mug",
                 &[],
+                &[],
+                None,
                 None,
                 11,
                 None,
@@ -3932,6 +4169,8 @@ mod tests {
                 ResolvedMode::Edit,
                 "add a hat",
                 &["PNG1".to_string()],
+                &[],
+                None,
                 None,
                 22,
                 None,
@@ -3997,6 +4236,8 @@ mod tests {
                 ResolvedMode::Generate,
                 "a red mug",
                 &[],
+                &[],
+                None,
                 None,
                 1,
                 None,
@@ -4026,6 +4267,8 @@ mod tests {
                 ResolvedMode::Edit,
                 "add a hat",
                 &["PNG1".to_string()],
+                &[],
+                None,
                 None,
                 2,
                 None,
@@ -4082,6 +4325,8 @@ mod tests {
                 ResolvedMode::Edit,
                 "add a hat",
                 &["PNG1".to_string()],
+                &[],
+                None,
                 None,
                 3,
                 None,
@@ -4148,6 +4393,8 @@ mod tests {
                 ResolvedMode::Compose,
                 "put them together in a studio",
                 &["PNGA".to_string(), "PNGB".to_string()],
+                &[],
+                None,
                 None,
                 4,
                 None,
@@ -4207,6 +4454,8 @@ mod tests {
                 ResolvedMode::Compose,
                 "put them together in a studio",
                 &["PNGA".to_string(), "PNGB".to_string()],
+                &[],
+                None,
                 None,
                 5,
                 None,
@@ -4222,5 +4471,229 @@ mod tests {
             n += 1;
         }
         assert_eq!(n, 3, "the label dance ran: two labels, one scene");
+    }
+
+    // --- the H3 makers'-PE path (task-041) -----------------------------------------
+
+    /// The makers' bundle, test stand-ins for the contract files (the real text
+    /// lives in the deployment's bundle, never here): one `{}` in the t2i task
+    /// template, the card's sampling rows, a licence.
+    fn write_h3_bundle(dir: &std::path::Path) {
+        let manifest = serde_json::json!({
+            "family": "minimax-h3",
+            "prompts": {
+                "t2iSystem": "t2i/system_prompt.txt",
+                "t2iTask": "t2i/task_prompt.txt",
+                "editTask": "edit/task_prompt.txt"
+            },
+            "sha256": {},
+            "sampling": {
+                "t2i": { "temperature": 1.0, "topP": 0.95, "topK": 20, "maxTokens": 4096 },
+                "edit": { "temperature": 1.0, "topP": 0.95, "topK": 20, "maxTokens": 16384 }
+            }
+        });
+        std::fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
+        std::fs::create_dir_all(dir.join("t2i")).unwrap();
+        std::fs::create_dir_all(dir.join("edit")).unwrap();
+        std::fs::write(dir.join("t2i").join("system_prompt.txt"), "FAKE-H3-T2I-SYS").unwrap();
+        std::fs::write(dir.join("t2i").join("task_prompt.txt"), "TASK START input_text: {} output_text: TASK END").unwrap();
+        std::fs::write(dir.join("edit").join("task_prompt.txt"), "FAKE-H3-EDIT-TASK").unwrap();
+        std::fs::write(dir.join("LICENSE"), "(test) licence").unwrap();
+    }
+
+    fn h3_cfg(cfg: AppConfig, ep: &str, bundle: &std::path::Path) -> AppConfig {
+        let mut cfg = cfg;
+        cfg.models.push(crate::config::ExternalModel {
+            label: "MiniMax H3".into(),
+            sub: None,
+            model: "kokon-h3-image".into(),
+            model_name: "MiniMax-H3-Image".into(),
+            sample: serde_json::json!({}),
+            gateway: None,
+            // One door serves both modes (the makers' PE is a native VLM): the
+            // plain door is the vision door's fallback, so image parts land here.
+            vlm: Some(crate::config::VlmEndpoint {
+                entrypoint: ep.into(),
+                model: "kokon-pup-h3-image".into(),
+                api_key: String::new(),
+            }),
+            vlm_vision: None,
+            prompt_bundle: bundle.to_str().unwrap().into(),
+        });
+        cfg
+    }
+
+    /// The makers' answer shape for the tests (stand-in text, not the contract):
+    /// a reasoning block, then exactly one JSON object.
+    fn h3_body(caption: &str, key: &str, ratio: &str) -> String {
+        let obj = serde_json::json!({ "expanded_caption": caption, key: ratio });
+        let content = format!("{TH_OPEN} pondering the scene {TH_CLOSE} {obj}");
+        serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                    "reasoning_content": "pondering the scene"
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": { "prompt_tokens": 12, "completion_tokens": 300 }
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn h3_t2i_assembles_the_makers_turn_and_decodes_the_envelope() {
+        let (e, _dir) = vlm_test_engine().await;
+        let caps = Capabilities { text_generation: true, ..Default::default() };
+        let bdir = tempfile::tempdir().unwrap();
+        write_h3_bundle(bdir.path());
+        let (port, seen) = crate::vlm::mock_chat(200, &h3_body("a decoded tower caption", "aspect_ratio", "9:16")).await;
+        let cfg = h3_cfg(
+            vlm_cfg(AppConfig::default(), "http://127.0.0.1:1/upstream/never"),
+            &format!("http://127.0.0.1:{port}/upstream/kokon-pup-h3-image"),
+            bdir.path(),
+        );
+        let id = e
+            .submit(GenerationRequest { prompt: "a tall tower".into(), enhance: true, ..Default::default() }, None)
+            .unwrap()
+            .id;
+        let out = e
+            .enhance_prompt(
+                &id,
+                &SdcppClient::new(9),
+                &caps,
+                &cfg,
+                "kokon-h3-image",
+                ResolvedMode::Generate,
+                "a tall tower",
+                &[],
+                &[],
+                None,
+                None,
+                11,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        // The DiT gets the expanded caption whole.
+        assert_eq!(out.as_deref(), Some("a decoded tower caption"));
+        // The t2i ratio lands on the view's suggestion (the size re-resolution reads it).
+        let v = e.job(&id).unwrap();
+        assert_eq!(v.suggested_ratio.as_deref(), Some("9:16"));
+        // The turn went to the pipeline's own PE door, with the makers' shape.
+        let raw = seen.await.unwrap();
+        assert!(raw.contains("POST /upstream/kokon-pup-h3-image/v1/chat/completions"));
+        let sent: serde_json::Value = raw[raw.find('{').unwrap()..].parse().unwrap();
+        assert_eq!(sent["model"], "kokon-pup-h3-image");
+        assert_eq!(sent["max_tokens"], crate::pup::H3_MAX_TOKENS_T2I);
+        assert_eq!(sent["messages"][0]["role"], "system");
+        assert_eq!(sent["messages"][0]["content"], "FAKE-H3-T2I-SYS");
+        let parts = sent["messages"][1]["content"].as_array().expect("a multipart t2i turn");
+        assert_eq!(parts.len(), 1, "the t2i turn carries no image parts");
+        assert_eq!(parts[0]["type"], "text");
+        assert!(parts[0]["text"].as_str().unwrap().contains("input_text: a tall tower"), "the instruction is spliced into the makers' template");
+    }
+
+    #[tokio::test]
+    async fn h3_edit_sends_the_reference_parts_and_the_adaptive_selection() {
+        let (e, _dir) = vlm_test_engine().await;
+        let caps = Capabilities { text_generation: true, ..Default::default() };
+        let bdir = tempfile::tempdir().unwrap();
+        write_h3_bundle(bdir.path());
+        let (port, seen) = crate::vlm::mock_chat(200, &h3_body("an edited cat caption", "target_aspect_ratio", "4:3")).await;
+        let cfg = h3_cfg(
+            vlm_cfg(AppConfig::default(), "http://127.0.0.1:1/upstream/never"),
+            &format!("http://127.0.0.1:{port}/upstream/kokon-pup-h3-image"),
+            bdir.path(),
+        );
+        let id = e
+            .submit(GenerationRequest { prompt: "a hat".into(), enhance: true, ..Default::default() }, None)
+            .unwrap()
+            .id;
+        let out = e
+            .enhance_prompt(
+                &id,
+                &SdcppClient::new(9),
+                &caps,
+                &cfg,
+                "kokon-h3-image",
+                ResolvedMode::Edit,
+                "a hat",
+                &["PNG1".to_string()],
+                &[crate::geometry::Size { width: 800, height: 600 }],
+                None,
+                // The user left the aspect automatic: the selection is "adaptive".
+                None,
+                22,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.as_deref(), Some("an edited cat caption"));
+        let v = e.job(&id).unwrap();
+        assert_eq!(v.suggested_ratio.as_deref(), Some("4:3"), "the edit ratio is recorded, never enforced");
+        let raw = seen.await.unwrap();
+        let sent: serde_json::Value = raw[raw.find('{').unwrap()..].parse().unwrap();
+        assert_eq!(sent["max_tokens"], crate::pup::H3_MAX_TOKENS_EDIT);
+        let parts = sent["messages"][0]["content"].as_array().expect("a multipart edit turn");
+        // The parts are: the edit task, the count line, the reference label,
+        // the image, the final instruction part.
+        let texts: Vec<&str> = parts
+            .iter()
+            .filter(|p| p["type"] == "text")
+            .map(|p| p["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(parts.len(), 5, "task, count, label, image, instruction");
+        assert_eq!(texts[0], "FAKE-H3-EDIT-TASK");
+        assert!(texts[1].contains("Reference Image Count:"));
+        assert!(texts[1].contains("1"));
+        assert!(texts[2].contains("Reference Media:"));
+        assert!(texts[2].contains("4:3"), "the reference row carries its reduced source ratio");
+        assert_eq!(parts[3]["type"], "image_url", "the image part follows its label");
+        assert!(texts[3].contains("User Editing Instruction"));
+        assert!(texts[3].contains("\"a hat\""), "the instruction travels as a JSON string");
+        assert!(texts[3].contains("adaptive"), "no user aspect: the makers' adaptive keyword");
+    }
+
+    #[tokio::test]
+    async fn h3_without_its_pe_door_fails_the_job_instead_of_running_raw() {
+        let (e, _dir) = vlm_test_engine().await;
+        let caps = Capabilities { text_generation: true, ..Default::default() };
+        let bdir = tempfile::tempdir().unwrap();
+        write_h3_bundle(bdir.path());
+        let mut cfg = h3_cfg(
+            vlm_cfg(AppConfig::default(), "http://127.0.0.1:1/upstream/never"),
+            "http://127.0.0.1:1/upstream/never",
+            bdir.path(),
+        );
+        cfg.models.iter_mut().for_each(|m| m.vlm = None);
+        let id = e
+            .submit(GenerationRequest { prompt: "a tall tower".into(), enhance: true, ..Default::default() }, None)
+            .unwrap()
+            .id;
+        let err = e
+            .enhance_prompt(
+                &id,
+                &SdcppClient::new(9),
+                &caps,
+                &cfg,
+                "kokon-h3-image",
+                ResolvedMode::Generate,
+                "a tall tower",
+                &[],
+                &[],
+                None,
+                None,
+                11,
+                None,
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::InvalidConfig);
+        assert!(err.message.contains("prompt-upsampler door"), "the failure names what to set: {err}");
     }
 }
