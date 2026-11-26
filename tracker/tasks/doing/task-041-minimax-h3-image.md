@@ -245,3 +245,15 @@ gateway id = llama alias = service `model` field = boot-script name).
 ## Verification
 
 (filled in as the phases land)
+- **D-041-17 (11-26, the 400 on H3 edits)** — the 52491bd build removed
+  per-request reference overrides from the sd-cpp API: `image_preprocess`,
+  `ref_image_args` and `increase_ref_index` in the img_gen JSON now throw
+  ("...requires a DGL script" / "reference overrides require a DGL script",
+  examples/common/common.cpp:1998-2004) → 400 "invalid generation
+  parameters". Reference handling is definition-owned per model
+  (generation_image.cpp: the H3 definition resizes with lanczos + augment +
+  reference-noise blocks; qwen with bilinear; `init_image`/`ref_images`/
+  `mask_image` are still request fields). The service therefore stops
+  sending those fields (the 395/245/49 tests pass without them); qwen/flux
+  edit/inpaint lose the `resize_before_vae=false` override — the definition's
+  resize applies (stock-build behaviour, not overridable from the API).

@@ -9,7 +9,9 @@ use image::{GrayImage, Luma, Rgba, RgbaImage};
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::geometry::{Rect, Size, WorkingCanvas};
 use crate::imaging::{self, LoadedImage};
-use crate::planner::{InpaintAction, Plan, ReferenceDetail, ResolvedMode};
+use crate::planner::{InpaintAction, Plan, ResolvedMode};
+#[cfg(test)]
+use crate::planner::ReferenceDetail;
 use crate::sdcpp::{Guidance, ImgGenRequest, SampleParams, VaeTilingParams, b64};
 
 /// Server-side facts that shape the request but are not part of the plan.
@@ -327,8 +329,6 @@ pub fn prepare(plan: &Plan, prompt: &str, seed: i64, images: &[LoadedImage], mas
         init_image: None,
         mask_image: None,
         ref_images: Vec::new(),
-        image_preprocess: Vec::new(),
-        ref_image_args: None,
         sample_params: SampleParams {
             sample_method: Some(plan.sampler.clone()),
             scheduler: None,
@@ -373,12 +373,10 @@ pub fn prepare(plan: &Plan, prompt: &str, seed: i64, images: &[LoadedImage], mas
                 let img = &images[r.index].pixels;
                 req.ref_images.push(png_b64(&to_canvas(img, &r.canvas))?);
             }
-            req.image_preprocess.push("target=ref,mode=none".into());
-            // Standard detail: encode the references at their planned (≤ 1 MP) size; Full keeps
-            // the server's resize to the output's area, as before.
-            if plan.reference_detail == Some(ReferenceDetail::Standard) {
-                req.ref_image_args = Some("resize_before_vae=false".into());
-            }
+            // The references go out at their planned size; how the engine treats them is the
+            // model definition's (52491bd removed per-request reference overrides from the API
+            // — the H3 definition resizes with lanczos and augments, the qwen one with
+            // bilinear; measured 11-26, the 400 "invalid generation parameters" on H3 edits).
             if let Some(s) = plan.strength {
                 req.strength = Some(s);
             }
@@ -461,11 +459,6 @@ pub fn prepare(plan: &Plan, prompt: &str, seed: i64, images: &[LoadedImage], mas
             if let Some((g, _)) = &guide {
                 req.ref_images.push(png_b64(g)?);
             }
-            // Standard detail: the references are encoded at their planned sizes (image 1 ≤ 1 MP,
-            // the guide a quarter of the canvas); Full lets the server resize both to the output's area.
-            if plan.reference_detail == Some(ReferenceDetail::Standard) {
-                req.ref_image_args = Some("resize_before_vae=false".into());
-            }
             req.prompt = match &guide {
                 Some((_, color_name)) if opts.written => written_inpaint_prompt(action, prompt, color_name),
                 Some((_, color_name)) => inpaint_prompt(action, prompt, color_name),
@@ -473,7 +466,6 @@ pub fn prepare(plan: &Plan, prompt: &str, seed: i64, images: &[LoadedImage], mas
             };
             req.mask_image = Some(gray_png_b64(&m_canvas)?);
             req.strength = plan.strength;
-            req.image_preprocess = vec!["target=init,mode=none".into(), "target=mask,mode=none,filter=nearest-exact".into(), "target=ref,mode=none".into()];
             // Regenerated but not pasted: the backend mask (back at region size) where the blend is ~0.
             let back = imaging::resize_mask(&m_work, region.width, region.height);
             let regen = GrayImage::from_fn(region.width, region.height, |x, y| Luma([if back.get_pixel(x, y)[0] > 127 && blend.get_pixel(x, y)[0] <= 8 { 255 } else { 0 }]));
@@ -493,7 +485,6 @@ pub fn prepare(plan: &Plan, prompt: &str, seed: i64, images: &[LoadedImage], mas
             req.mask_image = Some(gray_png_b64(&mask)?);
             req.ref_images.push(png_b64(&to_canvas(src, &plan.references[0].canvas))?);
             req.strength = plan.strength;
-            req.image_preprocess = vec!["target=init,mode=none".into(), "target=mask,mode=none,filter=nearest-exact".into(), "target=ref,mode=none".into()];
             let feather_final = ((op.overlap_working.left.max(op.overlap_working.right).max(op.overlap_working.top).max(op.overlap_working.bottom)) as f64
                 / op.working.scale)
                 .round() as u32;
@@ -888,7 +879,6 @@ mod tests {
         let rc = p.references[0].canvas.canvas;
         assert_eq!(decode(&j.request.ref_images[0]).dimensions(), (rc.width, rc.height), "reference as planned");
         assert!(rc.area() <= STANDARD_REFERENCE_AREA && p.working.area() > rc.area() * 2, "1 MP reference, larger canvas");
-        assert_eq!(j.request.ref_image_args.as_deref(), Some("resize_before_vae=false"), "encoded at its planned size");
         // The single-pass result is enlarged to the 3840x2160 source size with ESRGAN.
         let content = crop_content(fake_backend(p.working.width, p.working.height), &j.post);
         let target = enlarge_target(&j.post).unwrap();
@@ -1060,7 +1050,6 @@ mod tests {
         let p = plan(&r, &PlanInputs { image_sizes: vec![img.size()], vram_total_mib: Some(16303), ..Default::default() }, &RecommendedSettings::default()).unwrap();
         let j = prepare(&p, &r.prompt, 7, std::slice::from_ref(&img), None, &BackendOptions::default()).unwrap();
         assert_eq!((j.request.width, j.request.height), (1920, 1088));
-        assert!(j.request.ref_image_args.is_none(), "Full keeps the server's resize");
         assert_eq!(j.request.ref_images.len(), 1);
         assert!(j.request.init_image.is_none() && j.request.mask_image.is_none());
         let sent = decode(&j.request.ref_images[0]);
@@ -1246,12 +1235,10 @@ mod tests {
         assert_eq!(area(std.request.init_image.as_ref().unwrap()), canvas, "the painted image keeps the working size");
         assert!(area(&std.request.ref_images[0]) <= STANDARD_REFERENCE_AREA, "image 1 capped at 1 MP");
         assert!(area(&std.request.ref_images[1]) <= canvas / 4 + canvas / 20, "guide a quarter of the canvas");
-        assert_eq!(std.request.ref_image_args.as_deref(), Some("resize_before_vae=false"), "encoded at those sizes");
         assert_eq!(p.reference_detail, Some(ReferenceDetail::Standard));
         // Full: as before 0.9.4 (image 1 = the painted image, the server resizes the references).
         let (full, _) = job(ReferenceDetail::Full);
         assert_eq!(full.request.init_image.as_ref(), Some(&full.request.ref_images[0]));
-        assert!(full.request.ref_image_args.is_none());
     }
 
     #[test]

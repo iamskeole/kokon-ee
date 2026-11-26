@@ -91,14 +91,6 @@ pub struct ImgGenRequest {
     pub mask_image: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ref_images: Vec<String>,
-    /// Our images already arrive at exact working geometry, so input transforms are
-    /// disabled (`mode=none`) to guarantee no crop/stretch happens server-side.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub image_preprocess: Vec<String>,
-    /// e.g. "resize_before_vae=false": for Qwen-Image 2.1 the server otherwise resizes every
-    /// reference to the output's area before encoding (pipeline/image.cpp), smaller ones too.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ref_image_args: Option<String>,
     pub sample_params: SampleParams,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vae_tiling_params: Option<VaeTilingParams>,
@@ -1010,8 +1002,6 @@ mod tests {
             init_image: None,
             mask_image: None,
             ref_images: vec!["AAA".into(), "BBB".into()],
-            image_preprocess: vec!["target=ref,mode=none".into()],
-            ref_image_args: None,
             sample_params: SampleParams {
                 sample_method: Some("euler".into()),
                 scheduler: None,
@@ -1049,7 +1039,10 @@ mod tests {
         assert!(v.get("strength").is_none());
         assert!(v.get("vae_tiling_params").is_none());
         assert_eq!(v["embed_image_metadata"], false);
-        assert_eq!(v["image_preprocess"][0], "target=ref,mode=none");
+        assert!(
+            v.get("image_preprocess").is_none() && v.get("ref_image_args").is_none(),
+            "52491bd rejects per-request reference overrides (DGL-script only); the model definition owns them"
+        );
         assert!(
             v.get("hires").is_none()
                 && v.get("cache_mode").is_none()
