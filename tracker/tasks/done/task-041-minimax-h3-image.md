@@ -1,7 +1,7 @@
 # Task 041 — wire MiniMax H3-Image as a new selectable model (service plumbing + the makers' PE PUP door)
 
-**Status: doing (created 2026-11-26, owner brief; the gateway half of the door already
-exists on the box from the 11-26 morning work).**
+**Status: done (created 2026-11-26, owner brief; closed 2026-11-26 after the
+round-2 validation window and the qwen-PUP A/B window).**
 
 Owner brief, condensed: wire the new image model MiniMax H3. The image model is
 already downloaded and configured on the gateway (11-26: `kokon-h3-image`, DiT
@@ -233,14 +233,118 @@ gateway id = llama alias = service `model` field = boot-script name).
 - **B1 (resolved by inspection, P2)**: whether mradermacher's PE gguf carries
   the MTP module (no separate MTP file in his repo; unsloth keeps it apart).
   MTP on iff present — the build supports it; no code change either way.
+  **Resolved 11-26: the Q4_K_M gguf carries no MTP module** (`llama-gguf`: no
+  `n_layer_nextn`, no nextn tensors); architecture `qwen35` (Gated DeltaNet),
+  natively supported by the pinned build — the boot script runs without
+  `--spec-type draft-mtp`, and the CUDA SSM kernels in the build
+  (ggml-cuda/ssm-scan.cu, ssm-conv.cuh) keep the hybrid's recurrence on GPU.
 - **B2 (window measurement, P4)**: 16 MP on 24 GB with the Q4 DiT. The 13:31
   window peaked at **18.2 GB at 1024²** (4k tokens); 16 MP is 16k tokens of
   extra activations. If it OOMs, the quality preset drops to 12 MP
   (D-041-3's pre-decided fallback) — the card's own `min_generation_area`
   machinery means no model-side change.
+  **Resolved 11-26 (round-2 window, direct door, the card's 6-step recipe):**
+  2048×2048 completed, peak **19180 MiB**; 4096×4096 (16.8 MP) **completed**,
+  peak **22152 MiB** — 2.4 GB under the card, no OOM, no fallback. The 16 MP
+  quality preset **stands**; the pre-decided 12 MP fallback was not needed.
 - **B3 (ops)**: the window evicts vllm (the agent's own runtime) for its
   duration — the owner's sessions stay on qwen-direct; the window runs under
   the autonomy protocol (blocking wait as the last step of the launch call).
+  **Resolved 11-26:** both windows ran under the protocol and ended with the
+  daemon-managed vLLM revived (23520 MiB, gateway probe 200) and no stray
+  engines. One mid-run incident (an orphan vLLM from a manual exec of the 033
+  script, which unconditionally `exec`s — no attach logic) desynced the
+  daemon's matrix and killed the first H3 DiT boot; the standing rule is
+  D-041-10/14 — vLLM revival is always a keyed gateway request through the
+  daemon, never a script exec.
+
+## Decisions (continued, from the validation windows)
+
+- **D-041-21 (11-26, arm B is unreachable as a picker entry; the A/B verdict)** —
+  the service keys the pipeline's PUP on the *running DiT's model id*
+  (`models.iter().find(|m| m.model == model)`), so two picker entries sharing
+  the H3 DiT id always resolve to the first (arm A, the PE) — the round-2
+  window proved it: arm B's jobs carried the PE's exact captions (identical
+  enhanced_chars) and both arms' gallery images are **pixel-identical**
+  (same caption, same seed 42; only the PNG metadata differed). A picker
+  entry cannot therefore A/B the PUP for one DiT id, and the arm-B entry was
+  removed from the deployment config (dead, misleading config). The A/B was
+  completed instead by asking the 9B qwen doors the same questions directly
+  (window `models-041-qwenpup`, the service's own request shape): t2i
+  15 s / 1228 gen tokens → 2844 thinking chars + a 3219-char caption in the
+  **Qwen-2.1 contract** (`{"rewritten_prompt": …}`); i2i 24 s / 1307 tokens →
+  5178 thinking + a 693-char caption, same contract. The PE (27B): 33–38 s,
+  the H3 envelope (caption + 10-value ratio / W:H target). **Verdict: for H3
+  the makers' PE is the only PUP that speaks the H3 caption contract the DiT
+  is conditioned on; the 9B qwen doors speak the Qwen-Image-2.1 contract**
+  (fast, but their captions are not what the H3 DiT expects — through the
+  service's H3 path `decode_h3` would fall back to raw text after retries).
+  The 9B doors keep their native role in the Qwen 2.1 pipeline.
+- **D-041-22 (11-26, where Prompt+ is actually switchable from the API)** —
+  the thin `/generate`/`/edit`/… endpoints take `SimpleOp`, which has no
+  `enhance` field (`..Default::default()` → false): an `"enhance": true` in
+  those bodies is silently dropped and the job runs raw (the round-1 window's
+  `enhanced_chars: 0` — HTTP 200, job done, no PUP). The production path is
+  the one the browser uses: `POST /api/v1/jobs` with the full
+  `GenerationRequest` (`enhance`, `enhance_only`, `aspect_ratio`, …), then
+  long-poll `GET /api/v1/jobs/{id}/wait?timeout=≤600`. Validation and any
+  script/MCP consumer that wants Prompt+ must use `/jobs`, not the SimpleOp
+  endpoints. (Behaviour, not a bug: the SimpleOp endpoints predate the
+  enhance flag and stay deliberately minimal.)
+- **D-041-23 (11-26, the 16 MP tier stands on its measured peak)** — the
+  Qwen-calibrated token budget (`token_budget` + the large-GPU bonus) clamps
+  a 24 GB card to ~6.4 MP, which would have left H3's 16 MP quality tier
+  unreachable even though the measurement shows it fits (22152 MiB peak,
+  B2). `RecommendedSettings` gained `measured_peak_mib` (the largest tier's
+  measured full-run peak + 1400 MiB headroom; set only on the H3 row:
+  `23_552`): a card that holds it keeps every **single-image** H3 tier
+  (4/8/16 MP); reference-bearing jobs and unknown-VRAM boxes keep the shared
+  budget (the measured run was single-image; multi-reference 16 MP is not
+  measured and stays clamped). Verified live: `/plan` on this box now
+  resolves quality to 4065×4065 (16.5 MP, under the 4096 side cap) with no
+  reduction note.
+
+## Verification (closed 2026-11-26)
+
+- **PE door (P2)** — Q4_K_M 16.5 GB + mmproj-f16 0.93 GB in
+  `models/gguf/MiniMax/MiniMax-H3-Image-PE/`; boot script
+  `serve-kokon-pup-h3-image.sh` (ctx 32768, `--reasoning on`, temp 1.0 /
+  top_p 0.95 / top_k 20, jinja, `-ngl 99`, **no MTP** — B1); gateway id
+  `kokon-pup-h3-image` with its own bare set `h3p: ph & s & kv`. Cold boot
+  ~17–25 s through the matrix; warm door ~26 tok/s generation (llama-server
+  timings: prompt 1021 tok/s, gen 26.2 tok/s, graphs reused, 0 reallocs),
+  ~19.4 GB resident.
+- **Contract (P4, round-2 window)** — makers' T2I turn: 33.2 s, 774 tokens
+  (1941 thinking + 1537 reply), envelope ok, aspect `3:2`, 1490-char caption.
+  Makers' EDIT turn (one user message, no system — the corrected contract):
+  37.7 s, 777 tokens, envelope ok, `target_aspect_ratio 1:1`.
+- **Dance through the service (P4)** — every Prompt+ job in the round-2
+  window shows in the gateway journal: the PE request evicts the previous
+  tenant (vLLM) and boots the PE; the DiT request evicts the PE and boots the
+  H3 DiT; no OOM, no double-boot. Service t2i (arm A, `enhance: true` via
+  `/jobs`): done in 102 s, the **1487-char enhanced caption became the DiT
+  prompt**, the PE ratio `3:2` drove the size (2496×1664, note "The
+  upsampler's 3:2 choice sizes this image (your aspect is auto)") — D-041-4
+  proven live. Service edit: done in 141 s, 1424-char enhanced caption,
+  suggestion `1:1`, canvas kept (512²).
+- **403 origin gate (the 52491bd break)** — the build's server added an
+  origin/Host gate (examples/server/server_access.cpp); the gateway's
+  reverse proxy preserves the client `Host` (`apollo.local:8081`), which the
+  upstreams rejected with `Request origin is not allowed`. All four DiT boot
+  scripts now pass `--cors-origins http://apollo.local:8081,https://…`;
+  capabilities through the named-host route return 200 in ~5 s.
+- **A/B (D-041-21)** — picker arm B unreachable (pixel-identical proof);
+  direct qwen-door calls answered (numbers above). Verdict recorded; the
+  deployment picker keeps one H3 entry (the PE) — the 9B doors stay in the
+  Qwen 2.1 pipeline's entry.
+- **B2** — 16 MP stands (above); the planner encodes it as D-041-23.
+- **Tests** — `cargo test -p qls-core` 396 passed / 0 failed / 2 ignored;
+  `npm test` 245 passed; `mcp` 49 passed / 3 skipped. New coverage: bundle
+  family + hashes, request builder (t2i splice, edit parts, no-system edit),
+  decode (both envelopes, think-strip, tolerant retry, out-of-contract note),
+  H3 planner sizes (tier areas, 4096 side cap, the measured-peak waiver),
+  engine hooks (whole-caption DiT prompt, auto-ratio re-resolution, the
+  900 s PE clock).
 
 ## Verification
 

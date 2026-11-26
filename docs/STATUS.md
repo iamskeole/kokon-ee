@@ -1,6 +1,6 @@
 # Status
 
-**Updated 2026-11-23.** This page is the fork's view. The upstream project's status (its
+**Updated 2026-11-26.** This page is the fork's view. The upstream project's status (its
 releases, its issues) is the origin's; the working state **of this fork** — what is in
 progress, next, the parked triggers — is [tracker/STATUS.md](../tracker/STATUS.md), which
 supersedes this page, and the current task is always the oldest file in
@@ -24,6 +24,12 @@ the prompts.
 
 ## Recently shipped on this fork
 
+- task-041: **MiniMax H3 Image** as a picker entry — the makers' 6-step/no-CFG recipe at
+  up to 16 MP (measured to fit a 24 GB card at 4096²), its Prompt+ door the makers' own
+  PE fine-tune GGUF (one VLM door serves t2i and edit; the two big doors take turns on
+  the card through the gateway's eviction dance), and the 9B Qwen PUPs confirmed as the
+  Qwen 2.1 pipeline's own (they don't speak the H3 caption contract). The default model
+  is unchanged.
 - task-037: the `kokon-vision` lab door, the in-process lab, the service's 2×2 capability
   matrix, the vision.cpp server PR.
 - task-038: upscalers on the engine box (the split box asks the engine, not the service).

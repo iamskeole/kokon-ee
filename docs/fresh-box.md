@@ -128,6 +128,8 @@ state of this deployment uses:
 | `sd-cpp/BFL/flux-3-ae/ae.safetensors` | klein's VAE |
 | `sd-cpp/Qwen/qwen-image-2.1/model-Q8_0.gguf` | qwen "full" DiT |
 | `sd-cpp/Qwen/qwen-image-2.1-turbo/model-Q4_K_M.gguf` | qwen "turbo" DiT |
+| `sd-cpp/MiniMax/minimax-h3-image/` | the H3 picker entry: DiT `model-Q4_K_M.gguf` (+ `Q4_K_S` VRAM fallback), `p-h3-image_text_encoder_int8_convrot.safetensors` (the in-engine TE), `minimax_h3_image_vae_fp16.safetensors` |
+| `gguf/MiniMax/MiniMax-H3-Image-PE/` | the H3 PUP: the makers' PE fine-tune as Q4_K_M GGUF (16.5 GB) + `mmproj-f16.gguf` (0.93 GB) — door `kokon-pup-h3-image` |
 | `sd-cpp/madebyollin/texture-fix-vae-for-qwen-image-2.1/` | qwen's VAE |
 | `sd-cpp/upscalers/` | hires upscalers (flat, by file stem). The **engine** loads these at request time (`--hires-upscalers-dir`; `POST /sdcpp/v1/upscale` and the hires second pass) — this is the only copy that matters. The service box keeps none: in the split box the service only sends the name, and its Settings' upscaler list is the engine's own report (task-038) |
 | `gguf/BFL/flux-3-image-klein-pup/` | the PUP fine-tune: `model-Q8_0.gguf`, `model-Q4_K_M.gguf`, `mmproj-F16.gguf` |
@@ -164,6 +166,24 @@ with mmproj) — and the qwen sets now carry them as the mode-exclusive group
 `(p | pt | pi)`; the mode-routed cutover has **landed** (task-028 done,
 the owner's ADOPT-NATIVE-ON verdict): the qwen pipelines call the native
 doors (the VLM section below) and klein keeps the BFL door.
+
+The **H3 PE door** (`kokon-pup-h3-image`) is different in one way that the
+matrix encodes: at Q4_K_M + mmproj it is a **~17–19 GB resident**, and the
+H3 DiT (~21 GB bare) cannot sit beside it on a 24 GB card — so the two are
+each their own **bare set** (`h3`, `h3p`), and a H3 Prompt+ job makes two
+gateway requests in sequence (PE, then DiT), the matrix evicting between
+them (engineering notes, "The eviction dance"). One door serves both
+t2i and edit: the PE is a native VLM, and the request shape (system +
+task vs the makers' one-user-message edit assembly) is mode-driven, not
+door-driven — the H3 picker entry names the PE for **both** `vlm` and
+`vlmVision`. Two deployment pins: on a **split box** (the service without
+`nvidia-smi`) the service's config carries `vramOverrideMib` (the
+accelerator's total) so the planner is not blind; and on the 52491bd
+generation of the sd-cpp build the DiT scripts pass `--cors-origins`
+with the gateway's public host (that build's origin gate 403s any other
+`Host` — the gateway preserves the client's), which older builds simply
+ignore. The PE's GGUF carries no MTP module, so the door runs without
+speculative decoding.
 
 Downloads: follow each directory's `provenance.md` on the reference host
 (source, converter, hash). Verify sha256 after every download; a model is not
@@ -211,6 +231,20 @@ process *is* the engine):
   `qwen-image-2.1-turbo/model-Q4_K_M.gguf`, full → `qwen-image-2.1/model-Q8_0.gguf`;
   conditioner `Qwen3-VL-8B-Instruct` (Q4_K_M + mmproj-F16); VAE the
   texture-fix one. Same flag set as klein.
+- **H3** (port from `$1`): `sd-server --listen-ip 127.0.0.1 --listen-port "$1"
+  --diffusion-model models/sd-cpp/MiniMax/minimax-h3-image/model-Q4_K_M.gguf
+  --llm …/p-h3-image_text_encoder_int8_convrot.safetensors
+  --llm_vision …/p-h3-image_text_encoder_int8_convrot.safetensors
+  --vae …/minimax_h3_image_vae_fp16.safetensors
+  --sigmas minimax-h3-image --steps 6 --scheduler euler --cfg 1
+  --offload-to-cpu --max-vram 24` — the card's recipe as launch defaults
+  (6 NFE, no CFG, the PDD sigma schedule), plus `--cors-origins` for the
+  52491bd origin gate (above).
+- **the H3 PE** (port from `$1`): `llama-server -m
+  models/gguf/MiniMax/MiniMax-H3-Image-PE/MiniMax-H3-Image-PE.Q4_K_M.gguf
+  --mmproj …/MiniMax-H3-Image-PE.mmproj-f16.gguf --jinja --reasoning on
+  -c 32768 -ngl 99 --temp 1.0 --top-p 0.95 --top-k 20` — the card's row,
+  no speculative decoding (the GGUF carries no MTP module).
 
 **llama.cpp** — one shared build serving the PUP sidecar and the creative
 writers (`build/bin/llama-server`). The reference host's build is

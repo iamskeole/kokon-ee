@@ -244,8 +244,11 @@ few things make that loop fast:
 - **Gallery**: every image keeps its full recipe (prompt, seed, settings, pipeline) and reopens
   with one click. The recipe is also embedded in the PNG.
 - **Quality presets**: **Fast** (the default, ~1 MP), **Balanced** (~1.5K) and **Quality**
-  (native 2K). All run Qwen's official 8-step Turbo model with its own schedule, so you never
-  need to tune steps or guidance.
+  (native 2K, or 16 MP on the models that run that large). Each runs the selected model's
+  own recipe, so you never need to tune steps or guidance.
+- **The model is a small list**: Qwen-Image 2.1 Turbo (the default), Qwen-Image 2.1, Flux
+  Image 3 Klein and MiniMax H3 Image — switchable where the box's config names a picker.
+  The default never changes behind your back; a new model joins as a pick, not a swap.
 
 ## How it works
 

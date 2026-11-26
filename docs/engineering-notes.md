@@ -181,14 +181,17 @@ The **Upscale** action runs the upscaler model straight on the image. The Detail
 leaves only 1–2 steps at strength 0.3. Requests with `"method": "detailed"` run as the
 upscaler model only.
 
-### Turbo (the only image model since 2026-10-09)
+### Turbo (the default image model since 2026-10-09)
 
 Every job runs Qwen's official 8-step distilled model
 ([Qwen/Qwen-Image-2.1-Turbo](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo), released
 2026-10-09, Qwen Research License like the base), as
 [unsloth/Qwen-Image-2.1-Turbo-GGUF](https://huggingface.co/unsloth/Qwen-Image-2.1-Turbo-GGUF)
 Q4_K_M (4.2 GB) on the engine box; the ml repo pins the file. The box's config names the
-engine model and its sample settings; there is no model picker machinery in the service.
+engine model and its sample settings; the picker (the `models` list) also offers Qwen
+Image 2.1 (full), Flux Image 3 Klein and MiniMax H3 Image — switching is a config change,
+never a service-owned process. The **default** (first boot, and what a new box starts on)
+stays Turbo; H3 is a picker entry, not a default change.
 
 - Schedule: `planner::TURBO_SIGMAS` = `sample_sigmas` of the checkpoint's model_index.json
   ([1, .978453, .95418, .926626, .89508, .845148, .704534, .414568, 0], fixed at every
@@ -205,6 +208,58 @@ engine model and its sample settings; there is no model picker machinery in the 
   party); Turbo8 and Pruna 8-step LoRAs (unofficial); Sarvam Tez 2-step (t2i only); Alibaba
   Fun-Acc 4-step (a PDD bundle, not a plain LoRA); LightX2V Lightning for 2.1 (not released).
 
+### MiniMax H3 Image (picker entry, 2026-11-26)
+
+[MiniMax-H3-Image](https://huggingface.co/MiniMaxAI/MiniMax-H3-Image) (community
+license): a 33B DiT distilled to the card's recipe — **6 steps, euler, CFG 1, no custom
+sigmas** (the `minimax-h3-image` schedule in the boot script; a request carrying a custom
+schedule replaces it, so the service's per-model sample row sets
+`{steps: 6, cfg: 1, sampler: "euler", clear_sigmas: true}` and sends no sigmas), 16× VAE
+with 2×2 patchify (32 px per token), up to 16 reference images, unified t2i and
+reference-edit in one checkpoint. Works ~4–20 MP, best at 16; the 52491bd build caps the
+door at **4096 per side** (capabilities' limits), so the planner's H3 row keeps that
+bound: area presets 4/8/16 MP, align 32, max references 16, no bucket table.
+
+- **Prompt+ is the makers' PE fine-tune** (`MiniMax-H3-Image-PE`, a Qwen3.8-27B
+  fine-tune; [mradermacher's Q4_K_M GGUF](https://huggingface.co/mradermacher/MiniMax-H3-Image-PE-GGUF),
+  16.5 GB + the f16 mmproj). One llama-server door serves both workflows — t2i (system
+  message + task with the instruction spliced into the trailing `{}` placeholder) and edit
+  (**one user message, no system** — the makers' edit task prompt carries its own role
+  statement) — because the PE is a native VLM. Output is an H3 envelope
+  (t2i: `expanded_caption` + a 10-value `aspect_ratio` enum; edit: `expanded_caption` +
+  `target_aspect_ratio` W:H); the service decodes it, strips the thinking, retries once
+  out-of-contract, and on exhaustion falls back to the raw text with a job note. The PE
+  carries **no MTP module** (inspected: no nextn tensors), so the door runs without
+  speculative decoding. Warm door: ~26 tok/s (prompt 1021 tok/s), ~19.4 GB resident, cold
+  boot ~17–25 s through the matrix; the service gives the PE call a 900 s clock (measured
+  worst case ~40 s warm; edit's 16384-token budget incl. thinking).
+- **The eviction dance.** The PE (17.4 GB) and the H3 DiT (~21 GB bare) **cannot
+  co-reside** on a 24 GB card, unlike the qwen/klein doors that fit beside their PUPs.
+  Each is its own bare matrix set (`h3`, `h3p`), so a Prompt+ job sequences two gateway
+  requests and the matrix does both swaps: PE boots (evicting whatever held the card),
+  answers, the DiT boots (evicting the PE), the 6 steps run. No router machinery; the
+  journal of one job shows both evictions. A plain (no Prompt+) job never touches the PE.
+- **The 52491bd origin gate.** That build's server rejects requests whose `Host`/origin
+  it does not know (`server_access.cpp` → `Request origin is not allowed`). The gateway's
+  reverse proxy preserves the client `Host` (`apollo.local:8081`), so every DiT boot
+  script passes `--cors-origins http://apollo.local:8081,https://apollo.local:8081` —
+  without it the capability probe (and every job) 403s at the door. The gateway itself
+  stays key-gated; the upstreams stay keyless loopback services.
+- **16 MP stands (measured 2026-11-26, this 24 GB card):** a full 4096×4096 job
+  (6-step schedule + VAE decode) peaked at **22.2 GB** — 2.4 GB under the card; 2048²
+  at 19.2 GB. The Qwen-calibrated token budget would have clamped quality to ~6.4 MP, so
+  the H3 row carries a measured peak (`measured_peak_mib: 23_552`): a card that holds it
+  keeps every single-image tier; reference-bearing jobs and unknown-VRAM boxes keep the
+  shared budget (multi-reference 16 MP is not measured).
+- **The PUP A/B (D-041-21).** The 9B Qwen-Image-2.1 PE doors (the owner's first
+  candidate) were asked the same questions directly: they answer fast (15–24 s) but in
+  the **Qwen-2.1 contract** (`{"rewritten_prompt": …}`), not the H3 envelope the DiT is
+  conditioned on — through the H3 path that is an out-of-contract raw-text fallback. The
+  makers' PE is the only PUP that speaks H3, so the H3 picker entry names it for both
+  VLM doors (the picker keys the PUP on the DiT's model id, so a second entry sharing the
+  id could never have routed to the 9B doors anyway); the 9B doors stay with the Qwen 2.1
+  pipeline.
+
 ## Prompt+ (the prompt enhancer)
 
 Optional, off by default. A Qwen3-VL sidecar behind the same gateway as the image model
@@ -215,15 +270,24 @@ for edits) before the image is made.
   endpoint (`vlm` for text-to-image, `vlmVision` for image-grounded jobs — routing is the
   guard, an image part never reaches a text-only door) and its prompt bundle. The sidecar
   answers a whole turn; the answer replaces the user's prompt for the image job, and a down
-  sidecar hard-fails the job (no silent raw-prompt fallback).
+  sidecar hard-fails the job (no silent raw-prompt fallback). **Name the doors explicitly
+  in every picker entry:** `absorb_secrets` inherits a stored `vlm`/`vlmVision` whenever an
+  incoming config names none (an explicit `null` is indistinguishable from absent), so a
+  switch to an entry that leaves a door unnamed keeps the previous arm's door — for H3
+  that would route its edits to the wrong PUP.
 - **Prompt bundles** are data in the data dir (the BFL-bundle pattern: a `manifest.json`,
   per-mode `system_prompt.txt` files, a `LICENSE`), swappable per deployment, with the
   constants in `enhancer.rs` as the fallback when a deployment has no bundle. They are
-  our own texts, chosen in blind A/Bs against Qwen's official PE prompts. Rules kept: copy
-  the user's fixed content exactly (quoted text, counts, colours), name the medium early,
-  always state the light, no quality tags; for edits lead with the operation, describe only
-  what changes and end with one "keep everything else unchanged" clause. Output is always
-  English. Lesson: **any example colour or object in a system prompt leaks** into the outputs.
+  our own texts, chosen in blind A/Bs against Qwen's official PE prompts. The one
+  exception is a **contract model's bundle** (the makers' H3-PE prompts, family
+  `minimax-h3`): the texts are the model's own training contract, so the loader verifies
+  the makers' published sha256s at load and a broken or hash-mismatched bundle fails the
+  job cleanly (and the prompt text itself never enters the repo, logs or chat). For our
+  own texts the rules kept: copy the user's fixed content exactly (quoted text, counts,
+  colours), name the medium early, always state the light, no quality tags; for edits lead
+  with the operation, describe only what changes and end with one "keep everything else
+  unchanged" clause. Output is always English. Lesson: **any example colour or object in a
+  system prompt leaks** into the outputs.
 - **Length:** the prompts ask for a length that fits the request (t2i ~80-150 words, up to
   ~250 for crowded scenes; edits 20-60, up to ~150 for several changes; compose 100-200, up
   to ~300).
