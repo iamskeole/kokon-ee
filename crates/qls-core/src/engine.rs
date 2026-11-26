@@ -718,9 +718,11 @@ impl Engine {
         if upscale && request.images.is_empty() {
             return Err(AppError::invalid("Choose an image to upscale."));
         }
-        // The profile's reference cap (the model's card): reject at submit, before the job is
-        // queued; the planner re-checks at job start (it also sees the mask and outpaint).
-        let max_refs = self.config().profile().recommended_settings.max_references as usize;
+        // The active model's reference cap (its card, from its recommended-settings
+        // row — the profile's for bundled engines, the code's for the H3 door):
+        // reject at submit, before the job is queued; the planner re-checks at job
+        // start (it also sees the mask and outpaint).
+        let max_refs = self.effective_rec(&self.config()).max_references as usize;
         if request.images.len() > max_refs {
             return Err(AppError::invalid(format!("Use at most {max_refs} reference images.")));
         }
