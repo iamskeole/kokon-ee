@@ -25,16 +25,55 @@
 //!   tests, chat or docs (keys and hashes only). These doors answer a JSON
 //!   envelope instead of bare prompt text; the decode lives in [`crate::vlm`].
 //!
+//! - **MiniMax H3** (deployment data-dir, e.g. `assets/pup-h3/`): the
+//!   MiniMax-H3-Image-PE fine-tune's own prompt files — the makers' text under
+//!   the H3 community license, the same third-party discipline (a
+//!   `manifest.json` with the file paths, the makers' own sha256 manifest for
+//!   hash verification, the per-mode sampling rows, a `LICENSE`). Its T2I task
+//!   template is a format template: exactly one `{}` placeholder for the user
+//!   instruction, `{{`/`}}` for literal braces (verified at load; the splice is
+//!   [`format_one`]). The doors answer a JSON envelope (`expanded_caption` and
+//!   a ratio); the decode lives in [`crate::vlm`].
+//!
 //! A pipeline names its bundle in its config (`promptBundle`, schema 13,
 //! [`crate::config::resolve_prompt_bundle`]) and the service loads it at runtime,
 //! per job, so a replacement dropped into that folder applies to the next job.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::Deserialize;
+use sha2::Digest;
 
 use crate::error::{AppError, ErrorCode};
 use crate::planner::ResolvedMode;
+
+/// The sampling row of a bundle manifest for one mode group.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Row {
+    temperature: f32,
+    top_p: f32,
+    top_k: u32,
+    max_tokens: u32,
+}
+
+/// The manifest's sampling section (t2i and i2i rows, both optional).
+#[derive(Default, Deserialize)]
+struct SamplingRows {
+    t2i: Option<Row>,
+    i2i: Option<Row>,
+}
+
+/// The H3 family's prompt-file section of the manifest (paths relative to the
+/// bundle folder; empty/absent = the makers' own layout).
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct H3Prompts {
+    t2i_system: Option<String>,
+    t2i_task: Option<String>,
+    edit_task: Option<String>,
+}
 
 /// The prompt assets of one bundle folder, whichever family it is.
 ///
@@ -80,6 +119,21 @@ pub struct PupBundle {
     /// The native compose style: one call to the I2I door with the references
     /// (the fine-tune's own task) instead of the two-step label-then-write.
     pub compose_one_shot: bool,
+    // --- MiniMax H3 family ------------------------------------------------
+    /// True for the MiniMax-H3-Image-PE family.
+    pub minimax_h3: bool,
+    /// The PE's T2I system prompt (its own released file).
+    pub h3_t2i_system: Option<String>,
+    /// The PE's T2I task template (the maker's format template with its one
+    /// `{}` placeholder; the service splices the user instruction into it).
+    pub h3_t2i_task: Option<String>,
+    /// The PE's image-editing task prompt (the card's parts assembly is built
+    /// around it; the workflow is prompt-only and still in development).
+    pub h3_edit_task: Option<String>,
+    /// The manifest's sampling row for t2i jobs (None = the reference row).
+    pub h3_sampling_t2i: Option<NativeSampling>,
+    /// The manifest's sampling row for image-grounded jobs (None = the reference row).
+    pub h3_sampling_edit: Option<NativeSampling>,
 }
 
 /// The six BFL prompt assets as owned strings: what the BFL request path needs.
@@ -118,6 +172,66 @@ pub fn native_reference_row(mode: crate::planner::ResolvedMode) -> NativeSamplin
             _ => crate::enhancer::NATIVE_MAX_TOKENS_I2I,
         },
     }
+}
+
+/// The H3 PE's reference rows (the card's request parameters: temperature 1.0,
+/// top_p 0.95, top_k 20, thinking on), with the per-mode output budget:
+/// t2i 4096 *including* the reasoning block (the makers' released row), edit
+/// 16384 (the makers released no edit budget — the workflow is prompt-only and
+/// still in development; the room covers its longer envelope and thinking).
+pub const H3_MAX_TOKENS_T2I: u32 = 4096;
+pub const H3_MAX_TOKENS_EDIT: u32 = 16384;
+
+pub fn h3_reference_row(mode: crate::planner::ResolvedMode) -> NativeSampling {
+    NativeSampling {
+        temperature: 1.0,
+        top_p: 0.95,
+        top_k: 20,
+        max_tokens: match mode {
+            crate::planner::ResolvedMode::Generate => H3_MAX_TOKENS_T2I,
+            _ => H3_MAX_TOKENS_EDIT,
+        },
+    }
+}
+
+/// The maker's format-template semantics, as the card's own client applies
+/// them: `{{` and `}}` are literal braces, and the template's single bare `{}`
+/// is replaced by the value (the client's `.format(user_query)`). None when
+/// the template is not that shape — any other brace construct, or more than
+/// one bare placeholder — so a tampered or foreign file fails the load rather
+/// than a splice by guesswork.
+pub fn format_one(template: &str, value: &str) -> Option<String> {
+    let mut out = String::with_capacity(template.len() + value.len());
+    let mut bare = 0;
+    let mut chars = template.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '{' => match chars.peek() {
+                Some('{') => {
+                    chars.next();
+                    out.push('{');
+                }
+                Some('}') => {
+                    chars.next();
+                    bare += 1;
+                    if bare > 1 {
+                        return None;
+                    }
+                    out.push_str(value);
+                }
+                _ => return None, // `{key}`, `{0}`, `{attr}`: not this contract.
+            },
+            '}' => match chars.peek() {
+                Some('}') => {
+                    chars.next();
+                    out.push('}');
+                }
+                _ => return None,
+            },
+            _ => out.push(c),
+        }
+    }
+    (bare == 1).then_some(out)
 }
 
 impl PupBundle {
@@ -181,6 +295,16 @@ impl PupBundle {
         }
     }
 
+    /// The H3 family's sampling row for a mode: the bundle's manifest row,
+    /// else the card's reference row. The H3 family is hard, so no Option:
+    /// a missing manifest row means the reference row.
+    pub fn h3_sampling_for(&self, mode: ResolvedMode) -> NativeSampling {
+        match mode {
+            ResolvedMode::Generate => self.h3_sampling_t2i.unwrap_or_else(|| h3_reference_row(mode)),
+            _ => self.h3_sampling_edit.unwrap_or_else(|| h3_reference_row(mode)),
+        }
+    }
+
     /// The Qwen-family per-reference label prompt, if the bundle carries it.
     pub fn qwen_label(&self) -> Option<&str> {
         self.compose_label.as_deref()
@@ -213,14 +337,6 @@ fn load_native(dir: &Path) -> Result<PupBundle, AppError> {
             format!("cannot read the prompt bundle manifest at {}: {e}", dir.display()),
         )
     })?;
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Row {
-        temperature: f32,
-        top_p: f32,
-        top_k: u32,
-        max_tokens: u32,
-    }
     #[derive(Default, Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Manifest {
@@ -231,16 +347,15 @@ fn load_native(dir: &Path) -> Result<PupBundle, AppError> {
         sampling: SamplingRows,
         #[serde(default)]
         compose_one_shot: bool,
+        #[serde(default)]
+        h3_prompts: Option<H3Prompts>,
+        #[serde(default)]
+        sha256: Option<BTreeMap<String, String>>,
     }
     #[derive(Default, Deserialize)]
     struct SystemPrompts {
         t2i: Option<String>,
         i2i: Option<String>,
-    }
-    #[derive(Default, Deserialize)]
-    struct SamplingRows {
-        t2i: Option<Row>,
-        i2i: Option<Row>,
     }
     let m: Manifest = serde_json::from_str(&raw).map_err(|e| {
         AppError::new(
@@ -248,9 +363,16 @@ fn load_native(dir: &Path) -> Result<PupBundle, AppError> {
             format!("cannot parse the prompt bundle manifest at {}: {e}", dir.display()),
         )
     })?;
+    // The H3 family is a different contract: three prompt files (its own),
+    // hash verification against the makers' manifest, and the card's sampling
+    // rows. The qwen-native checks below never apply to it.
+    if m.family.as_deref() == Some("minimax-h3") {
+        return load_h3(dir, m.h3_prompts.as_ref(), &m.sha256, &m.sampling);
+    }
     match m.family.as_deref() {
-        // The only native family this loader knows; a manifest claiming another
-        // is a different deployment's contract, not a misfiled Qwen bundle.
+        // The only qwen-native family this loader knows; a manifest claiming
+        // another is a different deployment's contract, not a misfiled Qwen
+        // bundle.
         Some("qwen-native") => {}
         other => {
             return Err(AppError::new(
@@ -290,6 +412,88 @@ fn load_native(dir: &Path) -> Result<PupBundle, AppError> {
         native_sampling_t2i: m.sampling.t2i.as_ref().map(row_to_sampling),
         native_sampling_i2i: m.sampling.i2i.as_ref().map(row_to_sampling),
         compose_one_shot: m.compose_one_shot,
+        ..Default::default()
+    })
+}
+
+/// The MiniMax-H3-Image-PE family: the makers' three prompt files (T2I system
+/// prompt, T2I task template, editing task prompt), a `LICENSE`, the card's
+/// sampling rows, and — when the manifest carries the makers' own hash
+/// manifest — sha256 verification of every file. The T2I task template must
+/// be the maker's format shape (exactly one bare `{}`); anything else is a
+/// foreign or tampered file and fails the load. Errors name the file, never a
+/// byte of it.
+fn load_h3(
+    dir: &Path,
+    prompts: Option<&H3Prompts>,
+    hashes: &Option<std::collections::BTreeMap<String, String>>,
+    sampling: &SamplingRows,
+) -> Result<PupBundle, AppError> {
+    let read = |key: &str, path: Option<&str>| -> Result<String, AppError> {
+        let rel = path
+            .filter(|p| !p.is_empty())
+            .unwrap_or(match key {
+                "t2iSystem" => "t2i/system_prompt.txt",
+                "t2iTask" => "t2i/task_prompt.txt",
+                _ => "edit/task_prompt.txt",
+            });
+        let s = native_prompt_file(dir, rel, key)?;
+        if let Some(hashes) = hashes {
+            if let Some(want) = hashes.get(key).map(|h| h.trim()).filter(|h| !h.is_empty()) {
+                let have = hex::encode(sha2::Sha256::digest(s.as_bytes()));
+                if !have.eq_ignore_ascii_case(want) {
+                    return Err(AppError::new(
+                        ErrorCode::InvalidConfig,
+                        format!(
+                            "the prompt file {rel} of the bundle at {} does not match its manifest hash ({}…); re-copy it from the makers' repository",
+                            dir.display(),
+                            &want[..8.min(want.len())]
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(s)
+    };
+    let default = H3Prompts::default();
+    let p = prompts.unwrap_or(&default);
+    let t2i_system = read("t2iSystem", p.t2i_system.as_deref())?;
+    let t2i_task = read("t2iTask", p.t2i_task.as_deref())?;
+    let edit_task = read("editTask", p.edit_task.as_deref())?;
+    // The T2I task is the maker's format template: exactly one `{}` for the
+    // user instruction, `{{`/`}}` for literal braces. Verify the shape at load
+    // (a foreign file with other brace constructs would splice by guesswork).
+    if format_one(&t2i_task, "").is_none() {
+        return Err(AppError::new(
+            ErrorCode::InvalidConfig,
+            format!(
+                "the T2I task template of the bundle at {} is not the makers' format shape (one bare placeholder, escaped braces only)",
+                dir.display()
+            ),
+        ));
+    }
+    if !dir.join("LICENSE").exists() {
+        return Err(AppError::new(
+            ErrorCode::InvalidConfig,
+            format!(
+                "the prompt bundle at {} has no LICENSE (the makers' prompt text ships with its license)",
+                dir.display()
+            ),
+        ));
+    }
+    let row_to_sampling = |r: &Row| NativeSampling {
+        temperature: r.temperature,
+        top_p: r.top_p,
+        top_k: r.top_k,
+        max_tokens: r.max_tokens,
+    };
+    Ok(PupBundle {
+        minimax_h3: true,
+        h3_t2i_system: Some(t2i_system),
+        h3_t2i_task: Some(t2i_task),
+        h3_edit_task: Some(edit_task),
+        h3_sampling_t2i: sampling.t2i.as_ref().map(row_to_sampling),
+        h3_sampling_edit: sampling.i2i.as_ref().map(row_to_sampling),
         ..Default::default()
     })
 }
@@ -439,7 +643,7 @@ fn load_prompt_json(dir: &Path) -> Result<PupBundle, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
 
     fn asset_dir() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/pup")
@@ -450,7 +654,7 @@ mod tests {
     }
 
     fn sha(s: &str) -> String {
-        let mut h = Sha256::new();
+        let mut h = sha2::Sha256::new();
         h.update(s.as_bytes());
         hex::encode(h.finalize())
     }
