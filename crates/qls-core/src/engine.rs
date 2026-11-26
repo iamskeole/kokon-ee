@@ -2329,7 +2329,12 @@ impl Engine {
             .map(|(b, s)| (b.clone(), *s))
             .collect();
         let mut turn = enhancer::h3_request(bundle, mode, prompt, &refs, aspect, seed)?;
-        let mut done = vlm.chat_turn(&turn, Duration::from_secs(300)).await?;
+        // The PE door is the makers' 27B fine-tune: it decodes at ~26 tok/s on this
+        // box's card (11-26, 3090, pinned llama.cpp 12498, Q4_K_M — 1021 tok/s
+        // prefill, 38 ms/token), and the edit budget is 16384 tokens including
+        // thinking (the card's reference params). 900 s covers the full budget at
+        // the measured rate with margin; the door's own boot is outside this clock.
+        let mut done = vlm.chat_turn(&turn, Duration::from_secs(900)).await?;
         self.update(id, |j| j.view.enhanced_prompt = Some(done.text.clone()));
         let decoded = crate::vlm::decode_h3(&done.text, mode);
         let decoded = match decoded {
@@ -2339,7 +2344,7 @@ impl Engine {
                 // Greedy sampling with the same seed would write the same
                 // answer — nudge the seed so the warm retry can differ.
                 turn.sampling.seed += 1;
-                done = vlm.chat_turn(&turn, Duration::from_secs(300)).await?;
+                done = vlm.chat_turn(&turn, Duration::from_secs(900)).await?;
                 self.update(id, |j| j.view.enhanced_prompt = Some(done.text.clone()));
                 match crate::vlm::decode_h3(&done.text, mode) {
                     Some(h) => {
