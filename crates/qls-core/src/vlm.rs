@@ -18,7 +18,7 @@ use serde::Deserialize;
 
 use crate::config::VlmEndpoint;
 use crate::error::{AppError, ErrorCode};
-use crate::sdcpp::TextGenRequest;
+use crate::sdcpp::{TextGenRequest, TextSampling};
 
 /// f32 sampling values get promoted to f64 with representation noise on the wire
 /// (0.95 -> 0.949999988079071); round them back to the digits the config actually has.
@@ -45,6 +45,25 @@ pub struct VlmClient {
     model: String,
     api_key: Option<String>,
     http: reqwest::Client,
+}
+
+/// One part of an assembled turn: a text block or a base64 image block.
+#[derive(Debug, Clone, PartialEq)]
+pub enum VlmPart {
+    Text(String),
+    /// A base64 PNG (data-URL'd on the wire).
+    Image(String),
+}
+
+/// One assembled chat turn for [`VlmClient::chat_turn`]: an optional system
+/// message plus the user message's parts, in order, with the sampling the
+/// door's contract names.
+#[derive(Debug, Clone)]
+pub struct VlmTurn {
+    pub system: Option<String>,
+    pub parts: Vec<VlmPart>,
+    pub max_tokens: u32,
+    pub sampling: TextSampling,
 }
 
 impl VlmClient {
@@ -117,18 +136,57 @@ impl VlmClient {
                 serde_json::json!({ "role": "user", "content": parts }),
             ]
         };
+        self.send(messages, req.max_tokens, &req.sampling, timeout).await
+    }
+
+    /// One non-streaming turn with an explicitly assembled message: the doors
+    /// whose contract interleaves text and image parts (the H3 PE's editing
+    /// assembly) build their own parts and send them through here.
+    pub async fn chat_turn(&self, turn: &VlmTurn, timeout: Duration) -> Result<VlmReply, AppError> {
+        let messages: Vec<serde_json::Value> = {
+            let mut messages = Vec::new();
+            if let Some(system) = turn.system.as_deref().filter(|s| !s.trim().is_empty()) {
+                messages.push(serde_json::json!({ "role": "system", "content": system }));
+            }
+            let content: Vec<serde_json::Value> = turn
+                .parts
+                .iter()
+                .map(|p| match p {
+                    VlmPart::Text(t) => serde_json::json!({ "type": "text", "text": t }),
+                    VlmPart::Image(img) => serde_json::json!({
+                        "type": "image_url",
+                        "image_url": { "url": format!("data:image/png;base64,{img}") },
+                    }),
+                })
+                .collect();
+            messages.push(serde_json::json!({ "role": "user", "content": content }));
+            messages
+        };
+        self.send(messages, turn.max_tokens, &turn.sampling, timeout).await
+    }
+
+    /// The wire half of every turn: the OpenAI-compatible body, the auth, the
+    /// error shaping. [`chat`] and [`chat_turn`] differ only in how they build
+    /// the messages.
+    async fn send(
+        &self,
+        messages: Vec<serde_json::Value>,
+        max_tokens: u32,
+        sampling: &TextSampling,
+        timeout: Duration,
+    ) -> Result<VlmReply, AppError> {
         let mut body = serde_json::json!({
             "model": self.model,
             "stream": false,
             "messages": messages,
-            "max_tokens": req.max_tokens,
-            "temperature": round4(req.sampling.temperature),
-            "top_p": round4(req.sampling.top_p),
-            "top_k": req.sampling.top_k,
-            "presence_penalty": round4(req.sampling.presence_penalty),
+            "max_tokens": max_tokens,
+            "temperature": round4(sampling.temperature),
+            "top_p": round4(sampling.top_p),
+            "top_k": sampling.top_k,
+            "presence_penalty": round4(sampling.presence_penalty),
         });
-        if req.sampling.seed >= 0 {
-            body["seed"] = serde_json::json!(req.sampling.seed);
+        if sampling.seed >= 0 {
+            body["seed"] = serde_json::json!(sampling.seed);
         }
 
         let mut builder = self
@@ -258,6 +316,88 @@ pub fn strip_think(text: &str) -> String {
         };
         out = &after[end + CLOSE.len()..];
     }
+}
+
+/// A decoded H3 PE reply: the expanded caption the image model gets, plus the
+/// door's ratio recommendation, when it gave a usable one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct H3Reply {
+    /// The envelope's `expanded_caption`, as the image model gets it.
+    pub caption: String,
+    /// The recommended ratio: the card's enum value for t2i, the positive-integer
+    /// `W:H` for the editing workflow. None when the field was absent or out of
+    /// contract (the caller keeps the planned size and records a note).
+    pub ratio: Option<String>,
+}
+
+/// The card's t2i enum: the only aspect ratios the t2i PE may recommend.
+const H3_T2I_RATIOS: [&str; 10] = ["1:1", "5:4", "4:3", "3:2", "16:9", "21:9", "4:5", "3:4", "2:3", "9:16"];
+
+/// The envelope key carrying the ratio, per mode: t2i answers `aspect_ratio`;
+/// the (prompt-only, still in development) editing workflow answers
+/// `target_aspect_ratio`.
+pub fn h3_ratio_key(mode: crate::planner::ResolvedMode) -> &'static str {
+    match mode {
+        crate::planner::ResolvedMode::Generate => "aspect_ratio",
+        _ => "target_aspect_ratio",
+    }
+}
+
+/// Decode an H3 PE reply: an optional reasoning block, then exactly one JSON
+/// object `{"expanded_caption": …, <ratio key>: …}` (the door's output
+/// contract, conditioned on its own system prompt). The t2i ratio must be one
+/// of the card's enum values; the editing one is any positive-integer `W:H`.
+///
+/// None when the text is not a usable envelope (the caller retries once and
+/// then keeps the raw text — the door ran, it just answered out of contract).
+pub fn decode_h3(raw: &str, mode: crate::planner::ResolvedMode) -> Option<H3Reply> {
+    let mut text = strip_think(raw);
+    // The contract forbids a Markdown fence; a greedy decode can still slip
+    // one. Tolerate exactly one wrapping pair.
+    let t = text.trim_start();
+    if let Some(rest) = t.strip_prefix("```") {
+        let rest = rest.strip_prefix("json").unwrap_or(rest);
+        let Some(end) = rest.rfind("```") else {
+            return None;
+        };
+        text = rest[..end].trim().to_string();
+    }
+    let start = text.find('{')?;
+    // The answer is the object, written bare; be tolerant of a trailing
+    // fragment by trimming back to the last closing brace if the strict parse
+    // of the whole tail fails.
+    let tail = &text[start..];
+    let obj = serde_json::from_str::<serde_json::Value>(tail).ok().or_else(|| {
+        let end = tail.rfind('}')?;
+        serde_json::from_str::<serde_json::Value>(&tail[..=end]).ok()
+    })?;
+    let caption = obj
+        .get("expanded_caption")?
+        .as_str()?
+        .trim()
+        .to_string();
+    if caption.is_empty() {
+        return None;
+    }
+    let ratio = match h3_ratio_key(mode) {
+        "aspect_ratio" => obj
+            .get("aspect_ratio")
+            .and_then(|v| v.as_str())
+            .filter(|s| H3_T2I_RATIOS.contains(s))
+            .map(str::to_string),
+        _ => obj
+            .get("target_aspect_ratio")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .and_then(|s| {
+                let (w, h) = s.split_once(':')?;
+                let w = w.trim().parse::<u32>().ok()?;
+                let h = h.trim().parse::<u32>().ok()?;
+                (w > 0 && h > 0).then(|| s.to_string())
+            }),
+    };
+    Some(H3Reply { caption, ratio })
 }
 
 /// A decoded native PE reply: the rewritten prompt plus the door's suggested
@@ -650,5 +790,115 @@ mod tests {
         let reply = client.chat(&req("hi", vec![]), Duration::from_secs(10)).await.unwrap();
         assert_eq!(reply.text, format!("a head {TH_OPEN} and more"));
         assert_eq!(strip_think(&reply.text), "a head", "the unclosed block's tail is reasoning");
+    }
+
+    // --- The H3 PE contract -----------------------------------------------
+
+    #[test]
+    fn decode_h3_parses_the_t2i_envelope_with_its_reasoning_block() {
+        let raw = format!(
+            "{TH_OPEN} the reasoning {TH_CLOSE}\n{{\"expanded_caption\":\"a warm photograph of a cat\",\"aspect_ratio\":\"3:2\"}}"
+        );
+        let h = decode_h3(&raw, crate::planner::ResolvedMode::Generate).expect("in-contract t2i reply decodes");
+        assert_eq!(h.caption, "a warm photograph of a cat");
+        assert_eq!(h.ratio.as_deref(), Some("3:2"));
+    }
+
+    #[test]
+    fn decode_h3_t2i_ratio_must_be_the_cards_enum_value() {
+        // An in-contract enum value decodes...
+        let h = decode_h3(r#"{"expanded_caption":"p","aspect_ratio":"9:16"}"#, crate::planner::ResolvedMode::Generate).unwrap();
+        assert_eq!(h.ratio.as_deref(), Some("9:16"));
+        // ...a plausible-but-unlisted one does not (the caption still stands).
+        let h = decode_h3(r#"{"expanded_caption":"p","aspect_ratio":"13:7"}"#, crate::planner::ResolvedMode::Generate).unwrap();
+        assert_eq!(h.ratio, None);
+        // A missing ratio: the caption alone is the answer.
+        let h = decode_h3(r#"{"expanded_caption":"p"}"#, crate::planner::ResolvedMode::Generate).unwrap();
+        assert_eq!(h.ratio, None);
+    }
+
+    #[test]
+    fn decode_h3_edit_ratio_is_any_positive_integer_pair() {
+        let h = decode_h3(r#"{"expanded_caption":"p","target_aspect_ratio":"373:256"}"#, crate::planner::ResolvedMode::Edit).unwrap();
+        assert_eq!(h.ratio.as_deref(), Some("373:256"));
+        // Zero or non-integer: out of contract, the caption still stands.
+        let h = decode_h3(r#"{"expanded_caption":"p","target_aspect_ratio":"0:1"}"#, crate::planner::ResolvedMode::Edit).unwrap();
+        assert_eq!(h.ratio, None);
+        let h = decode_h3(r#"{"expanded_caption":"p","target_aspect_ratio":"16:9.5"}"#, crate::planner::ResolvedMode::Edit).unwrap();
+        assert_eq!(h.ratio, None);
+    }
+
+    #[test]
+    fn decode_h3_tolerates_a_fence_and_a_trailing_fragment_and_rejects_prose() {
+        let fenced = format!(
+            "{TH_OPEN} r {TH_CLOSE}\n```json\n{{\"expanded_caption\":\"p\",\"aspect_ratio\":\"1:1\"}}\n```"
+        );
+        let h = decode_h3(&fenced, crate::planner::ResolvedMode::Generate).expect("the fence is stripped");
+        assert_eq!(h.ratio.as_deref(), Some("1:1"));
+        let tail = r#"{"expanded_caption":"p","aspect_ratio":"1:1"} and then some words"#;
+        assert!(decode_h3(tail, crate::planner::ResolvedMode::Generate).is_some());
+        assert!(decode_h3("a plain paragraph about a cat", crate::planner::ResolvedMode::Generate).is_none());
+        assert!(decode_h3(r#"{"expanded_caption":"  ","aspect_ratio":"1:1"}"#, crate::planner::ResolvedMode::Generate).is_none());
+    }
+
+    #[tokio::test]
+    async fn chat_turn_sends_assembled_parts_in_order() {
+        // The H3 editing assembly: text, text, (text, image)…, text — the door
+        // must receive exactly that, with the turn's own sampling row.
+        let body = r#"{"choices":[{"message":{"content":"{\"expanded_caption\":\"p\",\"target_aspect_ratio\":\"3:2\"}"},"finish_reason":"stop"}]}"#;
+        let (port, seen) = mock_chat(200, body).await;
+        let client = VlmClient::new(&endpoint(port, ""));
+        let turn = VlmTurn {
+            system: None,
+            parts: vec![
+                VlmPart::Text("the task prompt".into()),
+                VlmPart::Text("Reference Image Count:\n2 input image(s)".into()),
+                VlmPart::Text("Reference Media:\n- <Picture 1> [aspect_ratio 3:2]".into()),
+                VlmPart::Image("B64ONE".into()),
+                VlmPart::Text("Reference Media:\n- <Picture 2> [aspect_ratio 1:1]".into()),
+                VlmPart::Image("B64TWO".into()),
+                VlmPart::Text("the final part".into()),
+            ],
+            max_tokens: 16384,
+            sampling: TextSampling { temperature: 1.0, top_p: 0.95, top_k: 20, presence_penalty: 0.0, seed: 7 },
+        };
+        let reply = client.chat_turn(&turn, Duration::from_secs(10)).await.unwrap();
+        assert!(reply.text.starts_with('{'));
+        let raw = seen.await.unwrap();
+        let sent: serde_json::Value = raw[raw.find('{').unwrap()..].parse().unwrap();
+        // No system message when the turn names none (the contract's single-user shape).
+        assert_eq!(sent["messages"].as_array().unwrap().len(), 1);
+        let content = sent["messages"][0]["content"].as_array().unwrap();
+        let kinds: Vec<&str> = content.iter().map(|p| p["type"].as_str().unwrap()).collect();
+        assert_eq!(
+            kinds,
+            vec!["text", "text", "text", "image_url", "text", "image_url", "text"]
+        );
+        assert_eq!(content[3]["image_url"]["url"], "data:image/png;base64,B64ONE");
+        assert_eq!(sent["max_tokens"], 16384);
+        assert_eq!(sent["temperature"], 1.0);
+        assert_eq!(sent["seed"], 7);
+    }
+
+    #[tokio::test]
+    async fn chat_turn_sends_a_system_message_when_named() {
+        let body = r#"{"choices":[{"message":{"content":"ok"}}]}"#;
+        let (port, seen) = mock_chat(200, body).await;
+        let client = VlmClient::new(&endpoint(port, ""));
+        let turn = VlmTurn {
+            system: Some("the system prompt".into()),
+            parts: vec![VlmPart::Text("spliced task".into())],
+            max_tokens: 4096,
+            sampling: TextSampling { temperature: 1.0, top_p: 0.95, top_k: 20, presence_penalty: 0.0, seed: -1 },
+        };
+        client.chat_turn(&turn, Duration::from_secs(10)).await.unwrap();
+        let raw = seen.await.unwrap();
+        let sent: serde_json::Value = raw[raw.find('{').unwrap()..].parse().unwrap();
+        let messages = sent["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[1]["content"][0]["text"], "spliced task");
+        // A negative seed is the server's choice: never sent.
+        assert!(sent.get("seed").is_none());
     }
 }
