@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { api, urls } from "../lib/api";
 import { haptic } from "../lib/haptics";
-import { composerFromRecord, modelSupportsBoxes, variationRequest } from "../lib/logic";
+import { composerFromRecord, entrySupportsInpaint, modelSupportsBoxes, variationRequest } from "../lib/logic";
 import { canCopyImage, native } from "../lib/native";
 import {
   editShownImage, getState, itemSource, removeSessionItem, reusePrompt, selectItem, setState, submitRequest, toastError, toastInfo, updateComposer, useStore, type SessionItem,
@@ -218,8 +218,12 @@ export function PhoneActions({ item, showOriginal, onLut }: { item: SessionItem;
   };
   // Paint and Boxes are complementary: a box model removes with boxes (it has no inpaint
   // pass - a mask would be ignored and the whole image re-denoised to gray), so Paint is
-  // hidden for those; every other model paints, not boxes.
-  const boxesOn = modelSupportsBoxes(useStore((s) => s.external?.model));
+  // hidden for those; every other model paints, not boxes. A no-inpaint picker entry
+  // (042, e.g. H3 - its editing is text and reference images) hides Paint too: a painted
+  // mask would be dropped and the image edited as a whole, which the button implies it is not.
+  const externalModel = useStore((s) => s.external?.model);
+  const inpaintOn = entrySupportsInpaint(useStore((s) => s.models), externalModel);
+  const boxesOn = modelSupportsBoxes(externalModel);
   const save = () => {
     const thumb = urls.sourceThumb(source);
     if (g) {
@@ -244,7 +248,7 @@ export function PhoneActions({ item, showOriginal, onLut }: { item: SessionItem;
           }}
         />
       )}
-      {!boxesOn && <ActionButton title="Paint the area to change" icon={<Brush size={17} />} label="Paint" onClick={() => paint("inpaint")} />}
+      {!boxesOn && inpaintOn && <ActionButton title="Paint the area to change" icon={<Brush size={17} />} label="Paint" onClick={() => paint("inpaint")} />}
       {boxesOn && (
         <ActionButton title="Draw layout boxes: place, keep or remove things" icon={<Square size={17} />} label="Boxes" onClick={() => paint("boxes")} />
       )}
