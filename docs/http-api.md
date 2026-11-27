@@ -44,7 +44,7 @@ The service has to be running for `service.json` to exist and be current.
 | GET | `/ping` | Liveness check (no token needed) |
 | GET | `/status` | Engine state (through the gateway), model, GPU and VRAM, active job, queue |
 | GET | `/jobs` | List the jobs the service knows about |
-| GET, PUT | `/config` | Read or replace the box settings; the reply to PUT says whether the engine door changed |
+| GET, PUT | `/config` | Read or replace the box settings (GET adds `activeModel`: the active model's derived row — refs cap and preset tiers — that the UI renders, 043); the reply to PUT says whether the engine door changed |
 | GET | `/diagnostics` | Box health: the engine door, its capabilities, the lab models, the watermark — as JSON |
 | GET | `/logs?lines=200` | Tail of the service log (default 200 lines, at most 4000) |
 | GET | `/enhancer/defaults` | The built-in system prompts for Prompt+ |

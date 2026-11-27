@@ -24,6 +24,20 @@ the prompts.
 
 ## Recently shipped on this fork
 
+- task-043: **H3's UI data and honest estimates** — the owner's three post-042 questions
+  (with screenshots): (1) does the UI cap H3 at 16 refs? The service did (the row's cap),
+  the UI didn't — it read the stale qwen profile (10). The /config reply now carries the
+  active model's derived row (`activeModel`), and the UI's refs cap and the quality-preset
+  labels read from it: H3 shows ~4 MP / ~8 MP / **native 16 MP · slowest** instead of the
+  qwen strings, and 16 refs; (2) the "native 2K" preset label was a hardcoded qwen story —
+  the presets now follow the model's own tiers (the qwen triple keeps its historical
+  labels; the native mark follows the model's top resolution tier, the size menu's rule);
+  (3) the ~2 m 9 s / ~9 min estimates came from the qwen-calibrated time model run at
+  Turbo's 8 steps with qwen's sigmas, scaled by a qwen-learned machine factor — for H3 the
+  plan now is the job (the door's 6 steps, its built-in schedule, no sigmas of its own),
+  the speed book calibrates **per model**, and on a split box whose GPU the service cannot
+  see the uncalibrated estimate hides ("time known after the first image") until the
+  model's own first measured job.
 - task-042: **H3's card, enforced** — the PE's reply is now grammar-constrained per
   request (the makers' strict JSON schema, the card's thinking parameters per request),
   the door sized to the card's 16-reference maximum (`-c 65536`, measured 41.3k prompt

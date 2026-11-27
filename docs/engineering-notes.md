@@ -138,8 +138,15 @@ box pins (see the ml repo's engine pins) and hold for any compatible release.
 - The text encoder lives in RAM (`--params-backend te=cpu`); below the budget, layers run
   split CPU/GPU.
 - Time estimates: the time model was measured on an RTX 5070 Ti. `speed.rs` compares every
-  finished job with the uncalibrated prediction and keeps a smoothed ratio per engine, GPU and
-  memory mode (`<data>/speed.json`).
+  finished job with the uncalibrated prediction and keeps a smoothed ratio per engine, GPU,
+  memory mode **and model** (`<data>/speed.json`; since 043 the key carries the model id —
+  models on one box calibrate themselves separately instead of sharing, or poisoning, one
+  factor). Two honesty rules: the plan applies the external engine's sample block, so the
+  estimate is the job that actually runs (H3: the door's 6 steps and built-in schedule, no
+  sigmas of its own — before 043 the UI estimated Turbo's 8-step qwen curve, ~9 min for a
+  ~2-minute 16 MP image), and on a split box whose local GPU the service cannot see, the
+  uncalibrated estimate of an external model is hidden (the UI says "time known after the
+  first image") until that model's own first measured job.
 
 ## Resolution and upscaling policy
 
@@ -272,6 +279,15 @@ bound: area presets 4/8/16 MP, align 32, max references 16, no bucket table.
   qwen keeps it (boxes stay Klein-only), and the engine drops a `mask`/`marks` sent
   through the raw API for such an entry with a job note, completing the job as a
   whole-image edit.
+- **The UI reads H3's own data (043).** The /config reply carries the active model's
+  derived row (`activeModel`: the service plans H3 with its own 16-ref / 4·8·16 MP
+  row, so that is what the UI shows): the refs cap in the UI is the card's 16, not the
+  stale qwen profile's 10, and the quality presets say what H3's tiers are (~4 MP / ~8 MP /
+  native 16 MP · slowest) instead of the qwen strings (~1 MP / ~1.5K / native 2K). The
+  qwen-area triple keeps its historical labels; anything else is derived (and marked
+  *native* only when the tier is the model's top resolution, the size menu's rule). The
+  H3 time estimate hides until H3's first measured job on the box (the split-box rule
+  above), then self-calibrates under H3's own key.
 - **The PUP A/B (D-041-21).** The 9B Qwen-Image-2.1 PE doors (the owner's first
   candidate) were asked the same questions directly: they answer fast (15–24 s) but in
   the **Qwen-2.1 contract** (`{"rewritten_prompt": …}`), not the H3 envelope the DiT is
