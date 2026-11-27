@@ -1328,7 +1328,26 @@ impl Engine {
 
     /// Dry run: the plan a request would get (used by the UI to show working sizes).
     /// The sizing row the planner uses for the active pipeline: the H3 door
-    /// takes the card's own row (D-041-3), every other pipeline the active
+    /// The family of the bundle the model's picker entry names (the manifest's
+    /// declaration — the contract's key, D-042-1: a renamed door keeps its
+    /// contract, the model id never decides). `None` = no manifest family
+    /// (the BFL/Qwen json shapes, an unnamed or missing bundle).
+    fn entry_bundle_family(&self, cfg: &crate::config::AppConfig, model: &str) -> Option<String> {
+        let dir = cfg
+            .models
+            .iter()
+            .find(|m| m.model == model)
+            .and_then(|m| m.prompt_bundle_path());
+        dir.and_then(|d| crate::pup::peek_family(&d).ok().flatten())
+    }
+
+    /// The H3 contract: the entry's bundle declares the makers' PE family.
+    fn is_h3(&self, cfg: &crate::config::AppConfig, model: &str) -> bool {
+        enhancer::is_h3_family(self.entry_bundle_family(cfg, model).as_deref())
+    }
+
+    /// H3 sizing by code, per model (D-041-3): the H3 door runs on the card's
+    /// own row (D-041-3), every other pipeline the active
     /// profile's row (bundled engines and the qwen models alike).
     fn effective_rec(&self, cfg: &crate::config::AppConfig) -> crate::config::RecommendedSettings {
         let profile = cfg.profile();
@@ -1337,7 +1356,7 @@ impl Engine {
             .as_ref()
             .map(|e| e.model.clone())
             .unwrap_or_else(|| profile.diffusion_model.to_string_lossy().into_owned());
-        if enhancer::h3_pup(&active_model) {
+        if self.is_h3(cfg, &active_model) {
             planner::h3_recommended()
         } else {
             profile.recommended_settings.clone()
@@ -1372,6 +1391,31 @@ impl Engine {
             j.view.started_at = Some(now_rfc3339());
             j.view.queue_position = 0;
         });
+
+        // A painted area or coloured marks on a model with no inpaint pass
+        // (schema 19: the entry says so — the H3 card's editing is text and
+        // reference images, no mask input): dropped, and the job runs as a
+        // whole-image edit of image 1. The brush is hidden for such models in
+        // the UI; this is the raw-API defence — a mask to that door would be
+        // a full re-render steered by a blurred reference, not an inpaint.
+        let cfg0 = self.config();
+        let active_model: String = cfg0
+            .external_engine
+            .as_ref()
+            .map(|e| e.model.clone())
+            .unwrap_or_else(|| cfg0.profile().diffusion_model.to_string_lossy().into_owned());
+        let supports_inpaint = cfg0
+            .models
+            .iter()
+            .find(|m| m.model == active_model)
+            .and_then(|m| m.supports_inpaint)
+            .unwrap_or_else(|| !enhancer::bfl_pup(&active_model));
+        let mut request = request;
+        let mask_dropped = (request.mask.is_some() || request.marks.is_some()) && !supports_inpaint;
+        if mask_dropped {
+            request.mask = None;
+            request.marks = None;
+        }
 
         // 1. Load inputs (off the async runtime: decoding large photos is CPU work).
         let this = self.clone();
@@ -1419,6 +1463,9 @@ impl Engine {
         let plan = planner::plan(&request, &plan_inputs, &rec)?;
         let mut seed = request.seed.unwrap_or_else(random_seed);
         let mut notes = plan.notes.clone();
+        if mask_dropped {
+            notes.push("This model has no inpaint pass (its editing is text and reference images): the marked area was not applied and the image was edited as a whole.".into());
+        }
         // A seed the user chose that made one of the references (see `avoid_reference_seeds`).
         // A quick upscale runs no diffusion, so its seed does not matter.
         if request.seed.is_some()
@@ -1428,7 +1475,6 @@ impl Engine {
             notes.push(reused_seed_note(matched, used, request.images.len()));
             seed = used;
         }
-        let mut request = request;
         if plan.mode == ResolvedMode::Upscale && request.prompt.trim().is_empty() {
             request.prompt = self.upscale_prompt(&request);
         }
@@ -1553,7 +1599,7 @@ impl Engine {
                     let as_mode = if plan.marks { ResolvedMode::Edit } else { plan.mode };
                     enhanced = self.enhance_prompt(id, &client, &caps, &cfg, &model_name, as_mode, &request.prompt, &sd_req.ref_images, &ref_sizes, None, request.aspect_ratio.as_deref(), seed, None, request.enhance_detail).await?;
                     if let Some(text) = &enhanced {
-                        if enhancer::h3_pup(&model_name) {
+                        if self.is_h3(&cfg, &model_name) {
                             // The H3 DiT runs on the PE's expanded caption, whole: the makers'
                             // pipeline sends exactly it. The user's words stay the job's record
                             // (and the stage's display), not the DiT's prompt.
@@ -1572,7 +1618,7 @@ impl Engine {
             // square. An explicit selection (a ratio or a custom size) always wins;
             // image-bearing modes keep the planned canvas (their ratio is recorded
             // on the view, as qwen's is).
-            if enhancer::h3_pup(&model_name)
+            if self.is_h3(&cfg, &model_name)
                 && plan.mode == ResolvedMode::Generate
                 && request.images.is_empty()
                 && request.mask.is_none()
@@ -1916,7 +1962,7 @@ impl Engine {
         // D-FB, contract edition: the H3 door runs on the makers' PE captions,
         // so it needs its PE door — without one the job fails instead of
         // running the DiT on the user's raw words (BFL's rule, same family).
-        if enhancer::h3_pup(model) && vlm.is_none() {
+        if self.is_h3(cfg, model) && vlm.is_none() {
             return Err(AppError::new(
                 ErrorCode::InvalidConfig,
                 "this model runs on its prompt-upsampler door (the makers' PE fine-tune): set its vlm entry and its promptBundle in the config",
@@ -1943,7 +1989,7 @@ impl Engine {
                     )
                 })?;
             Some(crate::pup::load(&dir)?)
-        } else if enhancer::h3_pup(model) {
+        } else if self.is_h3(cfg, model) {
             // The H3 door runs on the makers' PE captions (a contract model):
             // its bundle is mandatory, and it is the pipeline's own (the picker
             // entry's promptBundle), like the qwen bundles.
@@ -2028,7 +2074,7 @@ impl Engine {
             r
         } else if mode == ResolvedMode::Compose
             && !enhancer::bfl_pup(model)
-            && !enhancer::h3_pup(model)
+            && !self.is_h3(cfg, model)
             && !bundle.as_ref().is_some_and(|b| b.native && b.compose_one_shot)
         {
             let mut labels = Vec::with_capacity(images.len());
@@ -2513,6 +2559,7 @@ impl Engine {
             j.request.advanced.vae_tiling = Some(true);
             if tiled {
                 j.request.resolution = match j.request.resolution {
+                    ResolutionMode::K4 => ResolutionMode::K2,
                     ResolutionMode::K2 | ResolutionMode::Source | ResolutionMode::Custom => ResolutionMode::K15,
                     _ => ResolutionMode::K1,
                 };
@@ -3934,6 +3981,7 @@ mod tests {
             }),
             vlm_vision: None,
             prompt_bundle: String::new(),
+            ..Default::default()
         });
         let out = e
             .enhance_prompt(
@@ -4070,6 +4118,7 @@ mod tests {
             }),
             vlm_vision: None,
             prompt_bundle: bundle.to_str().unwrap().into(),
+            ..Default::default()
         };
         if let Some(i) = i2i_ep {
             m.vlm_vision = Some(crate::config::VlmEndpoint {
@@ -4526,6 +4575,7 @@ mod tests {
             }),
             vlm_vision: None,
             prompt_bundle: bundle.to_str().unwrap().into(),
+            ..Default::default()
         });
         cfg
     }

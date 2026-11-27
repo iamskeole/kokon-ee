@@ -159,12 +159,14 @@ pub fn bfl_pup(model: &str) -> bool {
     model.contains("klein")
 }
 
-/// The H3 pipeline, by the gateway model id (the namespace is ours; the only
-/// model carrying "h3" is the MiniMax H3 door). Like BFL, a contract model:
-/// it runs on the makers' PE captions, so its prompt bundle is mandatory and
-/// its PE door is required.
-pub fn h3_pup(model: &str) -> bool {
-    model.contains("h3")
+/// The H3 pipeline, by the bundle's family (the manifest's declaration, not
+/// the model id — a renamed door keeps its contract): the MiniMax-H3-Image-PE
+/// bundle. Like BFL, a contract model: it runs on the makers' PE captions, so
+/// its prompt bundle is mandatory and its PE door is required.
+pub const H3_BUNDLE_FAMILY: &str = "minimax-h3";
+
+pub fn is_h3_family(family: Option<&str>) -> bool {
+    family == Some(H3_BUNDLE_FAMILY)
 }
 
 /// One reference of the H3 editing assembly: the image the door sees
@@ -250,6 +252,14 @@ pub fn h3_request(
             parts: vec![VlmPart::Text(spliced)],
             max_tokens: row.max_tokens,
             sampling,
+            // The card's T2I request params: the thinking trio as template
+            // kwargs and the strict reply schema (caption + the 10-value
+            // ratio) — grammar-enforced where the door supports it.
+            json_schema: bundle.h3_t2i_params.as_ref().and_then(|p| p.json_schema.clone()),
+            chat_template_kwargs: bundle
+                .h3_t2i_params
+                .as_ref()
+                .map(|p| p.chat_template_kwargs.clone()),
         });
     }
     if refs.is_empty() {
@@ -300,6 +310,14 @@ pub fn h3_request(
         parts,
         max_tokens: row.max_tokens,
         sampling,
+        // The edit workflow is prompt-only and still in development at the
+        // makers: the envelope is ours (the card's two fields), enforced the
+        // same way when the bundle carries the params file.
+        json_schema: bundle.h3_edit_params.as_ref().and_then(|p| p.json_schema.clone()),
+        chat_template_kwargs: bundle
+            .h3_edit_params
+            .as_ref()
+            .map(|p| p.chat_template_kwargs.clone()),
     })
 }
 
