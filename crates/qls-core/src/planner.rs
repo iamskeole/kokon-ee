@@ -1313,8 +1313,10 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
     };
     // The server's `--vae-tiling` is only a fallback on large GPUs: a decode within the
     // budget is sent with tiling turned off (only an explicit choice overrides).
-    // Vulkan tiles every decode (`VULKAN_VAE_TILE`).
-    let vae_tiling = adv.vae_tiling.unwrap_or(inputs.vulkan || server_tiling || auto_tiling);
+    // Vulkan tiles every decode (`VULKAN_VAE_TILE`). A pinned door tile (the engine's
+    // `vaeTileSize`) is the sole tiling authority: its boot flags stand even against a
+    // user's explicit "off" (an untiled 4K decode on the H3 VAE is a ~24 GB near-OOM).
+    let vae_tiling = inputs.trust_server_tile || adv.vae_tiling.unwrap_or(inputs.vulkan || server_tiling || auto_tiling);
     if vae_tiling && adv.vae_tiling.is_none() && !inputs.server_vae_tiling && !inputs.vulkan && !quick_upscale {
         optimized = true;
         notes.push("Memory optimization enabled for this size.".into());
@@ -2218,6 +2220,13 @@ mod tests {
         let p = plan(&r, &trusted, &rec()).unwrap();
         assert!(p.vae_tile.is_none(), "the door's own tiles");
         assert!(p.vae_tiling, "the door tiles every decode");
+        // The user's explicit "off" never reaches a pinned door either.
+        let mut r_off = req("a lighthouse at dusk");
+        r_off.quality = Quality::Quality;
+        r_off.aspect_ratio = Some("16:9".into());
+        r_off.advanced.vae_tiling = Some(false);
+        let p = plan(&r_off, &trusted, &rec()).unwrap();
+        assert!(p.vae_tiling && p.vae_tile.is_none(), "pinned: the door's tiling stands against an explicit off");
         let untrusted = PlanInputs { trust_server_tile: false, ..trusted.clone() };
         assert!(plan(&r, &untrusted, &rec()).unwrap().vae_tile.is_some(), "same card without the pin: the shaped tiles return");
         // A small decode inside the door's regime (the smallest preset, 1.5 MP):

@@ -19,6 +19,12 @@ use crate::sdcpp::{Guidance, ImgGenRequest, SampleParams, VaeTilingParams, b64};
 pub struct BackendOptions {
     /// `--vae-tile-size` the server was launched with (0 = no server-side tiling).
     pub server_vae_tile_size: u32,
+    /// The server's tiling is authoritative (the external door's pinned tile, the
+    /// engine's `vaeTileSize`): no `vae_tiling_params` is ever sent — not even an
+    /// explicit "off" — so the door's boot flags govern every decode (task-044: on
+    /// the H3 VAE a full untiled 4K decode is a ~24 GB near-OOM and the look the
+    /// owner rejected; the boot's 256 px tiles are the verified-clean setting).
+    pub trust_server_tile: bool,
     /// An inpaint's coloured marks (`GenerationRequest::marks`, any size: stretched over the image).
     pub marks: Option<RgbaImage>,
     /// The prompt was written by Prompt+ (reviewed in the box: `enhanced_from`): for a painted
@@ -28,7 +34,7 @@ pub struct BackendOptions {
 
 impl Default for BackendOptions {
     fn default() -> Self {
-        Self { server_vae_tile_size: 0, marks: None, written: false }
+        Self { server_vae_tile_size: 0, trust_server_tile: false, marks: None, written: false }
     }
 }
 
@@ -40,7 +46,12 @@ pub const DEFAULT_VAE_TILE: u32 = 768;
 /// sending `tile_size 0` would silently select 256 px tiles. Only an explicit "off"
 /// overrides it.
 /// A per-job tile (`Plan::vae_tile`, large discrete GPUs) replaces the server's size.
-pub fn vae_tiling_params(tiling: bool, server_tile: u32, job_tile: Option<(u32, u32)>) -> Option<VaeTilingParams> {
+/// A trusted server (a pinned door tile) is never overridden at all: `trust` sends
+/// nothing, so the door's boot flags stand even against a user's explicit "off".
+pub fn vae_tiling_params(tiling: bool, server_tile: u32, job_tile: Option<(u32, u32)>, trust: bool) -> Option<VaeTilingParams> {
+    if trust {
+        return None;
+    }
     if let (true, Some((w, h))) = (tiling, job_tile) {
         return Some(VaeTilingParams { enabled: true, tile_size_w: Some(w), tile_size_h: Some(h), target_overlap: Some(crate::planner::VAE_TILE_OVERLAP) });
     }
@@ -323,7 +334,7 @@ pub fn prepare(plan: &Plan, prompt: &str, seed: i64, images: &[LoadedImage], mas
             custom_sigmas: plan.custom_sigmas.clone(),
             guidance: Guidance { txt_cfg: plan.cfg, img_cfg: None },
         },
-        vae_tiling_params: vae_tiling_params(plan.vae_tiling, opts.server_vae_tile_size, plan.vae_tile),
+        vae_tiling_params: vae_tiling_params(plan.vae_tiling, opts.server_vae_tile_size, plan.vae_tile, opts.trust_server_tile),
         hires: None,
         cache_mode: None,
         cache_option: None,
@@ -791,14 +802,21 @@ mod tests {
 
     #[test]
     fn vae_tiling_never_overrides_the_server_tile_size() {
-        assert_eq!(vae_tiling_params(true, 768, None), None, "server already tiles with its own size");
-        assert_eq!(vae_tiling_params(false, 0, None), None);
-        assert_eq!(vae_tiling_params(false, 768, None), Some(VaeTilingParams { enabled: false, ..Default::default() }));
-        let t = vae_tiling_params(true, 768, Some((1024, 1536))).unwrap();
+        assert_eq!(vae_tiling_params(true, 768, None, false), None, "server already tiles with its own size");
+        assert_eq!(vae_tiling_params(false, 0, None, false), None);
+        assert_eq!(vae_tiling_params(false, 768, None, false), Some(VaeTilingParams { enabled: false, ..Default::default() }));
+        let t = vae_tiling_params(true, 768, Some((1024, 1536)), false).unwrap();
         assert_eq!((t.enabled, t.tile_size_w, t.tile_size_h), (true, Some(1024), Some(1536)), "a per-job tile wins");
-        assert_eq!(vae_tiling_params(false, 768, Some((1024, 1536))), Some(VaeTilingParams { enabled: false, ..Default::default() }), "off stays off");
-        let p = vae_tiling_params(true, 0, None).unwrap();
+        assert_eq!(vae_tiling_params(false, 768, Some((1024, 1536)), false), Some(VaeTilingParams { enabled: false, ..Default::default() }), "off stays off");
+        let p = vae_tiling_params(true, 0, None, false).unwrap();
         assert_eq!((p.enabled, p.tile_size_w, p.tile_size_h, p.target_overlap), (true, Some(768), Some(768), Some(0.125)));
+        // A pinned door tile (the engine's `vaeTileSize`): the boot flags are the sole
+        // authority — no params are sent in any combination, explicit "off" included.
+        for tiling in [false, true] {
+            for job in [None, Some((1024, 1536))] {
+                assert_eq!(vae_tiling_params(tiling, 256, job, true), None, "trust never overrides the door");
+            }
+        }
         // Regression: a planned-tiled 2K job sent tile_size 0, i.e. 256 px tiles.
         let mut r = req("a cabin");
         r.aspect_ratio = Some("16:9".into());

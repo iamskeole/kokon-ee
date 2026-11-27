@@ -33,6 +33,11 @@ function NumField(props: { label: string; value: number | null | undefined; plac
 export function AdvancedPanel({ plan }: { plan: Plan | null }) {
   const c = useStore((s) => s.composer);
   const samplers = useStore((s) => (s.status?.server as { samplers?: string[] } | undefined)?.samplers);
+  const activeModel = useStore((s) => s.activeModel);
+  const models = useStore((s) => s.models);
+  // A pinned door tile (the model's `vaeTileSize`) makes the door's boot tiling the sole
+  // authority (task-044): an untiled decode is not a valid option for it, so the knob goes away.
+  const vaePinned = models.find((m) => m.model === activeModel?.model)?.vaeTileSize != null;
   const a = c.advanced;
   const setA = (patch: Partial<Advanced>) => updateComposer({ advanced: { ...a, ...patch } });
   const editLike = plan && (plan.mode === "inpaint" || plan.mode === "outpaint" || plan.mode === "edit");
@@ -117,12 +122,14 @@ export function AdvancedPanel({ plan }: { plan: Plan | null }) {
         </div>
       )}
 
-      <div className="field-row">
-        <span>
-          VAE tiling {a.vae_tiling == null ? `(auto: ${plan?.vae_tiling ? "on" : "off"})` : ""}
-        </span>
-        <Switch on={a.vae_tiling ?? plan?.vae_tiling ?? false} onChange={(v) => setA({ vae_tiling: v })} label="VAE tiling" />
-      </div>
+      {vaePinned || (
+        <div className="field-row">
+          <span>
+            VAE tiling {a.vae_tiling == null ? `(auto: ${plan?.vae_tiling ? "on" : "off"})` : ""}
+          </span>
+          <Switch on={a.vae_tiling ?? plan?.vae_tiling ?? false} onChange={(v) => setA({ vae_tiling: v })} label="VAE tiling" />
+        </div>
+      )}
 
       <button className="btn" onClick={() => updateComposer({ advanced: {}, seed: null })}>
         <RotateCcw size={14} /> Reset to automatic

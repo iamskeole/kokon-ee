@@ -366,6 +366,19 @@ owner's eyes separate them. The picture the eyes draw:
   and it matches the makers' decode. The pass-4 contact-sheet read (B2 meshing
   at 640 px crops) did not survive the owner's own full-resolution look; the
   eyes at full resolution are the arbiter, as D-044-5 said.
+- **D-044-11 (owner, 2026-11-27, on the advanced panel's "VAE tiling"
+  toggle)** the pin means the door's tiling is authoritative **in full**:
+  the service never sends `vae_tiling_params` for a pinned engine — a
+  user's explicit "off" is ignored (it would request a full untiled decode:
+  ~24 GB near-OOM on the H3 4K, and the mesh look the owner rejected) and
+  the UI hides the toggle for pinned models. Unpinned engines keep the
+  toggle (their measured fast path for small decodes). The standing concern
+  behind it: the planner's memory heuristics were calibrated on the Qwen
+  door (3.9 GB DiT + the qwen-2.1 texture-fix VAE, measured on
+  16 GB/5090-class cards); both Qwen doors share that exact VAE file, so the
+  numbers carry across the Qwen family, but klein runs a different VAE
+  (flux-3-ae) with no decode measurements — any model whose VAE the
+  heuristics get wrong takes a pin in its config row.
 
 ## Acceptance
 

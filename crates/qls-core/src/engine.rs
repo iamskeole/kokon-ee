@@ -1594,7 +1594,12 @@ impl Engine {
             let mask_img: Option<GrayImage> = mask.as_ref().map(|(m, _)| m.clone());
             // A prompt Prompt+ wrote and the user kept (reviewed in the box) is a whole instruction.
             let written = request.enhanced_from.is_some();
-            let opts = pipeline::BackendOptions { server_vae_tile_size: cfg.effective_vae_tile_size(), marks, written };
+            let opts = pipeline::BackendOptions {
+                server_vae_tile_size: cfg.effective_vae_tile_size(),
+                trust_server_tile: cfg.external_engine().is_some_and(|e| e.vae_tile_size.is_some()),
+                marks,
+                written,
+            };
             let prepared = tokio::task::spawn_blocking(move || pipeline::prepare(&plan2, &prompt, seed, &images, mask_img.as_ref(), &opts))
                 .await
                 .map_err(AppError::internal)??;
