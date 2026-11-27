@@ -1,5 +1,10 @@
 # task-044: H3 16 MP output artifacts — the VAE decode tiling (and the FA/sampling audit)
 
+**Closed 2026-11-27 (owner verified the fix: the pinned-tile 4K came back
+"ok" — the grid is gone).** Final door state per the owner: VAE FA **on**
+(they saw it through the live service and it is "perfect too" — decision
+D-044-10); the tile stays the pinned 256.
+
 Opened 2026-11-27 from the owner's on-box review of H3 outputs (attached images):
 4K generate and 4K edit show a visible square **grid** (strongest on
 high-frequency detail like fur), the edit additionally shows **colour
@@ -351,6 +356,16 @@ owner's eyes separate them. The picture the eyes draw:
   job-404 after a door crash; edit first). The edit path's reference
   encode also OOMs at 4K refs — a 4K-ref edit is infeasible on this
   card as configured regardless of tiling.
+
+- **D-044-10 (owner, 2026-11-27)** after verifying the pinned-tile fix the
+  owner looked at VAE FA **on** through the live service and approved it too
+  ("fa on is perfect too") — the door keeps `vae=on` (the header documents
+  it; dropping it restores the FA-off look). Rationale on record: the
+  256-px tiles read the same either way on this card, FA on is the faster
+  regime (it removes the FA-off wall between 1024 and 2048 px tiles, pass 1),
+  and it matches the makers' decode. The pass-4 contact-sheet read (B2 meshing
+  at 640 px crops) did not survive the owner's own full-resolution look; the
+  eyes at full resolution are the arbiter, as D-044-5 said.
 
 ## Acceptance
 

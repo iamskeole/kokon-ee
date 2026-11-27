@@ -273,20 +273,23 @@ bound: area presets 4/8/16 MP, align 32, max references 16, no bucket table.
   offers the native tier explicitly: the entry's `resolutions` list
   (`auto/1k/2k/4k`) gains the new `4k` mode (4096²), labelled *native size* in the UI;
   a 3:2 request at that tier sizes to 4096×2720 under the side cap.
-- **VAE decode: 256 px tiles with FA off (measured 2026-11-27, this 24 GB card;
-  task-044).** The original H3 VAE (the fp16 305 M one: 24-layer 2D-ViT decoder, 16×
-  spatial upsample) decoded cleanly **only in 256 px chunks with flash-attention off**,
-  on this build: at the same seed, a fine pixel-grid mesh appears over high-frequency
-  detail (fur) from 512 px tiles up, with VAE FA on it appears even in 256 px chunks
-  and in the single full-image 4096² decode (the makers' SGLang pipeline is bf16
-  full-context — the only known clean 16 MP path, unreachable on a 24 GB card), while
-  1–2 MP stays clean in every configuration (too coarse to read). The owner picked the
-  256/FA-off look from a contact sheet of all eight variants. So the door keeps
-  `--vae-tiling --vae-tile-size 256` with `--flash-attn off,diffusion=on` (no
-  `vae=on`), and the engine's `vaeTileSize: 256` in the box config tells the planner
-  the door's tiling is authoritative: no per-job shaped tile (the large-GPU memory
-  heuristic used to silently replace the 256 with ~896 px tiles — the visible grid in
-  the 2026-11-27 10:08 image) and no memory-derived untile.
+- **VAE decode: 256 px tiles (measured 2026-11-27, this 24 GB card;
+  task-044).** The original H3 VAE (the fp16 305 M one: 24-layer 2D-ViT
+  decoder, 16× spatial upsample) meshes a fine pixel grid over
+  high-frequency detail (fur) in chunks from 512 px up (FA off or on) and in
+  the single full-image 4096² decode; 1–2 MP stays clean in every
+  configuration (too coarse to read); the makers' clean 16 MP path is bf16
+  full-context SGLang — unreachable on a 24 GB card. In **256 px chunks both
+  FA-off and FA-on passed the owner's full-resolution look** (a 640-px crop
+  reading called the FA-on one meshing; it did not survive the owner looking
+  at the real image), so the door runs `--vae-tiling --vae-tile-size 256` with
+  `--flash-attn off,diffusion=on,vae=on`: the owner's call keeps VAE FA on —
+  it is the faster regime (it removes the FA-off wall between 1024 and 2048 px
+  tiles) and matches the makers' decode. The engine's `vaeTileSize: 256` in
+  the box config tells the planner the door's tiling is authoritative: no
+  per-job shaped tile (the large-GPU memory heuristic used to silently replace
+  the 256 with ~896 px tiles — the visible grid in the 2026-11-27 10:08
+  image) and no memory-derived untile.
 - **No brush, by design (042).** H3 has no mask/inpaint path — its editing is text plus
   up to 16 reference images. The picker entry says so (`supportsInpaint: false`,
   deployment data, config schema 19); the UI hides the mask tool for that entry while
