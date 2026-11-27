@@ -40,7 +40,7 @@ pub const DEFAULT_REMOTE_PORT: u16 = 39152;
 /// path, D-037-12/13): the serving box runs no ONNX and stores no model files when the
 /// door serves the lab. Deployment-level like the VLM doors: the UI carries no such field,
 /// so a settings save keeps the stored one (`absorb_secrets`).
-const SCHEMA_VERSION: u32 = 18;
+const SCHEMA_VERSION: u32 = 19;
 /// `upscaler_model` value for a plain Lanczos resize (no model).
 pub const LANCZOS: &str = "lanczos";
 /// Upscalers offered in Settings: (file stem, label). Superscale-SP is a setup download, MoSR is
@@ -414,7 +414,7 @@ pub struct ExternalEngine {
 /// One selectable model behind an externally managed engine (config `models`): what the UI
 /// lists in its model picker. Switching to a model sets it as the active `externalEngine`
 /// (the gateway loads it on demand). Empty = no picker.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalModel {
     /// Label in the UI, e.g. "Turbo".
@@ -448,6 +448,21 @@ pub struct ExternalModel {
     /// "" = none.
     #[serde(default)]
     pub prompt_bundle: String,
+    /// The resolution options this model offers in the input box (schema 19):
+    /// deployment data, because the native size is per-model (the Qwen 2.1
+    /// doors are native at 2K, the H3 door at the measured 4096² / 16 MP)
+    /// while the doors' raw limits can be higher than their native. `None` =
+    /// the standard list (auto, 1k, 1.5k, 2k, source, exact size).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub resolutions: Option<Vec<crate::planner::ResolutionMode>>,
+    /// Whether this model accepts a painted mask (the inpaint pass), schema
+    /// 19. `None` = the model class's rule (everything does, except the box
+    /// model, which has no inpaint path). `false` on the H3 entry: its
+    /// editing is the card's text + reference images, no mask input — so the
+    /// brush is hidden for it and a mask sent to it directly is dropped with
+    /// a note (the job runs as an edit on image 1).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub supports_inpaint: Option<bool>,
 }
 
 /// The lab's click-to-select engine run **outside this box** as a stock GGUF door
@@ -1770,6 +1785,44 @@ mod tests {
     }
 
     #[test]
+    fn schema_19_picker_entry_capabilities_roundtrip() {
+        // task-042: the picker entry declares its resolution list and whether it
+        // accepts a painted mask (deployment data). The H3 entry carries both;
+        // the other entry keeps the class defaults (None).
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.json");
+        let old = r#"{"schemaVersion":19,"models":[{"label":"H3","model":"kokon-h3-image","modelName":"m.gguf","resolutions":["auto","1k","2k","4k"],"supportsInpaint":false},{"label":"T","model":"t","modelName":"t.gguf"}]}"#;
+        std::fs::write(&p, old).unwrap();
+        let c = AppConfig::load_from(&p);
+        assert_eq!(c.schema_version, SCHEMA_VERSION);
+        let h3 = c.models.iter().find(|m| m.model == "kokon-h3-image").unwrap();
+        let want = vec![
+            crate::planner::ResolutionMode::Auto,
+            crate::planner::ResolutionMode::K1,
+            crate::planner::ResolutionMode::K2,
+            crate::planner::ResolutionMode::K4,
+        ];
+        assert_eq!(h3.resolutions, Some(want));
+        assert_eq!(h3.supports_inpaint, Some(false));
+        let t = c.models.iter().find(|m| m.model == "t").unwrap();
+        assert!(t.resolutions.is_none());
+        assert!(t.supports_inpaint.is_none());
+        // The save carries both on the H3 entry, and the other entry stays silent on them.
+        let saved = serde_json::to_string(&c).unwrap();
+        assert!(saved.contains("\"supportsInpaint\":false"));
+        assert!(saved.contains("\"resolutions\":[\"auto\",\"1k\",\"2k\",\"4k\"]"));
+        let v: serde_json::Value = serde_json::from_str(&saved).unwrap();
+        let t = v["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["model"] == "t")
+            .unwrap();
+        assert!(t.get("supportsInpaint").is_none());
+        assert!(t.get("resolutions").is_none());
+    }
+
+    #[test]
     fn schema_18_migration() {
         // task-032: a schema-17 file (the last shape of the cut) reads, bumps to the
         // current schema, and changes nothing else: the migration only marks that the
@@ -1780,7 +1833,7 @@ mod tests {
         let old = r#"{"schemaVersion":17,"externalEngine":{"gateway":"http://gw","model":"m","modelName":"m.gguf"}}"#;
         std::fs::write(&p, old).unwrap();
         let c = AppConfig::load_from(&p);
-        assert_eq!(c.schema_version, 18);
+        assert_eq!(c.schema_version, SCHEMA_VERSION, "the load bumps a 17 file to the current schema");
         assert_eq!(c.external_engine.as_ref().unwrap().model, "m");
         let saved = serde_json::to_string(&c).unwrap();
         assert!(
@@ -2017,6 +2070,7 @@ mod tests {
                 api_key: "k2".into(),
             }),
             prompt_bundle: "b".into(),
+            ..Default::default()
         }];
         // (1) Incoming without a vision door keeps the stored one, key included.
         let mut incoming = stored.clone();
@@ -2074,6 +2128,7 @@ mod tests {
                 vlm: stored.external_engine.as_ref().unwrap().vlm.clone(),
                 vlm_vision: None,
                 prompt_bundle: String::new(),
+                ..Default::default()
             },
             ExternalModel {
                 label: "Full".into(),
@@ -2085,6 +2140,7 @@ mod tests {
                 vlm: None,
                 vlm_vision: None,
                 prompt_bundle: String::new(),
+                ..Default::default()
             },
         ];
 
@@ -2142,6 +2198,7 @@ mod tests {
                 vlm: Some(vlm.clone()),
                 vlm_vision: None,
                 prompt_bundle: "pup".into(),
+                ..Default::default()
             },
             ExternalModel {
                 label: "Klein B".into(),
@@ -2153,6 +2210,7 @@ mod tests {
                 vlm: None,
                 vlm_vision: None,
                 prompt_bundle: String::new(),
+                ..Default::default()
             },
         ];
 
@@ -2247,6 +2305,7 @@ mod tests {
             vlm: Some(vlm),
             vlm_vision: None,
             prompt_bundle: String::new(),
+            ..Default::default()
         }];
         assert!(per_model.external_enhancer_configured());
     }
@@ -2286,6 +2345,7 @@ mod tests {
                 }),
                 vlm_vision: None,
                 prompt_bundle: "bfl-klein".into(),
+                ..Default::default()
             },
             ExternalModel {
                 label: "qwen-full".into(),
@@ -2301,6 +2361,7 @@ mod tests {
                 }),
                 vlm_vision: None,
                 prompt_bundle: "prompts/qwen".into(),
+                ..Default::default()
             },
             ExternalModel {
                 label: "qwen-turbo".into(),
@@ -2312,6 +2373,7 @@ mod tests {
                 vlm: None,
                 vlm_vision: None,
                 prompt_bundle: String::new(),
+                ..Default::default()
             },
         ];
 
