@@ -1219,6 +1219,7 @@ export function downloadIsFor(st: Pick<InstallStatus, "running" | "preset"> | nu
  * (config `models`). */
 export function modelRequest(external: ExternalEngine, m: ExternalModel): ExternalEngine {
   const r: ExternalEngine = { gateway: m.gateway ?? external.gateway, model: m.model, modelName: m.modelName, sample: m.sample };
+  if (m.vaeTileSize != null) r.vaeTileSize = m.vaeTileSize;
   if (m.vlm) r.vlm = m.vlm;
   if (m.promptBundle) r.promptBundle = m.promptBundle;
   return r;

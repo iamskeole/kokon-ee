@@ -620,7 +620,7 @@ mod tests {
         let sam = r.checks.iter().find(|c| c.id == "lab_sam").unwrap();
         assert!(!sam.ok);
         // With an engine configured: the doors are fine, the lab models still missing.
-        cfg.external_engine = Some(crate::config::ExternalEngine {
+        cfg.external_engine = Some(crate::config::ExternalEngine { vae_tile_size: None,
             gateway: "http://gw".into(),
             api_key: String::new(),
             model: "m".into(),
@@ -640,7 +640,7 @@ mod tests {
     fn upscaler_and_engine_release_checks() {
         let mut cfg = AppConfig::default();
         cfg.upscaler_model = crate::config::UPSCALER_CHOICES[0].0.into(); // the PC default (Macs: Lanczos)
-        cfg.external_engine = Some(crate::config::ExternalEngine {
+        cfg.external_engine = Some(crate::config::ExternalEngine { vae_tile_size: None,
             gateway: "http://gw".into(),
             api_key: String::new(),
             model: "m".into(),

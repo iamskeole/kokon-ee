@@ -429,6 +429,12 @@ pub struct PlanInputs {
     pub vulkan: bool,
     /// The server was launched with `--vae-tiling` (tiles every decode by default).
     pub server_vae_tiling: bool,
+    /// The server's tiling is authoritative (the external door's measured tile, the
+    /// engine's `vaeTileSize`): no per-job tile is planned for it, so its own
+    /// `--vae-tile-size` applies to every decode (task-044: the H3 VAE meshes in
+    /// chunks larger than 256 px, and the planner's large-GPU shaped tiles are tuned
+    /// for the Qwen VAE, not this one).
+    pub trust_server_tile: bool,
     /// SageAttention is enabled (faster steps; used for estimates only).
     pub sage_attention: bool,
     /// Measured speed of this machine relative to the time model (`crate::speed`).
@@ -1292,6 +1298,7 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
     // and up. 12/16 GB cards and Macs keep the measured fixed thresholds and the server's
     // --vae-tiling, unchanged.
     let untile_from_memory = !inputs.unified_memory
+        && !inputs.trust_server_tile
         && inputs.vram_total_mib.is_some_and(|mib| mib >= UNTILED_VAE_MIN_VRAM_MIB);
     let (auto_tiling, server_tiling) = if untile_from_memory {
         // `resident + area * bytes/pixel` must fit in this GPU's share of memory
@@ -1314,7 +1321,9 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
     }
     // Large discrete GPUs: decode tiles shaped to the image (fewer, larger tiles); others keep
     // the server's square tiles.
-    let large_gpu = !inputs.unified_memory && inputs.vram_total_mib.map(|m| m as f64 / 1024.0 >= 15.0).unwrap_or(false);
+    let large_gpu = !inputs.unified_memory
+        && !inputs.trust_server_tile
+        && inputs.vram_total_mib.map(|m| m as f64 / 1024.0 >= 15.0).unwrap_or(false);
     let vae_tile = if inputs.vulkan {
         (vae_tiling && !quick_upscale).then_some((VULKAN_VAE_TILE, VULKAN_VAE_TILE))
     } else {
@@ -2188,6 +2197,41 @@ mod tests {
         assert!(p.vae_tile.is_none(), "12 GB card: the server's tiles");
         r.advanced.vae_tiling = Some(false);
         assert!(plan(&r, &big, &rec()).unwrap().vae_tile.is_none(), "tiling off");
+    }
+
+    /// task-044 (2026-11-27, the H3 door on this box's 24 GB card): the VAE decodes
+    /// clean in 256 px chunks but meshes a fine grid in anything larger (512/1024
+    /// tiles and the full-image decode all showed it; 256 stayed clean across the
+    /// whole A/B set), so an engine that names its door's tile gets no per-job
+    /// override — neither the large-GPU shaped tile nor the memory-derived one.
+    #[test]
+    fn trusted_server_tile_never_gets_a_per_job_tile() {
+        let mut r = req("a lighthouse at dusk");
+        r.quality = Quality::Quality;
+        r.aspect_ratio = Some("16:9".into());
+        let trusted = PlanInputs {
+            vram_total_mib: Some(24_576),
+            server_vae_tiling: true,
+            trust_server_tile: true,
+            ..inputs(&[])
+        };
+        let p = plan(&r, &trusted, &rec()).unwrap();
+        assert!(p.vae_tile.is_none(), "the door's own tiles");
+        assert!(p.vae_tiling, "the door tiles every decode");
+        let untrusted = PlanInputs { trust_server_tile: false, ..trusted.clone() };
+        assert!(plan(&r, &untrusted, &rec()).unwrap().vae_tile.is_some(), "same card without the pin: the shaped tiles return");
+        // A small decode inside the door's regime (the smallest preset, 1.5 MP):
+        // the door tiles it, no override is sent.
+        let small_req = req("a lighthouse at dusk");
+        let one_mp = PlanInputs {
+            vram_total_mib: Some(24_576),
+            server_vae_tiling: true,
+            trust_server_tile: true,
+            ..inputs(&[])
+        };
+        let p = plan(&small_req, &one_mp, &rec()).unwrap();
+        assert_eq!(p.working, Size::new(1536, 1536), "the smallest preset");
+        assert!(p.vae_tiling && p.vae_tile.is_none());
     }
 
     #[test]

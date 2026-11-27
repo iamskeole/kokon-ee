@@ -382,7 +382,7 @@ mod tests {
 
     fn external_cfg(gateway: String, model_name: &str) -> AppConfig {
         let mut cfg = AppConfig::default();
-        cfg.external_engine = Some(ExternalEngine {
+        cfg.external_engine = Some(ExternalEngine { vae_tile_size: None,
             gateway,
             api_key: String::new(),
             model: "model-a".into(),

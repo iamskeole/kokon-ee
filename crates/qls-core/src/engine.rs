@@ -250,7 +250,8 @@ pub fn plan_inputs(cfg: &AppConfig, image_sizes: Vec<Size>, mask: Option<(Size, 
         upscaler,
         metal: cfg.gpu_backend == crate::config::GpuBackend::Metal,
         vulkan: cfg.gpu_backend == crate::config::GpuBackend::Vulkan,
-        server_vae_tiling: cfg.server_vae_tile_size() > 0,
+        server_vae_tiling: cfg.effective_vae_tile_size() > 0,
+        trust_server_tile: cfg.external_engine().is_some_and(|e| e.vae_tile_size.is_some()),
         sage_attention: cfg.uses_sage_attention(),
         speed_factor: None,
         hide_uncalibrated: !crate::speed::trust_uncalibrated(cfg),
@@ -1593,7 +1594,7 @@ impl Engine {
             let mask_img: Option<GrayImage> = mask.as_ref().map(|(m, _)| m.clone());
             // A prompt Prompt+ wrote and the user kept (reviewed in the box) is a whole instruction.
             let written = request.enhanced_from.is_some();
-            let opts = pipeline::BackendOptions { server_vae_tile_size: cfg.server_vae_tile_size(), marks, written };
+            let opts = pipeline::BackendOptions { server_vae_tile_size: cfg.effective_vae_tile_size(), marks, written };
             let prepared = tokio::task::spawn_blocking(move || pipeline::prepare(&plan2, &prompt, seed, &images, mask_img.as_ref(), &opts))
                 .await
                 .map_err(AppError::internal)??;
@@ -2908,7 +2909,7 @@ mod tests {
 
         let mut cfg = AppConfig { sdcpp_dir: dir.path().join("sdcpp"), ..AppConfig::default() };
         // The makers'-PE bundle: the H3 row, named by the entry's bundle family.
-        cfg.external_engine = Some(crate::config::ExternalEngine {
+        cfg.external_engine = Some(crate::config::ExternalEngine { vae_tile_size: None,
             model: "x-h3-image".into(),
             model_name: "model-Q4_K_M.gguf".into(),
             prompt_bundle: h3dir.to_str().unwrap().into(),
@@ -2926,7 +2927,7 @@ mod tests {
         assert_eq!(am.preset_areas, crate::config::PresetAreas { fast: 4_194_304, balanced: 8_388_608, quality: 16_777_216 });
 
         // A non-H3 bundle: the profile row, not the H3 row.
-        cfg.external_engine = Some(crate::config::ExternalEngine {
+        cfg.external_engine = Some(crate::config::ExternalEngine { vae_tile_size: None,
             model: "x-q-image".into(),
             model_name: "model-Q4_K_M.gguf".into(),
             prompt_bundle: qdir.to_str().unwrap().into(),
@@ -3061,7 +3062,7 @@ mod tests {
         let mut cfg = AppConfig::default();
         cfg.sdcpp_dir = dir.path().join("sdcpp");
         cfg.normalize();
-        cfg.external_engine = Some(crate::config::ExternalEngine {
+        cfg.external_engine = Some(crate::config::ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:1".into(),
             api_key: String::new(),
             model: "model-a".into(),
@@ -3349,7 +3350,7 @@ mod tests {
         cfg.normalize();
         // BFL model: its prompts come from the committed bundle, named by a fake external
         // pipeline (the gateway in the cfg is unused by this call).
-        cfg.external_engine = Some(crate::config::ExternalEngine {
+        cfg.external_engine = Some(crate::config::ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:9".into(),
             api_key: String::new(),
             model: "kokon-klein".into(),
@@ -3619,7 +3620,7 @@ mod tests {
         let mut cfg = AppConfig::default();
         cfg.sdcpp_dir = dir.path().to_path_buf();
         cfg.upscaler_model = "4x_NMKD-Superscale-SP_178000_G".into();
-        cfg.external_engine = Some(crate::config::ExternalEngine {
+        cfg.external_engine = Some(crate::config::ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:8081/upstream".into(),
             api_key: String::new(),
             model: "m".into(),
@@ -3854,7 +3855,7 @@ mod tests {
     fn vlm_cfg(cfg: AppConfig, entrypoint: &str) -> AppConfig {
         use crate::config::{ExternalEngine, VlmEndpoint};
         let mut cfg = cfg;
-        cfg.external_engine = Some(ExternalEngine {
+        cfg.external_engine = Some(ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:8081/upstream".into(),
             api_key: String::new(),
             model: "kokon-klein".into(),

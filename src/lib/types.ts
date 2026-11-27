@@ -405,6 +405,9 @@ export interface ExternalEngine {
   modelName: string;
   /** Per-request sample overrides (e.g. steps, cfg, sampler, clear_sigmas). */
   sample?: Record<string, unknown>;
+  /** The VAE tile (px) the gateway's door boots with; set = the planner sends no
+   * per-job tile for this engine — the door's own tiling applies. */
+  vaeTileSize?: number;
   /** The VLM (prompt upsampler) of the active pipeline; absent = no upsampler. */
   vlm?: VlmEndpoint;
   /** The second VLM endpoint: image-grounded jobs call it instead of `vlm` when named;
@@ -425,6 +428,9 @@ export interface ExternalModel {
   modelName: string;
   /** Per-request sample overrides (e.g. steps, cfg, sampler, clear_sigmas). */
   sample?: Record<string, unknown>;
+  /** The VAE tile (px) this pipeline's door boots with; set = the planner sends no
+   * per-job tile for this model — the door's own tiling applies. */
+  vaeTileSize?: number;
   /** This pipeline's gateway override; absent = the service-wide one. */
   gateway?: string;
   /** The VLM (prompt upsampler) of this pipeline; absent = no upsampler. */

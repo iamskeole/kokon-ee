@@ -795,6 +795,12 @@ describe("modelRequest", () => {
     expect(r.vlm).toEqual(vlm);
     expect(r.promptBundle).toBe("bfl-klein");
   });
+  it("a door tile pin rides along on the switch (task-044: the H3 VAE meshes above 256 px)", () => {
+    const r = modelRequest(external, { label: "H", model: "h", modelName: "h.gguf", vaeTileSize: 256 });
+    expect(r.vaeTileSize).toBe(256);
+    const r2 = modelRequest(external, { label: "X", model: "b", modelName: "b.gguf" });
+    expect(r2.vaeTileSize).toBeUndefined();
+  });
 });
 
 describe("entryForModel", () => {

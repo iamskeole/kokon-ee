@@ -396,6 +396,14 @@ pub struct ExternalEngine {
     /// `{}` = the engine's defaults for the loaded model.
     #[serde(default)]
     pub sample: serde_json::Value,
+    /// The VAE tile (px) the gateway's door boots with. When set, the planner trusts
+    /// that value and sends no per-job tile for this engine — the door's own tiling
+    /// applies. Measured on this box's 24 GB card (task-044, 2026-11-27): the H3 VAE
+    /// decodes clean in 256 px chunks but meshes a fine pixel grid on high-frequency
+    /// detail in anything larger, including the full-image decode, so its entry pins
+    /// 256 and the planner's large-GPU shaped tiles stay off for it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub vae_tile_size: Option<u32>,
     /// The VLM (prompt upsampler) of the active pipeline; None = no upsampler.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub vlm: Option<VlmEndpoint>,
@@ -454,6 +462,11 @@ pub struct ExternalModel {
     /// `{}` = the engine's defaults for the loaded model.
     #[serde(default)]
     pub sample: serde_json::Value,
+    /// The VAE tile (px) this pipeline's door boots with; when set the planner sends no
+    /// per-job tile for this model — the door's own tiling applies (see
+    /// [`ExternalEngine::vae_tile_size`]).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub vae_tile_size: Option<u32>,
     /// This pipeline's engine gateway override; None = the service-wide one
     /// (the active `externalEngine.gateway`). Per-pipeline pointability: a
     /// fresh deployment may run its pipelines on different gateways.
@@ -1277,6 +1290,16 @@ impl AppConfig {
         }
     }
 
+    /// The VAE tile the running server tiles with: the external engine's door value when
+    /// set (the box's own measured number — its capabilities cannot report boot flags),
+    /// else this box's configuration.
+    pub fn effective_vae_tile_size(&self) -> u32 {
+        self.external_engine
+            .as_ref()
+            .and_then(|e| e.vae_tile_size)
+            .unwrap_or_else(|| self.server_vae_tile_size())
+    }
+
     /// SageAttention is requested and the engine and card support it.
     pub fn uses_sage_attention(&self) -> bool {
         self.sage_attention && !self.sage_unsupported && self.gpu_backend == GpuBackend::Cuda
@@ -1866,6 +1889,32 @@ mod tests {
         );
     }
 
+    /// task-044: the H3 door's own measured VAE tile (256 px, clean; larger chunks
+    /// mesh) overrides this box's configured 768 for planning and for what the
+    /// request tells the server.
+    #[test]
+    fn the_external_engine_pins_the_door_vae_tile() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.json");
+        std::fs::write(
+            &p,
+            &format!(
+                r#"{{"schemaVersion":{SCHEMA_VERSION},"vaeTileSize":768,"externalEngine":{{"gateway":"http://gw","model":"m","modelName":"m.gguf","vaeTileSize":256}}}}"#
+            ),
+        )
+        .unwrap();
+        let c = AppConfig::load_from(&p);
+        assert_eq!(c.effective_vae_tile_size(), 256, "the door's number wins for planning");
+        // No pin: the box's configured size stands.
+        std::fs::write(
+            &p,
+            &format!(r#"{{"schemaVersion":{SCHEMA_VERSION},"vaeTileSize":768,"externalEngine":{{"gateway":"http://gw","model":"m","modelName":"m.gguf"}}}}"#),
+        )
+        .unwrap();
+        let c = AppConfig::load_from(&p);
+        assert_eq!(c.effective_vae_tile_size(), 768);
+    }
+
     #[test]
     fn a_stock_config_cannot_boot_the_box() {
         // task-031: without an external engine there is nothing to adopt — the boot
@@ -1879,7 +1928,7 @@ mod tests {
         assert!(e.to_string().contains("external engine"), "{:?}", e);
 
         let mut ok = AppConfig::default();
-        ok.external_engine = Some(crate::config::ExternalEngine {
+        ok.external_engine = Some(crate::config::ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:8081/upstream".into(),
             api_key: String::new(),
             model: "kokon-qwen-image-2.1-full".into(),
@@ -2127,7 +2176,7 @@ mod tests {
         // The UI never shows the key fields: a settings save carries empty keys and must
         // not wipe the stored ones (the 2026-11-11 box incident; see `absorb_secrets`).
         let mut stored = AppConfig::default();
-        stored.external_engine = Some(ExternalEngine {
+        stored.external_engine = Some(ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:8081/upstream".into(),
             api_key: "gw-key".into(),
             model: "m-turbo".into(),
@@ -2201,7 +2250,7 @@ mod tests {
             api_key: String::new(),
         };
         let mut stored = AppConfig::default();
-        stored.external_engine = Some(ExternalEngine {
+        stored.external_engine = Some(ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:8081/upstream".into(),
             api_key: "gw-key".into(),
             model: "m-klein-a".into(),
@@ -2240,7 +2289,7 @@ mod tests {
 
         // Switch to the entry that carries neither: VLM and bundle are inherited.
         let mut incoming = stored.clone();
-        incoming.external_engine = Some(ExternalEngine {
+        incoming.external_engine = Some(ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:8081/upstream".into(),
             api_key: "gw-key".into(),
             model: "m-klein-b".into(),
@@ -2260,7 +2309,7 @@ mod tests {
         // the empty value stands and the job fails explicitly instead of
         // writing wrong captions.
         let mut cross = stored.clone();
-        cross.external_engine = Some(ExternalEngine {
+        cross.external_engine = Some(ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:8081/upstream".into(),
             api_key: "gw-key".into(),
             model: "m-qwen".into(),
@@ -2271,7 +2320,7 @@ mod tests {
             prompt_bundle: "pup-qwen".into(),
         });
         let mut to_qwen = cross.clone();
-        to_qwen.external_engine = Some(ExternalEngine {
+        to_qwen.external_engine = Some(ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:8081/upstream".into(),
             api_key: "gw-key".into(),
             model: "m-klein-a".into(),
@@ -2300,7 +2349,7 @@ mod tests {
         assert!(!stock.external_enhancer_configured());
 
         let mut ext = stock.clone();
-        ext.external_engine = Some(ExternalEngine {
+        ext.external_engine = Some(ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:8081/upstream".into(),
             api_key: String::new(),
             model: "m-klein".into(),
@@ -2344,7 +2393,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut cfg = AppConfig::default();
         let gw = "http://127.0.0.1:8081";
-        cfg.external_engine = Some(ExternalEngine {
+        cfg.external_engine = Some(ExternalEngine { vae_tile_size: None,
             gateway: gw.into(),
             api_key: String::new(),
             model: "kokon-turbo".into(),
@@ -2526,7 +2575,7 @@ mod tests {
         );
         // The split box: the engine box holds the file, so the configured name stands
         // without a local copy (task-038, the 2026-11-23 Lanczos fallback).
-        c.external_engine = Some(ExternalEngine {
+        c.external_engine = Some(ExternalEngine { vae_tile_size: None,
             gateway: "http://127.0.0.1:8081/upstream".into(),
             api_key: String::new(),
             model: "m".into(),
