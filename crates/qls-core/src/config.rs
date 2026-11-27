@@ -467,6 +467,13 @@ pub struct ExternalModel {
     /// [`ExternalEngine::vae_tile_size`]).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub vae_tile_size: Option<u32>,
+    /// This model's own size row (the makers' card data — the three preset tier
+    /// areas, alignment, max side, reference cap, measured peak) when it differs
+    /// from the active profile's; `None` = the profile's row. Data, not code:
+    /// a new model takes a row in the config file, the code keeps only the
+    /// generic small / medium / maker's-native ladder (D-044-12).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub recommended_settings: Option<RecommendedSettings>,
     /// This pipeline's engine gateway override; None = the service-wide one
     /// (the active `externalEngine.gateway`). Per-pipeline pointability: a
     /// fresh deployment may run its pipelines on different gateways.
@@ -1294,10 +1301,13 @@ impl AppConfig {
     /// set (the box's own measured number — its capabilities cannot report boot flags),
     /// else this box's configuration.
     pub fn effective_vae_tile_size(&self) -> u32 {
-        self.external_engine
+        let ee = self.external_engine.as_ref();
+        // The active model's own pin, then the engine-level one, then the box's.
+        let active_pin = ee
             .as_ref()
-            .and_then(|e| e.vae_tile_size)
-            .unwrap_or_else(|| self.server_vae_tile_size())
+            .and_then(|e| self.models.iter().find(|m| m.model == e.model))
+            .and_then(|m| m.vae_tile_size);
+        active_pin.or_else(|| ee.and_then(|e| e.vae_tile_size)).unwrap_or_else(|| self.server_vae_tile_size())
     }
 
     /// SageAttention is requested and the engine and card support it.
@@ -1889,9 +1899,11 @@ mod tests {
         );
     }
 
-    /// task-044: the H3 door's own measured VAE tile (256 px, clean; larger chunks
-    /// mesh) overrides this box's configured 768 for planning and for what the
-    /// request tells the server.
+    /// task-044 / D-044-12: the door's own measured VAE tile (256 px, clean; larger
+    /// chunks mesh) wins over the configured 768 for planning and for what the request
+    /// tells the server — from the model row's pin (the active model's), or the
+    /// engine-level one; and a model row's own size row (the makers' card data)
+    /// parses out of the config, not the code.
     #[test]
     fn the_external_engine_pins_the_door_vae_tile() {
         let dir = tempfile::tempdir().unwrap();
@@ -1899,12 +1911,18 @@ mod tests {
         std::fs::write(
             &p,
             &format!(
-                r#"{{"schemaVersion":{SCHEMA_VERSION},"vaeTileSize":768,"externalEngine":{{"gateway":"http://gw","model":"m","modelName":"m.gguf","vaeTileSize":256}}}}"#
+                r#"{{"schemaVersion":{SCHEMA_VERSION},"vaeTileSize":768,"externalEngine":{{"gateway":"http://gw","model":"m","modelName":"m.gguf"}},"models":[{{"label":"M","model":"m","modelName":"m.gguf","vaeTileSize":256,"recommendedSettings":{{"sampler":"euler","area_fast":4194304,"area_balanced":8388608,"area_quality":16777216,"align":32,"max_side":4096,"max_references":16,"buckets":false,"measured_peak_mib":23552}}}}]}}"#
             ),
         )
         .unwrap();
         let c = AppConfig::load_from(&p);
-        assert_eq!(c.effective_vae_tile_size(), 256, "the door's number wins for planning");
+        assert_eq!(c.effective_vae_tile_size(), 256, "the model row's pin wins over the box's for planning");
+        // The model's own size row rides in the config data.
+        let m = &c.models[0];
+        let row = m.recommended_settings.as_ref().expect("the model row carries its own size row");
+        assert_eq!((row.area_fast, row.area_balanced, row.area_quality), (4194304, 8388608, 16777216));
+        assert_eq!((row.align, row.max_side, row.max_references, row.buckets), (32, 4096, 16, false));
+        assert_eq!(row.measured_peak_mib, Some(23552));
         // No pin: the box's configured size stands.
         std::fs::write(
             &p,

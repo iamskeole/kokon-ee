@@ -251,7 +251,14 @@ pub fn plan_inputs(cfg: &AppConfig, image_sizes: Vec<Size>, mask: Option<(Size, 
         metal: cfg.gpu_backend == crate::config::GpuBackend::Metal,
         vulkan: cfg.gpu_backend == crate::config::GpuBackend::Vulkan,
         server_vae_tiling: cfg.effective_vae_tile_size() > 0,
-        trust_server_tile: cfg.external_engine().is_some_and(|e| e.vae_tile_size.is_some()),
+        // A pinned model row (or the engine-level pin) makes the door's boot tiling
+        // the sole authority (D-044-12): no per-job tile, no untile, no user "off".
+        trust_server_tile: cfg
+            .external_engine()
+            .and_then(|e| cfg.models.iter().find(|m| m.model == e.model))
+            .and_then(|m| m.vae_tile_size)
+            .is_some()
+            || cfg.external_engine().is_some_and(|e| e.vae_tile_size.is_some()),
         sage_attention: cfg.uses_sage_attention(),
         speed_factor: None,
         hide_uncalibrated: !crate::speed::trust_uncalibrated(cfg),
@@ -1381,9 +1388,9 @@ impl Engine {
         enhancer::is_h3_family(self.entry_bundle_family(cfg, model).as_deref())
     }
 
-    /// H3 sizing by code, per model (D-041-3): the H3 door runs on the card's
-    /// own row (D-041-3), every other pipeline the active
-    /// profile's row (bundled engines and the qwen models alike).
+    /// The active model's size row (D-044-12): the model's own row from the config
+    /// data when it carries one (H3's makers' card), else the profile's row (the
+    /// qwen models). No per-model code: a new model takes a row in the config file.
     fn effective_rec(&self, cfg: &crate::config::AppConfig) -> crate::config::RecommendedSettings {
         let profile = cfg.profile();
         let active_model: String = cfg
@@ -1391,11 +1398,11 @@ impl Engine {
             .as_ref()
             .map(|e| e.model.clone())
             .unwrap_or_else(|| profile.diffusion_model.to_string_lossy().into_owned());
-        if self.is_h3(cfg, &active_model) {
-            planner::h3_recommended()
-        } else {
-            profile.recommended_settings.clone()
-        }
+        cfg.models
+            .iter()
+            .find(|m| m.model == active_model)
+            .and_then(|m| m.recommended_settings.clone())
+            .unwrap_or_else(|| profile.recommended_settings.clone())
     }
 
     pub fn preview_plan(
@@ -1594,9 +1601,22 @@ impl Engine {
             let mask_img: Option<GrayImage> = mask.as_ref().map(|(m, _)| m.clone());
             // A prompt Prompt+ wrote and the user kept (reviewed in the box) is a whole instruction.
             let written = request.enhanced_from.is_some();
+            // The door's tiling is the sole authority for a pinned model (the row's
+            // `vaeTileSize`, or the engine-level pin as a blanket for its models).
+            let active_model: String = cfg
+                .external_engine
+                .as_ref()
+                .map(|e| e.model.clone())
+                .unwrap_or_else(|| cfg.profile().diffusion_model.to_string_lossy().into_owned());
+            let model_pinned = cfg
+                .models
+                .iter()
+                .find(|m| m.model == active_model)
+                .and_then(|m| m.vae_tile_size)
+                .is_some();
             let opts = pipeline::BackendOptions {
                 server_vae_tile_size: cfg.effective_vae_tile_size(),
-                trust_server_tile: cfg.external_engine().is_some_and(|e| e.vae_tile_size.is_some()),
+                trust_server_tile: model_pinned || cfg.external_engine().is_some_and(|e| e.vae_tile_size.is_some()),
                 marks,
                 written,
             };
@@ -2898,12 +2918,11 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> AppResult<()> {
 mod tests {
     use super::*;
 
-    /// The UI's activeModel is the row the service plans with (task-043): the
-    /// makers'-PE bundle selects the H3 row (16 refs, 4/8/16 MP); a non-H3 bundle
-    /// and a local engine take the profile row — never a stale profile for the
-    /// wrong model.
+    /// The UI's activeModel is the row the service plans with: the model's own
+    /// `recommendedSettings` row from the config data (D-044-12 — data, not code),
+    /// else the profile's row. Never a stale profile for the wrong model.
     #[test]
-    fn active_model_info_follows_the_bundle_family() {
+    fn active_model_info_reads_the_model_row_from_config() {
         let dir = tempfile::tempdir().unwrap();
         let h3dir = dir.path().join("pup-h3");
         std::fs::create_dir_all(&h3dir).unwrap();
@@ -2912,9 +2931,25 @@ mod tests {
         std::fs::create_dir_all(&qdir).unwrap();
         std::fs::write(qdir.join("manifest.json"), r#"{"family":"qwen"}"#).unwrap();
 
+        // The H3 row exactly as this box carries it in the config data (D-044-12):
+        // the makers' card — presets 4/8/16 MP, 32-px alignment, 4096 max side
+        // (the 52491bd build's cap), 16-reference max, the measured 24 GB peak.
+        let h3_row = crate::config::RecommendedSettings {
+            sampler: "euler".into(),
+            area_fast: 4 * 1024 * 1024,
+            area_balanced: 8 * 1024 * 1024,
+            area_quality: 16 * 1024 * 1024,
+            align: 32,
+            max_side: 4096,
+            max_references: 16,
+            buckets: false,
+            measured_peak_mib: Some(23_552),
+            ..Default::default()
+        };
+
         let mut cfg = AppConfig { sdcpp_dir: dir.path().join("sdcpp"), ..AppConfig::default() };
-        // The makers'-PE bundle: the H3 row, named by the entry's bundle family.
-        cfg.external_engine = Some(crate::config::ExternalEngine { vae_tile_size: None,
+        // The model row carries its own size row: the service plans with it.
+        cfg.external_engine = Some(crate::config::ExternalEngine {
             model: "x-h3-image".into(),
             model_name: "model-Q4_K_M.gguf".into(),
             prompt_bundle: h3dir.to_str().unwrap().into(),
@@ -2923,6 +2958,7 @@ mod tests {
         cfg.models = vec![crate::config::ExternalModel {
             model: "x-h3-image".into(),
             prompt_bundle: h3dir.to_str().unwrap().into(),
+            recommended_settings: Some(h3_row),
             ..Default::default()
         }];
         let e = Engine::new(cfg.clone(), dir.path()).unwrap();
@@ -2931,8 +2967,8 @@ mod tests {
         assert_eq!(am.max_references, 16);
         assert_eq!(am.preset_areas, crate::config::PresetAreas { fast: 4_194_304, balanced: 8_388_608, quality: 16_777_216 });
 
-        // A non-H3 bundle: the profile row, not the H3 row.
-        cfg.external_engine = Some(crate::config::ExternalEngine { vae_tile_size: None,
+        // A model row without its own row: the profile row, not the H3 row.
+        cfg.external_engine = Some(crate::config::ExternalEngine {
             model: "x-q-image".into(),
             model_name: "model-Q4_K_M.gguf".into(),
             prompt_bundle: qdir.to_str().unwrap().into(),

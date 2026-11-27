@@ -607,33 +607,6 @@ pub fn size_for_ratio(ratio: &str, area: u64, rec: &RecommendedSettings) -> Opti
     Some(dims_for_area(aspect, area as f64, rec.align, 256, rec.max_side))
 }
 
-/// The MiniMax H3-Image's row (the model card: works about 4–20 MP, best around
-/// 16 MP; 16× VAE × 2×2 patch → 32-px alignment; the makers' 16-reference max).
-/// Presets: 4 MP / 8 MP / 16 MP. No bucket table — H3 sizes continuously. The
-/// card's 21:9 examples reach 6272, but the 52491bd build's definition caps the
-/// door at 4096 per side (capabilities' limits, measured 11-26), so the planner
-/// does too. The 16 MP quality preset stands or falls on the box's VRAM
-/// measurement (task-041's window); if the card cannot hold it, the preset
-/// drops to 12 MP with a note here.
-pub fn h3_recommended() -> RecommendedSettings {
-    RecommendedSettings {
-        sampler: "euler".into(),
-        area_fast: 4 * 1024 * 1024,
-        area_balanced: 8 * 1024 * 1024,
-        area_quality: 16 * 1024 * 1024,
-        align: 32,
-        max_side: 4096,
-        max_references: 16,
-        buckets: false,
-        // Measured 2026-11-26 on this 24 GB card (the 52491bd build, quantized H3):
-        // a full 4096×4096 job — the card's 6-step schedule plus the VAE decode —
-        // peaked at 22152 MiB, 2.4 GB under the card; a 2048×2048 job at 19180 MiB.
-        // The Qwen-calibrated token budget over-clamps this model (its per-token
-        // activations are lighter), so the tiers stand on the measured peak.
-        measured_peak_mib: Some(23_552),
-    }
-}
-
 pub fn resolution_area(mode: ResolutionMode, quality: Quality, rec: &RecommendedSettings) -> Option<u64> {
     match mode {
         ResolutionMode::Auto => Some(match quality {
@@ -1428,7 +1401,7 @@ mod tests {
 
     #[test]
     fn h3_tiers_stand_on_their_measured_peak() {
-        let h3 = h3_recommended();
+        let h3 = h3_row();
         let req = |q: Quality| GenerationRequest { prompt: "a red bicycle".into(), quality: q, ..Default::default() };
         // This box's card (the 24 GB override): the 16 MP quality tier stands, even
         // though the Qwen-calibrated budget would clamp it to ~6.4 MP.
@@ -1470,7 +1443,7 @@ mod tests {
     /// live box had estimated Turbo's 8 steps for H3's 6-step door.
     #[test]
     fn external_sample_is_the_plan_not_a_display() {
-        let h3 = h3_recommended();
+        let h3 = h3_row();
         let req = GenerationRequest { prompt: "a red bicycle".into(), ..Default::default() };
         let h3sample = PlanInputs {
             sample: Some(serde_json::json!({ "steps": 6, "cfg": 1.0, "sampler": "euler", "clear_sigmas": true })),
@@ -1506,6 +1479,28 @@ mod tests {
 
     fn rec() -> RecommendedSettings {
         RecommendedSettings::default()
+    }
+    /// The H3 row exactly as this box carries it in the config data (D-044-12):
+    /// makers' card — works ~4–20 MP, best ~16 MP; 16× VAE × 2×2 patch → 32-px
+    /// alignment; 16-reference max; continuous sizing (no bucket table); the
+    /// 52491bd build caps the door at 4096 per side (capabilities, measured
+    /// 11-26). `measured_peak_mib`: a full 4096² job (6-step schedule + VAE
+    /// decode) peaked at 22152 MiB on this 24 GB card, 2026-11-26; the Qwen-
+    /// calibrated token budget over-clamps this model, so the tiers stand on
+    /// the measured peak.
+    fn h3_row() -> RecommendedSettings {
+        RecommendedSettings {
+            sampler: "euler".into(),
+            area_fast: 4 * 1024 * 1024,
+            area_balanced: 8 * 1024 * 1024,
+            area_quality: 16 * 1024 * 1024,
+            align: 32,
+            max_side: 4096,
+            max_references: 16,
+            buckets: false,
+            measured_peak_mib: Some(23_552),
+            ..Default::default()
+        }
     }
     fn req(prompt: &str) -> GenerationRequest {
         GenerationRequest { prompt: prompt.into(), preserve_dimensions: true, quality: Quality::Balanced, ..Default::default() }

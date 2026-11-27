@@ -379,6 +379,29 @@ owner's eyes separate them. The picture the eyes draw:
   numbers carry across the Qwen family, but klein runs a different VAE
   (flux-3-ae) with no decode measurements — any model whose VAE the
   heuristics get wrong takes a pin in its config row.
+- **D-044-12 (owner, 2026-11-27, after spotting the tiling flags in the
+  qwen/klein boot scripts)** correction of the record: **all four doors boot
+  with the maker's `--vae-tiling --vae-tile-size 256`** (the qwen/klein
+  scripts carry it since the 11-26 restoration — "the maker's default,
+  explicit, the measured OOM cure"), not only H3. The service's per-job
+  override (shaped ~1K tiles / untile) was the only deviation from the
+  makers' defaults anywhere, so the owner called the end state: **every
+  model row in the box config pins the door's 256 (`vaeTileSize: 256`)
+  and the service sends no tiling instruction to any door at all** — no
+  shaped tile, no untile, not even a user's explicit off; the advanced
+  toggle is hidden for pinned models (a future model whose door does not
+  tile at boot omits the pin and keeps the heuristics + toggle). Same
+  call: **no in-code model rows** — H3's card data (presets 4/8/16 MP,
+  align 32, max side 4096, 16 refs, measured peak 23552) moved out of
+  `planner::h3_recommended()` into its model row's `recommendedSettings`
+  in the config (a per-model row now wins over the profile row;
+  qwen/klein keep the profile's row, already config data). Verified live:
+  Klein (the active model, whose engine-level pin had been lost to a
+  config rewrite — the exact failure mode the per-row pin fixes) plans
+  `vae_tiling: true, vae_tile: null` with the toggle off. One pending
+  visual verdict (task-039): the qwen doors' 256 px tiles can seam on
+  large images; the documented seam-free variant is a one-line `256 → 512`
+  per door script plus the number in the config rows.
 
 ## Acceptance
 

@@ -224,8 +224,9 @@ schedule replaces it, so the service's per-model sample row sets
 `{steps: 6, cfg: 1, sampler: "euler", clear_sigmas: true}` and sends no sigmas), 16× VAE
 with 2×2 patchify (32 px per token), up to 16 reference images, unified t2i and
 reference-edit in one checkpoint. Works ~4–20 MP, best at 16; the 52491bd build caps the
-door at **4096 per side** (capabilities' limits), so the planner's H3 row keeps that
-bound: area presets 4/8/16 MP, align 32, max references 16, no bucket table.
+door at **4096 per side** (capabilities' limits), so the H3 model's config row keeps that
+bound: area presets 4/8/16 MP, align 32, max references 16, no bucket table (the row lives
+in the box config as `recommendedSettings` on the model entry — data, not code, D-044-12).
 
 - **Prompt+ is the makers' PE fine-tune** (`MiniMax-H3-Image-PE`, a Qwen3.8-27B
   fine-tune; [mradermacher's Q4_K_M GGUF](https://huggingface.co/mradermacher/MiniMax-H3-Image-PE-GGUF),
@@ -267,7 +268,7 @@ bound: area presets 4/8/16 MP, align 32, max references 16, no bucket table.
 - **16 MP stands (measured 2026-11-26, this 24 GB card):** a full 4096×4096 job
   (6-step schedule + VAE decode) peaked at **22.2 GB** — 2.4 GB under the card; 2048²
   at 19.2 GB. The Qwen-calibrated token budget would have clamped quality to ~6.4 MP, so
-  the H3 row carries a measured peak (`measured_peak_mib: 23_552`): a card that holds it
+  the H3 config row carries a measured peak (`measured_peak_mib: 23_552`): a card that holds it
   keeps every single-image tier; reference-bearing jobs and unknown-VRAM boxes keep the
   shared budget (multi-reference 16 MP is not measured). Since 042 the picker also
   offers the native tier explicitly: the entry's `resolutions` list
@@ -285,11 +286,20 @@ bound: area presets 4/8/16 MP, align 32, max references 16, no bucket table.
   at the real image), so the door runs `--vae-tiling --vae-tile-size 256` with
   `--flash-attn off,diffusion=on,vae=on`: the owner's call keeps VAE FA on —
   it is the faster regime (it removes the FA-off wall between 1024 and 2048 px
-  tiles) and matches the makers' decode. The engine's `vaeTileSize: 256` in
-  the box config tells the planner the door's tiling is authoritative: no
-  per-job shaped tile (the large-GPU memory heuristic used to silently replace
-  the 256 with ~896 px tiles — the visible grid in the 2026-11-27 10:08
-  image) and no memory-derived untile.
+  tiles) and matches the makers' decode.
+- **The doors' own tiling is the sole authority (D-044-12, owner 2026-11-27).** All four
+  doors boot with the maker's `--vae-tiling --vae-tile-size 256` (H3 as above; qwen turbo,
+  qwen full and klein carry it since the 11-26 restoration — "the maker's default, explicit,
+  the measured OOM cure"), so every model row in the box config pins that number
+  (`vaeTileSize: 256`) and the service sends **no tiling instruction to any door** — no
+  per-job shaped tile (the large-GPU memory heuristic, calibrated on the Qwen door, used to
+  silently replace the 256 with ~896 px tiles — the visible grid in the 2026-11-27 10:08
+  image), no memory-derived untile, and not even a user's explicit "off" from the advanced
+  panel (the toggle is hidden for pinned models). A future model whose door does *not* tile
+  at boot simply omits the pin and keeps the planner's heuristics and the toggle. One
+  pending visual verdict (task-039): the qwen doors' 256 px tiles can seam on large images;
+  the documented seam-free variant is a one-line `256 → 512` per door script plus the same
+  number in the config rows — the doors stay authoritative either way.
 - **No brush, by design (042).** H3 has no mask/inpaint path — its editing is text plus
   up to 16 reference images. The picker entry says so (`supportsInpaint: false`,
   deployment data, config schema 19); the UI hides the mask tool for that entry while
