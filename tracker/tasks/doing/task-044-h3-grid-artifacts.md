@@ -173,7 +173,14 @@ still ended FAIL — the box was never at fault:
   script is byte-identical to its pre-window state (pass 3 failed before
   the swap). No stage-B data was produced.
 
-## Pass 4 (launching now) — the decisive stage B, third attempt
+## Pass 4 results (2026-11-27 15:56–16:33 UTC) — the decisive stage B, third attempt
+
+The window ran to a **YIELD-DONE on its own terms** (the runtime was left as
+found: vLLM up — the owner's own message to the assistant at 16:33:12 booted
+it through the gateway, which evicted the *idle* H3 door; the job's yield
+rule ended the run cleanly, restored the door script byte-identical, and
+wrote the marker. The gateway did exactly what it should; owner confirmed —
+not a failure mode, no chasing).
 
 Same window shape as the D-044-6 ruling (blocking wait, no neutralisation,
 yield on any vLLM reappearing — the watcher's 3 h cap writes TIMEOUT and
@@ -212,6 +219,64 @@ proven pass-2 job (the stage-A outputs it compares against live in
 - **Preflight** also asserts the door script is the expected baseline
   (FA-off, 256 tiles) before the window starts — if the box drifted, it
   fails fast instead of producing an uninterpretable A/B.
+
+**What actually happened (the record):**
+
+- **All six t2i runs completed** on the `vae=on` door (swapped at 15:56,
+  the makers' flash-attention decode): B6 1 MP full tile 20 s / 18.4 GB,
+  B5 2 K full 40 s / 20.2 GB, B2 4K @ 256 t **223 s** / 22.3 GB, B3 4K @
+  512 t 213 s / 22.3 GB, **B1 4K @ 4096 full-tile 222 s / 24.0 GB**, **B7
+  3264×4096 @ 4096 full-tile 162 s / 23.0 GB** (the owner's exact shape;
+  the full-context decode is *not* slower than the tiled runs and peaks
+  23.9–24.0 GB — it fits the card, with ~200 MiB to spare).
+- **B4 (4K edit, 4K ref) died in 2 s** — submitted 16:11:44, the door
+  process exited 16:11:46: the 4096² reference encode OOMed (the A8-class
+  risk, exactly as predicted). The daemon auto-rebooted the door 8 s later
+  (16:11:54, health passed 16:11:55) but B4's job id was gone with the
+  process, so the poll loop got 404s for the rest of its 30-min budget
+  (16:12–16:33) while the card sat idle (the rebooted door idles at ~4 MiB
+  VRAM — offload-to-cpu). **B8 (1MP-ref edit) never ran** (yield first).
+- **The edit colour question (dodge/burn/bleed) therefore remains
+  unmeasured**; B8 (the lighter encode) is the one missing data point and
+  would be a ~5–10 min single-run window if the owner wants it. B4 is not
+  runnable on this card as configured — a 4K-ref encode does not fit a
+  24 GB card next to the DiT.
+- **Metrics (score.py; the mottle family is trend-only, not a grid
+  detector):** B2 (256 t, FA-on) is *bit-identical* to A1 (256 t, FA-off)
+  — mottle 0.5196 / aligned 0.953 / acf 0.3417 / fft-period 2.8 — and B3
+  (512 t, FA-on) matches A2 (0.7291 / 0.911 / 1.7672). **Turning the VAE's
+  flash-attention on changes nothing measurable in a tiled decode** (same
+  seeds, same content). A3 (1024 t, FA-off) 0.7117. Full-tile runs (B1,
+  B5, B6, B7) have no tile to comb against — the metrics are null by
+  construction; the eyes are the arbiter.
+- **The evidence for the owner's call** (chest/fur crops, one shared crop
+  box, all 8 panels): the contact sheet `165500-task044-h3-vae-decode-contact-sheet.png`
+  is in the 11-27 gallery (browser), with the full-size originals in this
+  job's `outs/` (B1/B7 4K + the owner's 4K/1MP) and stage A's `outs/`
+  (A1/A2/A3). Row 1 = tiled decode (256/512/1024 FA-off, 512 FA-on);
+  row 2 = the makers' full decode (B1 4K, B7 the owner's shape) beside
+  the owner's reported 4K and the clean 1 MP control.
+- **Agent's own read (for the owner, not a verdict):** in the 640-px crops
+  the full-tile decodes do **not** look dramatically cleaner than the
+  tiled ones or the owner's 4K — the fine fur texture is visible in all
+  panels; the 1 MP control reads smooth but was upscaled from 327 px. If
+  the owner's eyes at full resolution agree, the grid is a property of the
+  fp16 24-layer 2D-ViT decoder itself (16× upsample on high-frequency
+  content) rather than of tiling or of FA — which would make it a model/
+  engine property, outside this window's measurement-only mandate.
+- **The score.py fix** (the `acf_comb` None-crash on full-tile images,
+  `round(None)`) is in this job's copy; pass-2's copy keeps the old bug
+  (harmless — A-side scoring always had tile < width).
+- **Two job improvements recorded for the next window** (neither was needed
+  for the data we have; both cut wall time): (1) a door crash mid-run loses
+  the job id — on N consecutive job-404s the run should **resubmit** the
+  same generation (the daemon reboots the door in ~8 s, proven here at
+  16:11:54) instead of polling a dead id for 30 min (the 16:12–16:33 idle
+  gap the owner caught); (2) the window's *own* poller is a gateway client
+  — any concurrent client (the owner's assistant, a compaction) can boot
+  vLLM and YIELD the run, which is correct behavior but burns a 37-min
+  window's setup; a shorter edit run order (B8 first, before the long t2i
+  runs) would make a future edit-only window ~10 min end-to-end.
 
 ## Plan
 
