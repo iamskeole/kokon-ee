@@ -439,6 +439,11 @@ pub struct PlanInputs {
     /// Apple Silicon (unified memory). Fast renders its full size here too: 768² plus the
     /// upscaler took longer than 1 MP directly on an M2 Pro (5 min 25 s vs 4 min 20 s, 2026-10-10).
     pub unified_memory: bool,
+    /// The external engine's per-request sample block (deployment data on the picker
+    /// entry, `externalEngine.sample`): the plan applies the same overrides the job
+    /// body receives, so the displayed plan and the request are the same job
+    /// (task-043). Absent for bundled engines.
+    pub sample: Option<serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -783,12 +788,34 @@ pub fn unified_memory_planning_mib(ram_mib: u64, text_encoder_mib: u64) -> u64 {
 
 pub const PIXELS_PER_TOKEN: u64 = 256; // 8x VAE downscale, 2x2 patches
 
-/// The noise schedule of every diffusion job: `sample_sigmas` of Qwen/Qwen-Image-2.1-Turbo's model_index.json
-/// (8 steps, fixed at every resolution, no dynamic shift), sent verbatim because sd.cpp's
-/// own Qwen schedule shifts by resolution and has a 0.02 terminal shift.
+/// The default noise schedule of a diffusion job: `sample_sigmas` of Qwen/Qwen-Image-2.1-Turbo's
+/// model_index.json (8 steps, fixed at every resolution, no dynamic shift), sent verbatim because
+/// sd.cpp's own Qwen schedule shifts by resolution and has a 0.02 terminal shift. A door that
+/// runs its own schedule (the entry's `clear_sigmas`) plans with none and sends none.
 pub const TURBO_SIGMAS: [f32; 9] = [1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0.0];
 /// Turbo's step count (fixed: Qwen evaluated no other schedule).
 pub const TURBO_STEPS: u32 = TURBO_SIGMAS.len() as u32 - 1;
+
+/// The external engine's per-request sample overrides (config `externalEngine.sample`):
+/// `steps` (sample steps), `cfg` (prompt guidance) and `sampler` (sample method).
+/// Keys that are absent leave the planned values untouched. The plan and the job body
+/// apply this one function, so the displayed plan and the request cannot drift
+/// (task-043: the plan estimated Turbo's 8 steps while the H3 door ran 6).
+pub fn effective_sample(steps: u32, cfg: f32, sampler: &str, sample: &serde_json::Value) -> (u32, f32, String) {
+    let (mut steps, mut cfg, mut sampler) = (steps, cfg, sampler.to_string());
+    if let Some(v) = sample.get("steps").and_then(|v| v.as_u64())
+        && v > 0
+    {
+        steps = v as u32;
+    }
+    if let Some(v) = sample.get("cfg").and_then(|v| v.as_f64()) {
+        cfg = v as f32;
+    }
+    if let Some(v) = sample.get("sampler").and_then(|v| v.as_str()) {
+        sampler = v.to_string();
+    }
+    (steps, cfg, sampler)
+}
 
 /// Area of the inpaint guide reference (the region with the painted area marked), as a
 /// share of the working canvas: enough to locate the area, cheap in tokens.
@@ -1005,8 +1032,9 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
     }
     let mut notes = Vec::new();
     let quality = req.quality;
-    // Turbo: its fixed 8-step schedule without CFG (model card).
-    let cfg = 1.0;
+    // Turbo: its fixed 8-step schedule without CFG (model card). An external engine's
+    // sample block (deployment data) may replace any of the three.
+    let mut cfg = 1.0;
     let budget_tokens = planning_token_budget(inputs.vram_total_mib, inputs.unified_memory);
     let budget_area = if let Some(peak) = rec.measured_peak_mib {
         // This model's tiers are measured, not budgeted: a card that holds the largest
@@ -1305,6 +1333,17 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
     }
     // Results are enlarged with ESRGAN when the model exists (Lanczos otherwise).
     let enlarge = output.area() as f64 > working.content.area() as f64 * 1.21;
+    // The entry's sample block is the plan (task-043): the same steps/CFG/sampler the
+    // job body receives, and no schedule of its own when the door runs a built-in one
+    // (clear_sigmas) — the display no longer shows a schedule the request will not run.
+    let mut sampler = adv.sampler.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| rec.sampler.clone());
+    let mut clear_sigmas = false;
+    if let Some(sample) = &inputs.sample {
+        if steps > 0 {
+            (steps, cfg, sampler) = effective_sample(steps, cfg, &sampler, sample);
+        }
+        clear_sigmas = sample.get("clear_sigmas").and_then(|v| v.as_bool()) == Some(true);
+    }
     let mut estimated_seconds =
         if quick_upscale { 2.0 } else { estimate_seconds(working.canvas, &references, steps, batch_count, inputs.sage_attention, cfg) };
     let mut upscale_seconds = 0.0;
@@ -1333,7 +1372,7 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
         content: working.content_rect(),
         steps,
         cfg,
-        sampler: adv.sampler.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| rec.sampler.clone()),
+        sampler,
         strength,
         batch_count,
         vae_tiling,
@@ -1353,7 +1392,7 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
         upscaler: inputs.upscaler.clone(),
         upscale_tile: if inputs.upscale_tile > 0 { inputs.upscale_tile } else { LARGE_UPSCALE_TILE },
         upscale,
-        custom_sigmas: if quick_upscale { Vec::new() } else { TURBO_SIGMAS.to_vec() },
+        custom_sigmas: if quick_upscale || clear_sigmas { Vec::new() } else { TURBO_SIGMAS.to_vec() },
         vae_tile,
         reference_detail: matches!(mode, ResolvedMode::Edit | ResolvedMode::MultiReference | ResolvedMode::Compose | ResolvedMode::Inpaint).then(|| adv.reference_detail.unwrap_or_default()),
     })
@@ -1413,6 +1452,32 @@ mod tests {
         assert!(u.upscale_share >= 0.0 && u.upscale_share < 1.0, "the share is known anyway: {}", u.upscale_share);
         let known = PlanInputs { hide_uncalibrated: true, speed_factor: Some(2.0), ..base };
         assert!(plan(&r, &known, &RecommendedSettings::default()).unwrap().estimated_seconds > 0.0);
+    }
+
+    /// The entry's sample block is the plan (task-043): the same steps the job body
+    /// receives, and no schedule of its own when the door runs a built-in one — the
+    /// live box had estimated Turbo's 8 steps for H3's 6-step door.
+    #[test]
+    fn external_sample_is_the_plan_not_a_display() {
+        let h3 = h3_recommended();
+        let req = GenerationRequest { prompt: "a red bicycle".into(), ..Default::default() };
+        let h3sample = PlanInputs {
+            sample: Some(serde_json::json!({ "steps": 6, "cfg": 1.0, "sampler": "euler", "clear_sigmas": true })),
+            ..Default::default()
+        };
+        let p = plan(&req, &h3sample, &h3).unwrap();
+        assert_eq!(p.steps, 6, "the door's schedule, not the Turbo default");
+        assert_eq!(p.cfg, 1.0);
+        assert_eq!(p.sampler, "euler");
+        assert!(p.custom_sigmas.is_empty(), "clear_sigmas: the door's built-in schedule runs");
+        let plain = plan(&req, &PlanInputs { ..Default::default() }, &h3).unwrap();
+        assert_eq!(plain.steps, TURBO_STEPS);
+        assert_eq!(plain.custom_sigmas, TURBO_SIGMAS.to_vec());
+        assert!(p.estimated_seconds < plain.estimated_seconds, "six steps estimate less than eight");
+        // A sample without clear_sigmas keeps the planned schedule (a door that runs it).
+        let steps_only = plan(&req, &PlanInputs { sample: Some(serde_json::json!({ "steps": 6 })), ..Default::default() }, &h3).unwrap();
+        assert_eq!(steps_only.steps, 6);
+        assert_eq!(steps_only.custom_sigmas, TURBO_SIGMAS.to_vec());
     }
 
     #[test]

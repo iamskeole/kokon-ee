@@ -283,21 +283,7 @@ pub fn enhanced_prompt(original: &str, enhanced: &str) -> String {
 /// What the external engine's overrides leave of the planned values: the `steps`, `cfg`
 /// and `sampler` the request is sent with (and the image's metadata records). Keys that
 /// are absent leave the planned values untouched.
-pub fn effective_sample(steps: u32, cfg: f32, sampler: &str, sample: &serde_json::Value) -> (u32, f32, String) {
-    let (mut steps, mut cfg, mut sampler) = (steps, cfg, sampler.to_string());
-    if let Some(v) = sample.get("steps").and_then(|v| v.as_u64())
-        && v > 0
-    {
-        steps = v as u32;
-    }
-    if let Some(v) = sample.get("cfg").and_then(|v| v.as_f64()) {
-        cfg = v as f32;
-    }
-    if let Some(v) = sample.get("sampler").and_then(|v| v.as_str()) {
-        sampler = v.to_string();
-    }
-    (steps, cfg, sampler)
-}
+pub use crate::planner::effective_sample;
 
 /// The external engine's per-request sample overrides (config `externalEngine.sample`):
 /// `steps` (sample steps), `cfg` (prompt guidance), `sampler` (sample method) and
