@@ -1,7 +1,7 @@
 import { ArrowUp, Brush, Check, ChevronDown, Cpu, Expand, Eye, FolderOpen, Gauge, ImagePlus, Layers, Lightbulb, Maximize, Pencil, Settings, Settings2, SlidersHorizontal, Sparkles, Square, Undo2, WandSparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, urls } from "../lib/api";
-import { activeLoras, activeOverrides, aspectLabel, buildRequest, composing, editing, enhancerApplies, expansionPixels, formatDuration, hasOutpaint, imageName, MAX_LORAS, modelRequest, modelSupportsBoxes, moveRef, needsPrompt, parseRatio, toggleLora, type Ref, typedWords, wantsPromptReview, withActionVerb } from "../lib/logic";
+import { activeLoras, activeOverrides, aspectLabel, buildRequest, composing, editing, enhancerApplies, entrySupportsInpaint, expansionPixels, formatDuration, hasOutpaint, imageName, MAX_LORAS, modelRequest, modelSupportsBoxes, moveRef, needsPrompt, parseRatio, toggleLora, type Ref, typedWords, wantsPromptReview, withActionVerb } from "../lib/logic";
 import { native } from "../lib/native";
 import { haptic } from "../lib/haptics";
 import { useNarrow } from "../lib/platform";
@@ -175,6 +175,10 @@ function TargetBar() {
   const nameOf = useRefNames();
   const narrow = useNarrow();
   const boxesOn = modelSupportsBoxes(useStore((s) => s.external?.model));
+  // The brush is a model capability (the entry says so; the H3 door takes no
+  // mask — its editing is text + reference images). Its label and the mask's
+  // effect both follow it.
+  const inpaintOn = entrySupportsInpaint(useStore((s) => s.models), useStore((s) => s.external?.model));
 
   if (!c.refs.length) {
     if (!session.some((i) => i.gen || i.input)) return null;
@@ -207,7 +211,7 @@ function TargetBar() {
   const name = nameOf(first)?.toLowerCase() ?? (first.source.startsWith("gen:") ? "this result" : first.name);
   // A painted mask only takes effect for models with an inpaint pass; for box models it
   // degrades to an edit (the build would ignore it and re-denoise the whole image).
-  const maskLive = !!c.mask && !boxesOn;
+  const maskLive = !!c.mask && !boxesOn && inpaintOn;
   const outPx = hasOutpaint(c.outpaint) ? expansionPixels(c.outpaint!, first.width, first.height) : null;
   const what =
     c.refs.length > 1 ? `Combining ${c.refs.length} images` : maskLive ? (c.mask?.marks ? `Adding at the coloured marks on ${name}` : `${INPAINT_VERB[c.inpaintAction]} the painted area of ${name}`) : outPx ? `Expanding ${name}` : `Editing ${name}`;
@@ -228,7 +232,7 @@ function TargetBar() {
       </span>
       <span className="spacer" />
       <span className="tool-group">
-{!boxesOn && (
+{!boxesOn && inpaintOn && (
           <button className={`tool ${c.mask ? "on" : ""}`} data-tour="paint" onClick={() => openEditor("inpaint")} title="Paint where things go (one colour each), or the area to change; the rest stays as it is">
             <Brush size={14} /> <span className="lbl">{c.mask?.marks ? "Colours painted" : c.mask ? "Area painted" : "Paint area"}</span>
           </button>

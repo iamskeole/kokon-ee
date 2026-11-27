@@ -200,6 +200,20 @@ export function modelSupportsInpaint(model?: string | null): boolean {
   return !modelSupportsBoxes(model);
 }
 
+/** The resolution options the size menu offers for this model: the entry's own
+ * list (deployment data — the native size is per-model), else the standard list. */
+export function resolutionOptions(models: ExternalModel[], model?: string | null): ResolutionMode[] {
+  return entryForGeneration(models, { external_model: model })?.resolutions ?? ["auto", "1k", "1.5k", "2k", "source"];
+}
+
+/** Whether the brush (a painted mask) is offered for this model: the entry's
+ * flag, else the class rule. The H3 entry says no: its editing is the card's
+ * text + reference images, with no mask input. */
+export function entrySupportsInpaint(models: ExternalModel[], model?: string | null): boolean {
+  const flag = entryForGeneration(models, { external_model: model })?.supportsInpaint;
+  return flag ?? modelSupportsInpaint(model);
+}
+
 /** A painted mask the request will actually send, for `model` (see modelSupportsInpaint). */
 const maskLive = (c: Composer, model?: string | null) => maskInUse(c) && modelSupportsInpaint(model);
 

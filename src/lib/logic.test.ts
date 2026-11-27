@@ -9,9 +9,9 @@ import {
   planPipeline, remainingSeconds, sizeForWidth, timeAgo, upscaleRequest, upscaleTargets, versionLabels, type JobClock, type Ref,
   neighbourAfterRemoval, pageOutdated, previewIndex, starPromptDue, STAR_PROMPT_AFTER, formatBytes, formatDuration, installProgress, timelineLinks, undoTarget, aspectLabel, parseRatio, sizeForRatio, sizeForLongSide, expandToRatio, expandToSize, arcLayout,
   goneVersions, moreLikeThisRequest, MORE_LIKE_THIS, PREVIEW_SIDE, stageFitsPreview, viewerWantsFull,
-  modelRequest, entryForModel, entryForGeneration, maxRefs, boxRows, movedBox, appendBoxTable, splitBoxTable, modelSupportsBoxes, modelSupportsInpaint, type BoxRow,
+  modelRequest, entryForModel, entryForGeneration, maxRefs, boxRows, movedBox, appendBoxTable, splitBoxTable, modelSupportsBoxes, modelSupportsInpaint, entrySupportsInpaint, resolutionOptions, type BoxRow,
 } from "./logic";
-import type { GenerationRecord, InstallItem, JobView, LoraItem, Plan } from "./types";
+import type { ExternalModel, GenerationRecord, InstallItem, JobView, LoraItem, Plan } from "./types";
 
 const ref = (n: number): Ref => ({ key: `k${n}`, source: `input:${n}`, width: 100, height: 100, name: `r${n}` });
 
@@ -834,6 +834,32 @@ describe("entryForGeneration", () => {
 
   it("lets a known tenant win over a different reported name", () => {
     expect(entryForGeneration(models, { external_model: "kokon-full", model: "m-turbo.gguf" })?.label).toBe("Full");
+  });
+});
+
+describe("entry capability flags (task-042)", () => {
+  // H3 takes no mask (its editing is text + reference images) and offers its own
+  // resolution list with the native 4096² tier; the others keep the class defaults.
+  const models: ExternalModel[] = [
+    { label: "H3", model: "kokon-h3", modelName: "m-h3.gguf", resolutions: ["auto", "1k", "2k", "4k"], supportsInpaint: false },
+    { label: "Turbo", model: "kokon-turbo", modelName: "m-turbo.gguf" },
+    { label: "Klein", model: "kokon-klein", modelName: "model-Q8_0.gguf" },
+  ];
+
+  it("resolutions: the entry's list when it has one, else the standard list", () => {
+    expect(resolutionOptions(models, "kokon-h3")).toEqual(["auto", "1k", "2k", "4k"]);
+    expect(resolutionOptions(models, "kokon-turbo")).toEqual(["auto", "1k", "1.5k", "2k", "source"]);
+    expect(resolutionOptions(models, undefined)).toEqual(["auto", "1k", "1.5k", "2k", "source"]);
+  });
+
+  it("supportsInpaint: the entry's flag beats the class rule", () => {
+    expect(entrySupportsInpaint(models, "kokon-h3")).toBe(false);
+    // class rule: klein has no inpaint pass, everything else does
+    expect(entrySupportsInpaint(models, "kokon-klein")).toBe(false);
+    expect(entrySupportsInpaint(models, "kokon-turbo")).toBe(true);
+    expect(entrySupportsInpaint(models, undefined)).toBe(true);
+    // an explicit true also stands (a box model with an inpaint pass)
+    expect(entrySupportsInpaint([{ ...models[2], supportsInpaint: true } as ExternalModel], "kokon-klein")).toBe(true);
   });
 });
 

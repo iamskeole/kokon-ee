@@ -9,7 +9,7 @@ export type RecordMode = ResolvedMode | "lut" | "layers";
 export type InpaintAction = "edit" | "remove" | "replace" | "add";
 /** Presets of the Turbo model (8 steps, no CFG): ~1 MP, ~1.5K, native 2K. */
 export type Quality = "fast" | "balanced" | "quality";
-export type ResolutionMode = "auto" | "source" | "1k" | "1.5k" | "2k" | "custom";
+export type ResolutionMode = "auto" | "source" | "1k" | "1.5k" | "2k" | "4k" | "custom";
 export type OutputFormat = "png" | "jpeg" | "webp";
 export type Units = "pixels" | "percent";
 /** Refine effort of older versions' two-pass records (gallery details only). */
@@ -416,6 +416,14 @@ export interface ExternalModel {
   vlmVision?: VlmEndpoint;
   /** Prompt bundle of this pipeline (a bundled id or a path); "" = none. */
   promptBundle?: string;
+  /** The resolution options this model offers in the input box; absent = the
+   * standard list. The native size is per-model (the Qwen doors are native at
+   * 2K, the H3 door at its measured 4096² / 16 MP), so the list is deployment
+   * data. */
+  resolutions?: ResolutionMode[];
+  /** Whether this model accepts a painted mask (the inpaint pass); absent = the
+   * model class's rule (everything does, except the box model). */
+  supportsInpaint?: boolean;
 }
 
 export type InstallItemState = "present" | "pending" | "downloading" | "verifying" | "extracting" | "done" | "failed" | "cancelled";

@@ -1,6 +1,6 @@
 import { ArrowLeftRight, Check } from "lucide-react";
 import { useState } from "react";
-import { ASPECTS, LONG_SIDE_PRESETS, aspectLabel, parseRatio, planPipeline, sizeForLongSide, sizeForRatio } from "../lib/logic";
+import { ASPECTS, LONG_SIDE_PRESETS, aspectLabel, parseRatio, planPipeline, resolutionOptions, sizeForLongSide, sizeForRatio } from "../lib/logic";
 import { getState, updateComposer, useStore } from "../lib/store";
 import type { Plan, ResolutionMode } from "../lib/types";
 import { Option } from "./ui";
@@ -65,15 +65,24 @@ export function AspectGrid(props: { value: string | null; onPick: (ratio: string
   );
 }
 
-const RES_OPTIONS: { value: ResolutionMode; label: string; sub: string }[] = [
-  { value: "auto", label: "Auto", sub: "Set by the quality preset" },
-  { value: "1k", label: "1K", sub: "~1 MP" },
-  { value: "1.5k", label: "1.5K", sub: "~2.4 MP" },
-  { value: "2k", label: "2K", sub: "~4 MP · the model's native size" },
-  { value: "source", label: "Source", sub: "Same size as image 1" },
-];
+// The preset tiers the size menu can offer; a model's entry may narrow the list
+// (deployment data) and the biggest tier it keeps is labelled its native size
+// (the Qwen doors are native at 2K, the H3 door at the measured 4096² / 16 MP).
+const RES_TIER: Record<Exclude<ResolutionMode, "auto" | "source" | "custom">, { label: string; sub: string; order: number }> = {
+  "1k": { label: "1K", sub: "~1 MP", order: 1 },
+  "1.5k": { label: "1.5K", sub: "~2.4 MP", order: 2 },
+  "2k": { label: "2K", sub: "~4 MP", order: 3 },
+  "4k": { label: "4K", sub: "~16 MP", order: 4 },
+};
 
-export const resolutionLabel = (r: ResolutionMode, w: number, h: number) => (r === "custom" ? `${w}×${h}` : RES_OPTIONS.find((o) => o.value === r)?.label ?? "Auto");
+const resOption = (value: ResolutionMode): { value: ResolutionMode; label: string; sub: string } => {
+  if (value === "auto") return { value, label: "Auto", sub: "Set by the quality preset" };
+  if (value === "source") return { value, label: "Source", sub: "Same size as image 1" };
+  const t = RES_TIER[value as keyof typeof RES_TIER];
+  return { value, label: t.label, sub: t.sub };
+};
+
+export const resolutionLabel = (r: ResolutionMode, w: number, h: number) => (r === "custom" ? `${w}×${h}` : resOption(r).label);
 
 /** Output size: a preset level or an exact width × height (whose ratio is then shown). */
 export function ResolutionMenu({ plan, close }: { plan: Plan | null; close: () => void }) {
@@ -92,9 +101,18 @@ export function ResolutionMenu({ plan, close }: { plan: Plan | null; close: () =
   const pick = () => valid && c.resolution !== "custom" && updateComposer({ resolution: "custom", customWidth: w as number, customHeight: h as number });
   // Screen presets keep the ratio already typed (16:9 when there is none).
   const ratio = valid ? (w as number) / (h as number) : 16 / 9;
+  // The entry's list (or the standard one); the biggest tier it keeps is the
+  // model's native size and says so.
+  const order = resolutionOptions(useStore((s) => s.models), useStore((s) => s.external?.model));
+  const tiers = order.filter((o) => o in RES_TIER) as (keyof typeof RES_TIER)[];
+  const native = tiers.length ? tiers.reduce((a, b) => (RES_TIER[a].order >= RES_TIER[b].order ? a : b)) : null;
+  const options = order.map((o) => {
+    const p = resOption(o);
+    return o === native ? { ...p, sub: `${p.sub} · the model's native size` } : p;
+  });
   return (
     <div className="res-menu">
-      {RES_OPTIONS.filter((o) => o.value !== "source" || editing).map((o) => (
+      {options.filter((o) => o.value !== "source" || editing).map((o) => (
         <Option key={o.value} selected={c.resolution === o.value} label={o.label} sub={o.sub} onClick={() => (updateComposer({ resolution: o.value }), close())} />
       ))}
       <div className={`res-custom ${c.resolution === "custom" ? "on" : ""}`}>
