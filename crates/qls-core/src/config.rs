@@ -379,7 +379,7 @@ pub struct VlmEndpoint {
 /// model router that starts the engine when requested), and a running engine is accepted only
 /// when it reports `model_name`. The UI treats "no engine loaded" as a normal resting state
 /// (zero VRAM) and requests one explicitly.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalEngine {
     /// Base URL of the load-on-demand gateway, e.g. `http://127.0.0.1:8080/engine`.
@@ -409,6 +409,30 @@ pub struct ExternalEngine {
     /// assets. "" = none.
     #[serde(default)]
     pub prompt_bundle: String,
+}
+
+/// The pixel area of one quality preset tier (`RecommendedSettings::area_*`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetAreas {
+    pub fast: u64,
+    pub balanced: u64,
+    pub quality: u64,
+}
+
+/// The active diffusion model's data, derived by the service from the row it plans
+/// with (task-043): the UI reads its refs cap and the quality-preset labels from
+/// here, never from a stale profile left in the config file. External engines plan
+/// with Rust-code rows (the H3 card), local engines with the profile block — either
+/// way the UI shows the row the service will run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveModel {
+    /// The model id in the engine's vocabulary (the external gateway's id, or the
+    /// bundled engine's file name).
+    pub model: String,
+    pub max_references: u32,
+    pub preset_areas: PresetAreas,
 }
 
 /// One selectable model behind an externally managed engine (config `models`): what the UI
