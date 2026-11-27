@@ -85,16 +85,36 @@ impl SpeedBook {
     }
 }
 
-/// What makes timings comparable: backend, GPU and how the weights are held.
-pub fn machine_key(cfg: &AppConfig, gpu: Option<&GpuInfo>) -> String {
+/// What makes timings comparable: backend, GPU and how the weights are held — and the
+/// model: different models on the same box must not share one factor (task-043: the
+/// qwen-learned factor was applied to H3's plans, and H3's measurements were recorded
+/// under it, poisoning both).
+pub fn machine_key(cfg: &AppConfig, gpu: Option<&GpuInfo>, model: &str) -> String {
     let gpu = gpu.map(|g| g.name.as_str()).unwrap_or("unknown GPU");
     format!(
-        "{}|{}|{:?}|sage={}",
+        "{}|{}|{:?}|sage={}|model={}",
         cfg.gpu_backend.device_prefix(),
         gpu,
         cfg.text_encoder_placement,
-        cfg.uses_sage_attention()
+        cfg.uses_sage_attention(),
+        model
     )
+}
+
+/// Whether the uncalibrated estimate may be shown at all. `trust_uncalibrated` covers
+/// the bundled engine (the curve fits only the hardware it was measured on). On a
+/// split box an external engine runs on a machine this box cannot see: the local GPU
+/// is absent or unknown, so the uncalibrated curve — fitted on yet another box's
+/// hardware — is not a measurement. Hide it until the model's own first measured job
+/// (task-043: the split box showed ~9 min for H3's 16 MP against ~2 min measured).
+pub fn show_uncalibrated(cfg: &AppConfig, gpu: Option<&GpuInfo>) -> bool {
+    if !trust_uncalibrated(cfg) {
+        return false;
+    }
+    if cfg.external_engine.is_some() {
+        return gpu.is_some();
+    }
+    true
 }
 
 /// Whether the uncalibrated model is close enough to show before the first measurement:
@@ -139,14 +159,37 @@ mod tests {
             name: "NVIDIA GeForce RTX 5070".into(),
             ..Default::default()
         };
-        let a = machine_key(&cfg, Some(&gpu));
+        let a = machine_key(&cfg, Some(&gpu), "model-a");
         cfg.gpu_backend = GpuBackend::Vulkan;
         assert_ne!(
             a,
-            machine_key(&cfg, Some(&gpu)),
+            machine_key(&cfg, Some(&gpu), "model-a"),
             "backends are calibrated separately"
+        );
+        assert_ne!(
+            a,
+            machine_key(&cfg, Some(&gpu), "model-b"),
+            "models are calibrated separately (task-043)"
         );
         cfg.gpu_backend = GpuBackend::Vulkan;
         assert!(!trust_uncalibrated(&cfg));
+    }
+
+    #[test]
+    fn uncalibrated_hides_for_external_engines_without_a_local_gpu() {
+        let mut cfg = AppConfig::default();
+        cfg.gpu_backend = GpuBackend::Cuda;
+        // Bundled engine: the measured-on-NVIDIA trust stands, even without a detected GPU.
+        assert!(show_uncalibrated(&cfg, None));
+        // Split box, external engine, no local GPU: hidden until the first measurement.
+        cfg.external_engine = Some(crate::config::ExternalEngine::default());
+        assert!(!show_uncalibrated(&cfg, None));
+        // The engine box reports a GPU through the gateway: shown again.
+        let gpu = GpuInfo { name: "some card".into(), ..Default::default() };
+        assert!(show_uncalibrated(&cfg, Some(&gpu)));
+        // A non-CUDA box was never trusted in the first place.
+        let mut vulkan = AppConfig::default();
+        vulkan.gpu_backend = GpuBackend::Vulkan;
+        assert!(!show_uncalibrated(&vulkan, Some(&gpu)));
     }
 }
