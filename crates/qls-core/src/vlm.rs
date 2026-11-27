@@ -58,12 +58,21 @@ pub enum VlmPart {
 /// One assembled chat turn for [`VlmClient::chat_turn`]: an optional system
 /// message plus the user message's parts, in order, with the sampling the
 /// door's contract names.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VlmTurn {
     pub system: Option<String>,
     pub parts: Vec<VlmPart>,
     pub max_tokens: u32,
     pub sampling: TextSampling,
+    /// The door's contract reply as a strict JSON schema (the makers' PE
+    /// constrains its output this way; llama.cpp converts it to a grammar).
+    /// Sent per request — the two H3 workflows carry different envelopes, so
+    /// one door can enforce both. `None` = unconstrained (the prompt asks).
+    pub json_schema: Option<serde_json::Value>,
+    /// Template kwargs the door's card names (thinking on, the reasoning
+    /// effort, thinking preserved) — per request, the same mechanism this
+    /// host's own reasoning-level routing uses.
+    pub chat_template_kwargs: Option<std::collections::BTreeMap<String, serde_json::Value>>,
 }
 
 impl VlmClient {
@@ -136,7 +145,7 @@ impl VlmClient {
                 serde_json::json!({ "role": "user", "content": parts }),
             ]
         };
-        self.send(messages, req.max_tokens, &req.sampling, timeout).await
+        self.send(messages, req.max_tokens, &req.sampling, None, None, timeout).await
     }
 
     /// One non-streaming turn with an explicitly assembled message: the doors
@@ -162,7 +171,15 @@ impl VlmClient {
             messages.push(serde_json::json!({ "role": "user", "content": content }));
             messages
         };
-        self.send(messages, turn.max_tokens, &turn.sampling, timeout).await
+        self.send(
+            messages,
+            turn.max_tokens,
+            &turn.sampling,
+            turn.json_schema.as_ref(),
+            turn.chat_template_kwargs.as_ref(),
+            timeout,
+        )
+        .await
     }
 
     /// The wire half of every turn: the OpenAI-compatible body, the auth, the
@@ -173,6 +190,8 @@ impl VlmClient {
         messages: Vec<serde_json::Value>,
         max_tokens: u32,
         sampling: &TextSampling,
+        json_schema: Option<&serde_json::Value>,
+        chat_template_kwargs: Option<&std::collections::BTreeMap<String, serde_json::Value>>,
         timeout: Duration,
     ) -> Result<VlmReply, AppError> {
         let mut body = serde_json::json!({
@@ -187,6 +206,16 @@ impl VlmClient {
         });
         if sampling.seed >= 0 {
             body["seed"] = serde_json::json!(sampling.seed);
+        }
+        // The contract fields: the pinned llama.cpp takes both per request
+        // (json_schema → a GBNF grammar, scoped to the output — the thinking
+        // block stays free). The servers that do not know them ignore the
+        // unknown keys, so sending them from a contract turn is safe.
+        if let Some(schema) = json_schema {
+            body["json_schema"] = schema.clone();
+        }
+        if let Some(kwargs) = chat_template_kwargs {
+            body["chat_template_kwargs"] = serde_json::json!(kwargs);
         }
 
         let mut builder = self
@@ -861,6 +890,7 @@ mod tests {
             ],
             max_tokens: 16384,
             sampling: TextSampling { temperature: 1.0, top_p: 0.95, top_k: 20, presence_penalty: 0.0, seed: 7 },
+            ..Default::default()
         };
         let reply = client.chat_turn(&turn, Duration::from_secs(10)).await.unwrap();
         assert!(reply.text.starts_with('{'));
@@ -890,6 +920,7 @@ mod tests {
             parts: vec![VlmPart::Text("spliced task".into())],
             max_tokens: 4096,
             sampling: TextSampling { temperature: 1.0, top_p: 0.95, top_k: 20, presence_penalty: 0.0, seed: -1 },
+            ..Default::default()
         };
         client.chat_turn(&turn, Duration::from_secs(10)).await.unwrap();
         let raw = seen.await.unwrap();

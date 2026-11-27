@@ -73,6 +73,42 @@ struct H3Prompts {
     t2i_system: Option<String>,
     t2i_task: Option<String>,
     edit_task: Option<String>,
+    t2i_request_params: Option<String>,
+    edit_request_params: Option<String>,
+}
+
+/// What the loader keeps from one request-params file: the card's template
+/// kwargs (thinking on, the reasoning effort — the top-level `reasoning_effort`
+/// folded in, because in llama.cpp it is a template kwarg, not an API field)
+/// and the strict reply schema, when the file carries one.
+#[derive(Debug, Clone, Default)]
+pub struct H3RequestParams {
+    pub chat_template_kwargs: std::collections::BTreeMap<String, serde_json::Value>,
+    pub json_schema: Option<serde_json::Value>,
+}
+
+/// Extract the loader's fields from one request-params file (the makers' own
+/// shape: sampling fields ignored here — the manifest's rows own those — plus
+/// `chat_template_kwargs`, an optional top-level `reasoning_effort`, and a
+/// `response_format` of type `json_schema`).
+fn request_params_of(value: &serde_json::Value) -> H3RequestParams {
+    let mut kwargs = std::collections::BTreeMap::new();
+    if let Some(m) = value.get("chat_template_kwargs").and_then(|v| v.as_object()) {
+        for (k, v) in m {
+            kwargs.insert(k.clone(), v.clone());
+        }
+    }
+    if let Some(effort) = value.get("reasoning_effort").and_then(|v| v.as_str()) {
+        kwargs.insert("reasoning_effort".into(), serde_json::Value::String(effort.to_string()));
+    }
+    let schema = value
+        .pointer("/response_format/json_schema/schema")
+        .filter(|_| value.pointer("/response_format/type").and_then(|t| t.as_str()) == Some("json_schema"))
+        .cloned();
+    H3RequestParams {
+        chat_template_kwargs: kwargs,
+        json_schema: schema,
+    }
 }
 
 /// The prompt assets of one bundle folder, whichever family it is.
@@ -134,6 +170,12 @@ pub struct PupBundle {
     pub h3_sampling_t2i: Option<NativeSampling>,
     /// The manifest's sampling row for image-grounded jobs (None = the reference row).
     pub h3_sampling_edit: Option<NativeSampling>,
+    /// The card's t2i request params (template kwargs + the strict reply
+    /// schema), when the bundle carries the file.
+    pub h3_t2i_params: Option<H3RequestParams>,
+    /// The card's edit request params (same shape, the edit envelope), when
+    /// the bundle carries the file.
+    pub h3_edit_params: Option<H3RequestParams>,
 }
 
 /// The six BFL prompt assets as owned strings: what the BFL request path needs.
@@ -416,19 +458,48 @@ fn load_native(dir: &Path) -> Result<PupBundle, AppError> {
     })
 }
 
+/// The bundle's declared family, or `None` when the folder has no
+/// `manifest.json` (the BFL/Qwen `system_prompts.json` shapes). Manifest-only:
+/// no file reads beyond the manifest, no hash verification — for the callers
+/// that must know the contract before (or without) loading the bundle
+/// (the planner, the capability gates).
+pub fn peek_family(dir: &Path) -> Result<Option<String>, AppError> {
+    let raw = match std::fs::read_to_string(dir.join("manifest.json")) {
+        Ok(raw) => raw,
+        Err(_) if !dir.join("manifest.json").exists() => return Ok(None),
+        Err(e) => {
+            return Err(AppError::new(
+                ErrorCode::InvalidConfig,
+                format!("cannot read the prompt bundle manifest at {}: {e}", dir.display()),
+            ))
+        }
+    };
+    let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+        AppError::new(
+            ErrorCode::InvalidConfig,
+            format!("cannot parse the prompt bundle manifest at {}: {e}", dir.display()),
+        )
+    })?;
+    Ok(v.get("family").and_then(|f| f.as_str()).map(str::to_string))
+}
+
 /// The MiniMax-H3-Image-PE family: the makers' three prompt files (T2I system
 /// prompt, T2I task template, editing task prompt), a `LICENSE`, the card's
 /// sampling rows, and — when the manifest carries the makers' own hash
 /// manifest — sha256 verification of every file. The T2I task template must
 /// be the maker's format shape (exactly one bare `{}`); anything else is a
-/// foreign or tampered file and fails the load. Errors name the file, never a
-/// byte of it.
+/// foreign or tampered file and fails the load. The request-params files
+/// (optional; the makers' t2i one plus the edit one) carry the card's
+/// template kwargs and the strict reply schemas — the grammar half of the
+/// contract. Errors name the file, never a byte of it.
 fn load_h3(
     dir: &Path,
     prompts: Option<&H3Prompts>,
     hashes: &Option<std::collections::BTreeMap<String, String>>,
     sampling: &SamplingRows,
 ) -> Result<PupBundle, AppError> {
+    let m_sha256 = hashes;
+
     let read = |key: &str, path: Option<&str>| -> Result<String, AppError> {
         let rel = path
             .filter(|p| !p.is_empty())
@@ -487,6 +558,77 @@ fn load_h3(
         top_k: r.top_k,
         max_tokens: r.max_tokens,
     };
+    // The request-params files: named in the manifest or at the makers' own
+    // layout paths. Present in the manifest but missing from the folder is an
+    // incomplete bundle (a loud error); absent from the manifest is the
+    // pre-params shape (no grammar enforcement, the prompt asks instead).
+    let read_params = |key: &str,
+                      path: Option<&str>,
+                      hashes: &Option<std::collections::BTreeMap<String, String>>|
+     -> Result<Option<H3RequestParams>, AppError> {
+        let rel = match path {
+            Some(p) if !p.is_empty() => p.to_string(),
+            _ => match key {
+                "t2iRequestParams" => "t2i/request_params.json".to_string(),
+                _ => "edit/request_params.json".to_string(),
+            },
+        };
+        let p = dir.join(&rel);
+        let raw = match std::fs::read_to_string(&p) {
+            Ok(raw) => raw,
+            Err(_) if !p.exists() => {
+                // Named in the manifest but missing: the folder is incomplete.
+                if hashes.as_ref().is_some_and(|h| h.get(key).map(|s| !s.trim().is_empty()).unwrap_or(false)) {
+                    return Err(AppError::new(
+                        ErrorCode::InvalidConfig,
+                        format!(
+                            "the bundle at {} names the request-params file {rel} in its manifest but the file is missing",
+                            dir.display()
+                        ),
+                    ));
+                }
+                return Ok(None);
+            }
+            Err(e) => {
+                return Err(AppError::new(
+                    ErrorCode::InvalidConfig,
+                    format!("cannot read {rel} from the bundle at {}: {e}", dir.display()),
+                ))
+            }
+        };
+        if let Some(hashes) = hashes {
+            if let Some(want) = hashes.get(key).map(|h| h.trim()).filter(|h| !h.is_empty()) {
+                let have = hex::encode(sha2::Sha256::digest(raw.as_bytes()));
+                if !have.eq_ignore_ascii_case(want) {
+                    return Err(AppError::new(
+                        ErrorCode::InvalidConfig,
+                        format!(
+                            "the request-params file {rel} of the bundle at {} does not match its manifest hash ({}…); re-copy it from the makers' repository",
+                            dir.display(),
+                            &want[..8.min(want.len())]
+                        ),
+                    ));
+                }
+            }
+        }
+        let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+            AppError::new(
+                ErrorCode::InvalidConfig,
+                format!("cannot parse {rel} in the bundle at {}: {e}", dir.display()),
+            )
+        })?;
+        Ok(Some(request_params_of(&v)))
+    };
+    let t2i_params = read_params(
+        "t2iRequestParams",
+        p.t2i_request_params.as_deref(),
+        &m_sha256,
+    )?;
+    let edit_params = read_params(
+        "editRequestParams",
+        p.edit_request_params.as_deref(),
+        &m_sha256,
+    )?;
     Ok(PupBundle {
         minimax_h3: true,
         h3_t2i_system: Some(t2i_system),
@@ -494,6 +636,8 @@ fn load_h3(
         h3_edit_task: Some(edit_task),
         h3_sampling_t2i: sampling.t2i.as_ref().map(row_to_sampling),
         h3_sampling_edit: sampling.i2i.as_ref().map(row_to_sampling),
+        h3_t2i_params: t2i_params,
+        h3_edit_params: edit_params,
         ..Default::default()
     })
 }
@@ -845,6 +989,39 @@ mod tests {
         assert_eq!((i.temperature, i.top_p, i.top_k, i.max_tokens), (1.0, 0.95, 20, 24000));
         assert_eq!(i.max_tokens, t.max_tokens + 7744, "the i2i row carries the image budget");
         assert!(b.compose_one_shot, "the manifest's one-shot compose style");
+    }
+
+    // The field 400 the makers' PE door gave (2026-11-27, window 042): the pinned
+    // llama.cpp wants `chat_template_kwargs.enable_thinking` as a JSON boolean,
+    // and a stringified "true" is rejected before a single token. The extractor
+    // must therefore carry the native JSON types, not stringified ones.
+    #[test]
+    fn h3_request_params_keep_the_native_json_types_of_the_template_kwargs() {
+        let v = serde_json::json!({
+            "reasoning_effort": "xhigh",
+            "chat_template_kwargs": {
+                "enable_thinking": true,
+                "preserve_thinking": true
+            },
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "expanded_caption_and_aspect_ratio",
+                    "strict": true,
+                    "schema": { "type": "object", "properties": { "aspect_ratio": { "type": "string" } } }
+                }
+            }
+        });
+        let p = request_params_of(&v);
+        // booleans stay booleans (the 400 was a string "true")
+        assert_eq!(p.chat_template_kwargs["enable_thinking"], serde_json::json!(true));
+        assert_eq!(p.chat_template_kwargs["preserve_thinking"], serde_json::json!(true));
+        // the top-level effort folds in as a string
+        assert_eq!(p.chat_template_kwargs["reasoning_effort"], serde_json::json!("xhigh"));
+        // the strict schema is the inner `schema`, not the wrapper
+        let s = p.json_schema.as_ref().unwrap();
+        assert_eq!(s.get("type").and_then(|t| t.as_str()), Some("object"));
+        assert!(s.get("properties").is_some());
     }
 
     #[test]

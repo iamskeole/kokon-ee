@@ -319,7 +319,7 @@ pub struct UpscaleResponse {
 }
 
 /// Sampling of `POST /sdcpp/v1/text_gen` (`temperature` 0 = greedy).
-#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq)]
 pub struct TextSampling {
     pub temperature: f32,
     pub top_p: f32,
