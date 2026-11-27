@@ -1,6 +1,6 @@
 // Pure UI logic (unit-tested in logic.test.ts).
 
-import type { Advanced, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InpaintAction, InputRecord, InstallItem, InstallStatus, JobView, LoraItem, LutInfo, Mode, OutpaintSpec, Plan, Quality, ResolutionMode, Size } from "./types";
+import type { Advanced, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InpaintAction, InputRecord, InstallItem, InstallStatus, JobView, LoraItem, LutInfo, Mode, OutpaintSpec, Plan, PresetAreas, Quality, ResolutionMode, Size } from "./types";
 
 export interface Ref {
   key: string;
@@ -126,7 +126,13 @@ export const DEFAULT_MAX_REFS = 10;
 export function maxRefs(cfg: {
   activeProfile?: string;
   profiles?: { id: string; recommendedSettings?: Record<string, unknown> }[];
+  activeModel?: { maxReferences?: number } | null;
 } | null | undefined): number {
+  // The service's derived active-model data wins: once an external engine is active the
+  // profile block left in the file is stale (task-043: it capped H3 at 10 while the
+  // service allows 16).
+  const am = Number(cfg?.activeModel?.maxReferences);
+  if (Number.isInteger(am) && am >= 1) return am;
   const profiles = cfg?.profiles ?? [];
   const p = profiles.find((x) => x.id === cfg?.activeProfile) ?? profiles[0];
   const n = Number(p?.recommendedSettings?.max_references);
@@ -212,6 +218,43 @@ export function resolutionOptions(models: ExternalModel[], model?: string | null
 export function entrySupportsInpaint(models: ExternalModel[], model?: string | null): boolean {
   const flag = entryForGeneration(models, { external_model: model })?.supportsInpaint;
   return flag ?? modelSupportsInpaint(model);
+}
+
+/** The quality preset menu's rows. The service's derived activeModel carries the
+ * model's own tiers; the qwen-area triple (1 / 2.36 / 4 MP) keeps its historical
+ * strings (no churn for the box's original users), anything else is derived: MP
+ * notation, and the Quality tier marked "native …" when it is the model's top
+ * resolution tier (the same rule the size menu uses). H3: "~4 MP", "~8 MP",
+ * "native 16 MP · slowest". */
+const QWEN_AREAS = { fast: 1_048_576, balanced: 2_359_296, quality: 4_194_304 };
+const TIER_AREA: Record<string, number> = { "1k": 1_048_576, "1.5k": 2_359_296, "2k": 4_194_304, "4k": 16_777_216 };
+
+function mpLabel(area: number, prefix = "~"): string {
+  const mp = area / 1_048_576;
+  const s = Number.isInteger(mp) ? String(mp) : mp.toFixed(1);
+  return `${prefix}${s} MP`;
+}
+
+export function qualityOptions(
+  models: ExternalModel[],
+  active?: { model?: string; presetAreas?: PresetAreas } | null
+): { value: Quality; label: string; sub: string }[] {
+  const a = active?.presetAreas;
+  if (!a || (a.fast === QWEN_AREAS.fast && a.balanced === QWEN_AREAS.balanced && a.quality === QWEN_AREAS.quality)) {
+    return [
+      { value: "fast", label: "Fast", sub: "~1 MP · fastest" },
+      { value: "balanced", label: "Balanced", sub: "~1.5K" },
+      { value: "quality", label: "Quality", sub: "native 2K · slowest" },
+    ];
+  }
+  const tiers = entryForGeneration(models, { external_model: active?.model })?.resolutions;
+  const top = tiers?.filter((t) => t in TIER_AREA).map((t) => TIER_AREA[t]);
+  const native = top?.length ? Math.max(...top) === a.quality : false;
+  return [
+    { value: "fast", label: "Fast", sub: `${mpLabel(a.fast)} · fastest` },
+    { value: "balanced", label: "Balanced", sub: mpLabel(a.balanced) },
+    { value: "quality", label: "Quality", sub: `${native ? "native " : ""}${mpLabel(a.quality, "")} · slowest` },
+  ];
 }
 
 /** A painted mask the request will actually send, for `model` (see modelSupportsInpaint). */

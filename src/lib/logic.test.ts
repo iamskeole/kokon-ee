@@ -9,7 +9,7 @@ import {
   planPipeline, remainingSeconds, sizeForWidth, timeAgo, upscaleRequest, upscaleTargets, versionLabels, type JobClock, type Ref,
   neighbourAfterRemoval, pageOutdated, previewIndex, starPromptDue, STAR_PROMPT_AFTER, formatBytes, formatDuration, installProgress, timelineLinks, undoTarget, aspectLabel, parseRatio, sizeForRatio, sizeForLongSide, expandToRatio, expandToSize, arcLayout,
   goneVersions, moreLikeThisRequest, MORE_LIKE_THIS, PREVIEW_SIDE, stageFitsPreview, viewerWantsFull,
-  modelRequest, entryForModel, entryForGeneration, maxRefs, boxRows, movedBox, appendBoxTable, splitBoxTable, modelSupportsBoxes, modelSupportsInpaint, entrySupportsInpaint, resolutionOptions, type BoxRow,
+  modelRequest, entryForModel, entryForGeneration, maxRefs, boxRows, movedBox, appendBoxTable, splitBoxTable, modelSupportsBoxes, modelSupportsInpaint, entrySupportsInpaint, resolutionOptions, qualityOptions, type BoxRow,
 } from "./logic";
 import type { ExternalModel, GenerationRecord, InstallItem, JobView, LoraItem, Plan } from "./types";
 
@@ -1009,5 +1009,51 @@ describe("layout boxes", () => {
     expect(splitBoxTable(`a lamp ${JSON.stringify([{ id: "obj_1" }])}`)).toBeNull();
     expect(splitBoxTable(`a lamp ${JSON.stringify([1, 2, 3])}`)).toBeNull();
     expect(splitBoxTable("a lamp")).toBeNull();
+  });
+});
+
+describe("active model data (task-043)", () => {
+  const h3 = {
+    label: "MiniMax H3 Image",
+    sub: "slowest, best for high res images",
+    model: "kokon-h3-image",
+    modelName: "model-Q4_K_M.gguf",
+    sample: {},
+    promptBundle: "pup-h3",
+    resolutions: ["auto", "1k", "2k", "4k"],
+    supportsInpaint: false,
+  } as unknown as ExternalModel;
+
+  it("maxRefs reads the derived active model, not the stale profile", () => {
+    const cfg = {
+      activeProfile: "qwen-image-2.1",
+      profiles: [{ id: "qwen-image-2.1", recommendedSettings: { max_references: 10 } }],
+      activeModel: { model: "kokon-h3-image", maxReferences: 16, presetAreas: { fast: 4194304, balanced: 8388608, quality: 16777216 } },
+    };
+    // The service's derived data wins over the stale profile; an old service keeps the profile path.
+    expect(maxRefs(cfg)).toBe(16);
+    expect(maxRefs({ ...cfg, activeModel: undefined })).toBe(10);
+    expect(maxRefs({ ...cfg, activeModel: null })).toBe(10);
+  });
+
+  it("quality options keep the historical strings for the qwen-area triple", () => {
+    expect(qualityOptions([], null)).toEqual([
+      { value: "fast", label: "Fast", sub: "~1 MP · fastest" },
+      { value: "balanced", label: "Balanced", sub: "~1.5K" },
+      { value: "quality", label: "Quality", sub: "native 2K · slowest" },
+    ]);
+    const q = qualityOptions([], { model: "x", presetAreas: { fast: 1_048_576, balanced: 2_359_296, quality: 4_194_304 } });
+    expect(q.map((x) => x.sub)).toEqual(["~1 MP · fastest", "~1.5K", "native 2K · slowest"]);
+  });
+
+  it("quality options derive H3's tiers, marked native at the model's top tier", () => {
+    const q = qualityOptions([h3], { model: "kokon-h3-image", presetAreas: { fast: 4194304, balanced: 8388608, quality: 16777216 } });
+    expect(q.map((x) => x.sub)).toEqual(["~4 MP · fastest", "~8 MP", "native 16 MP · slowest"]);
+  });
+
+  it("the native mark needs the quality tier to be the model's top tier", () => {
+    const capped = { ...h3, resolutions: ["auto", "1k", "2k"] } as ExternalModel;
+    const q = qualityOptions([capped], { model: "kokon-h3-image", presetAreas: { fast: 4194304, balanced: 8388608, quality: 16777216 } });
+    expect(q[2].sub).toBe("16 MP · slowest");
   });
 });

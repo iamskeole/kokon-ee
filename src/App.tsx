@@ -166,7 +166,7 @@ export default function App() {
         setState(!welcomeSeen ? { overlay: "welcome" } : whatsNew ? { overlay: "whats-new" } : {});
         setBoot("ok");
         // An externally managed engine: visiting the UI must not put a model on the GPU.
-        if (cfg.externalEngine) setState({ external: cfg.externalEngine, models: cfg.models ?? [], maxRefs: maxRefs(cfg) });
+        if (cfg.externalEngine) setState({ external: cfg.externalEngine, models: cfg.models ?? [], maxRefs: maxRefs(cfg), activeModel: cfg.activeModel ?? null });
       } catch (e) {
         setBoot(String(e));
       }

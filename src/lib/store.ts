@@ -11,7 +11,7 @@ import { markFresh } from "../components/Cocoon";
 import { api, ApiError, setPrivateInputs, subscribe, urls } from "./api";
 import { activeLoras, buildRequest, composing, DEFAULT_MAX_REFS, emptyComposer, goneVersions, isGenericName, needsPrompt, newKey, pageOutdated, persistentAdvanced, refFromGen, refFromInput, reviewRequest, stageFitsPreview, starPromptDue, timelineLinks, undoTarget, versionLabels, wantsPromptReview, type CompareMode, type Composer, type Ref } from "./logic";
 import { keepLabsIn, labsChanged, labSources, loadLab, type LabStore } from "./layerDoc";
-import type { AppErrorBody, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InputRecord, JobView, LoraItem, ServerState, StatusResponse } from "./types";
+import type { ActiveModel, AppErrorBody, ExternalEngine, ExternalModel, GenerationRecord, GenerationRequest, InputRecord, JobView, LoraItem, ServerState, StatusResponse } from "./types";
 
 export type Overlay = null | "gallery" | "settings" | "inpaint" | "expand" | "layers" | "boxes" | "welcome" | "whats-new" | "prompt-tips" | "shortcuts" | "ai-check";
 
@@ -54,6 +54,8 @@ export interface State {
   models: ExternalModel[];
   /** The active model's reference cap (config `recommendedSettings.max_references`, default 10). */
   maxRefs: number;
+  /** The active model's derived data (the service's `activeModel`, task-043); null until loaded. */
+  activeModel: ActiveModel | null;
   status: StatusResponse | null;
   /** Versions of the open project, in order. */
   session: SessionItem[];
@@ -453,6 +455,7 @@ let state: State = {
   external: null,
   models: [],
   maxRefs: DEFAULT_MAX_REFS,
+  activeModel: null,
   status: null,
   session: [],
   selected: null,

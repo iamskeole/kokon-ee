@@ -1,25 +1,18 @@
 import { ArrowUp, Brush, Check, ChevronDown, Cpu, Expand, Eye, FolderOpen, Gauge, ImagePlus, Layers, Lightbulb, Maximize, Pencil, Settings, Settings2, SlidersHorizontal, Sparkles, Square, Undo2, WandSparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, urls } from "../lib/api";
-import { activeLoras, activeOverrides, aspectLabel, buildRequest, composing, editing, enhancerApplies, entrySupportsInpaint, expansionPixels, formatDuration, hasOutpaint, imageName, MAX_LORAS, modelRequest, modelSupportsBoxes, moveRef, needsPrompt, parseRatio, toggleLora, type Ref, typedWords, wantsPromptReview, withActionVerb } from "../lib/logic";
+import { activeLoras, activeOverrides, aspectLabel, buildRequest, composing, editing, enhancerApplies, entrySupportsInpaint, expansionPixels, formatDuration, hasOutpaint, imageName, MAX_LORAS, maxRefs, modelRequest, modelSupportsBoxes, moveRef, needsPrompt, parseRatio, qualityOptions, toggleLora, type Ref, typedWords, wantsPromptReview, withActionVerb } from "../lib/logic";
 import { native } from "../lib/native";
 import { haptic } from "../lib/haptics";
 import { useNarrow } from "../lib/platform";
 import {
   addAsReference, addInputs, openEditor, cancelPromptReview, editShownImage, enhancerAvailable, focusPrompt, getState, itemSource, openSettings, refreshStatus, selectedItem, sessionLabels, setProjectLoras, setState, startNewImage, submitComposer, toastError, undoEnhancedPrompt, updateComposer, useStore, type SessionItem,
 } from "../lib/store";
-import type { InpaintAction, Plan, Quality } from "../lib/types";
+import type { InpaintAction, Plan } from "../lib/types";
 import { AdvancedPanel } from "./Advanced";
 import { reviewPhotos } from "./PhotoReview";
 import { AspectGrid, pickAspect, RatioIcon, resolutionLabel, ResolutionMenu } from "./SizeMenus";
 import { Option, Popover, Seg } from "./ui";
-
-// All presets run Qwen-Image 2.1 Turbo (8 steps); they differ in size.
-const QUALITY: { value: Quality; label: string; sub: string }[] = [
-  { value: "fast", label: "Fast", sub: "~1 MP · fastest" },
-  { value: "balanced", label: "Balanced", sub: "~1.5K" },
-  { value: "quality", label: "Quality", sub: "native 2K · slowest" },
-];
 
 const INPAINT_ACTIONS: { value: InpaintAction; label: string; placeholder: string }[] = [
   { value: "remove", label: "Remove", placeholder: "What to remove (optional)…" },
@@ -535,6 +528,9 @@ export function Composer() {
   const boxesPillOn = modelSupportsBoxes(model) && c.refs.length === 0;
   const overrides = activeOverrides(c.advanced);
   const canEnhance = useStore(enhancerAvailable) && enhancerApplies(c, model);
+  // The preset rows follow the active model's own tiers (the service's derived
+  // activeModel, task-043), not a hardcoded story of one model.
+  const qualityRows = qualityOptions(models, useStore((s) => s.activeModel));
   const newImage = !editing(c);
   // Prompt+ review: the prompt it is writing streams into the box, which is read-only meanwhile.
   const review = useStore((s) => s.review);
@@ -781,7 +777,13 @@ export function Composer() {
                         // Switching only records the pick; the engine is loaded by the next
                         // generation. The server saves the config before answering, so the
                         // picker can show the new model at once.
-                        api.switchModel(req).then(() => { setState({ external: req }); refreshStatus(); }, toastError).finally(close);
+                        api.switchModel(req).then(() => {
+                          setState({ external: req });
+                          refreshStatus();
+                          // The active model's derived data (refs cap, preset labels) follows the
+                          // switch; the service saved the new engine before answering.
+                          api.config().then((cfg) => setState({ maxRefs: maxRefs(cfg), activeModel: cfg.activeModel ?? null }), () => {});
+                        }, toastError).finally(close);
                       }}
                     />
                   ))
@@ -793,13 +795,13 @@ export function Composer() {
               trigger={(open, toggle) => (
                 <button className={`pill ${open ? "on" : ""}`} onClick={toggle} title="Quality">
                   <Gauge size={15} />
-                  <span className="lbl">{QUALITY.find((q) => q.value === c.quality)?.label}</span>
+                  <span className="lbl">{qualityRows.find((q) => q.value === c.quality)?.label}</span>
                   <ChevronDown size={13} className="chev" />
                 </button>
               )}
             >
               {(close) =>
-                QUALITY.map((q) => <Option key={q.value} selected={c.quality === q.value} label={q.label} sub={q.sub} onClick={() => (updateComposer({ quality: q.value }), close())} />)
+                qualityRows.map((q) => <Option key={q.value} selected={c.quality === q.value} label={q.label} sub={q.sub} onClick={() => (updateComposer({ quality: q.value }), close())} />)
               }
             </Popover>
 

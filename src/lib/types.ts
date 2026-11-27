@@ -315,6 +315,22 @@ export interface ModelProfile {
 /** stable-diffusion.cpp build: CUDA (NVIDIA) or Vulkan (AMD, Intel, also NVIDIA). */
 export type GpuBackend = "cuda" | "vulkan" | "metal";
 
+/** The pixel area of one quality preset tier (the service's `activeModel.presetAreas`). */
+export interface PresetAreas {
+  fast: number;
+  balanced: number;
+  quality: number;
+}
+
+/** The active diffusion model's data, derived by the service from the row it plans with
+ * (task-043): the UI reads its refs cap and the quality-preset labels from here, never
+ * from a stale profile left in the config file. */
+export interface ActiveModel {
+  model: string;
+  maxReferences: number;
+  presetAreas: PresetAreas;
+}
+
 export interface AppConfig {
   schemaVersion: number;
   sdcppDir: string;
@@ -366,6 +382,8 @@ export interface AppConfig {
   externalEngine?: ExternalEngine;
   /** Selectable models of the external engine (config); empty or absent = no model picker. */
   models?: ExternalModel[];
+  /** The active model's derived data (the service adds it; old services omit it). */
+  activeModel?: ActiveModel;
 }
 
 /** A VLM (prompt upsampler) the service calls: an OpenAI-compatible chat endpoint. */
