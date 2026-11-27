@@ -309,24 +309,81 @@ proven pass-2 job (the stage-A outputs it compares against live in
     picks it up; update the door header comment, the ml provenance note,
     and `docs/engineering-notes.md` with the measured result.
 
+## Owner verdict and the fix (2026-11-27, contact sheet reviewed)
+
+The owner looked at the contact sheet and every full-size original:
+**all of stage B is bad — B1/B7 (full decode), B2 (256, FA-on), B3 (512,
+FA-on), B5/B6 — and the only clean panel is A1, the 256-tile FA-off
+tiled baseline, i.e. the current live door.** The metrics were wrong on
+the one thing that mattered: B2 measures *bit-identical* to A1, but the
+owner's eyes separate them. The picture the eyes draw:
+
+- Clean **iff 256 px tiles and VAE FA off.** 512/1024 px tiles mesh even
+  with FA off (A2/A3); FA-on meshes at 256 too (B2) and in the
+  full-image decode (B1/B7) — so chasing the makers' full-context
+  decode (pass 4's whole stage B) was the wrong direction on this card;
+  the makers' clean 16 MP path is the bf16 SGLang pipeline, which does
+  not fit 24 GB. 1–2 MP is clean in every configuration (too coarse to
+  read a grid).
+- **The 10:08 image's grid was not the door's fault — the service was
+  overriding it.** The planner's large-GPU memory heuristic (tuned on
+  the Qwen VAE) replaces the door's 256 with a shaped ~896 px per-job
+  tile whenever the card reports ≥15 GB, and the 24 GB override does —
+  so every H3 job on this box decoded at ~896 px (the mottled regime),
+  and the config's `vaeTileSize: 768` was a lie for this engine (the
+  door's boot flags are invisible through `/capabilities`; the planner
+  had no per-engine way to say "trust the door").
+- **The fix (applied, not a door change):** a new
+  `ExternalEngine.vaeTileSize` (mirrored on `ExternalModel`): when set,
+  the planner plans tiling for the engine but sends **no per-job tile**
+  — the door's own `--vae-tile-size` governs every decode (no shaped
+  tiles, no memory-derived untile). The box config pins `256` on the
+  H3 engine and its model entry; the door script stays byte-identical
+  (it was already the best configuration). Rebuilt and re-deployed
+  (`kokon-ee:dev-h3`, new image); the live service's `/api/v1/plan` for
+  a 4K job now returns `vae_tiling: true, vae_tile: null` (was: the
+  ~896 px shaped tile). Proof is the owner's next 4K click: it should
+  match A1 (smooth fur, no grid, no tile-boundary steps).
+- **Still open, optional:** the edit colour question (dodge/burn/bleed)
+  is unmeasured — B4 OOMs (4K ref on a 24 GB card) and B8 (1MP ref,
+  ~5–10 min) never ran (the yield first). If the owner wants it, it is a
+  single-run window with the pass-4 job's two improvements (resubmit on
+  job-404 after a door crash; edit first). The edit path's reference
+  encode also OOMs at 4K refs — a 4K-ref edit is infeasible on this
+  card as configured regardless of tiling.
+
 ## Acceptance
 
 - [x] The Paint button is hidden for H3 (and any no-inpaint entry) —
-      committed `6f7868f`; lands on the box with the image rebuild this
-      window runs first
+      committed `6f7868f`
 - [x] Service image rebuilt from HEAD and re-deployed on the dev box, a
       1 MP H3 generate through the deployed service clean (2026-11-27,
-      `kokon-ee:dev-h3` `c9e35bb5321a`; job `job_d5a7faea2f60`, ~48 s, HTTP
-      200 — the smoke test of the pass-3 window turn)
-- [ ] Window digest: per-run wall / VRAM peak / metric set, stage A vs B,
-      door-crash / OOM journal evidence
-- [ ] The pass-4 window completes (or yields) with the runtime restored
-      before its marker
-- [ ] A root-cause statement backed by the measurements (tile-bound vs
-      VAE-decode-bound, per the B1 full-tile result)
-- [ ] A decision (D-044-5): `decision.txt` + `script.proposed` + contact
-      sheet for the owner's call — apply / cap / accept
-- [ ] Docs / status updated; service repo and ml repo committed (unpushed)
+      job `job_d5a7faea2f60`, ~48 s, HTTP 200)
+- [x] Window digest: per-run wall / VRAM peak / metric set, stage A vs B
+      (the yield path writes the marker without a separate digest file —
+      the per-run `outs/*.meta.json` + `*.score.json` are the digest),
+      door-crash / OOM journal evidence (B4 at 16:11:46, auto-reboot
+      16:11:54)
+- [x] The pass-4 window completes (or yields) with the runtime restored
+      before its marker (vLLM as-found, door script byte-identical)
+- [x] A root-cause statement backed by the measurements: the visible grid
+      is the VAE decode in this build — chunks above 256 px (and FA-on
+      decodes) mesh on high-frequency detail; the 10:08 image's was worse
+      than the door's own 256 because the planner had been overriding it
+      with ~896 px shaped tiles on this 24 GB card
+- [x] A decision (D-044-5, resolved): the owner kept the 256/FA-off door;
+      the service now pins the door's tile instead of overriding it
+      (D-044-8/9)
+- [x] Docs / status updated; service repo committed (code + tracker);
+      ml repo: the pass-4 job is committed (`af044ce`), the door script
+      is unchanged, and the `vaeTileSize: 256` pin sits in the box's
+      `config.json` — the owner's WIP file, left uncommitted with their
+      WIP
+
+**Out (not accepted, recorded):** a future model-change proposal (a bf16
+full-context path, or another 16 MP model) would go through the usual
+"beat the current model overall" bar — D-044-8's verdict is that the
+current one, correctly configured, is acceptable to the owner.
 
 ## blockers
 
@@ -378,3 +435,22 @@ reappears on its own mid-window)
   revival machinery — a suspended session removes the failure vector
   without surgery on the routing matrix (which carries the owner's
   uncommitted vision-slot WIP that a swap would have to preserve).
+- **D-044-8 (owner verdict, 2026-11-27, on the contact sheet)** the H3 VAE
+  decodes clean **only** in 256 px tiles with FA off on this build/card;
+  512 px and up mesh (FA off or on), the full-image decode meshes (FA on),
+  1–2 MP is clean in everything. The makers' clean 16 MP path (bf16,
+  full-context, SGLang) does not fit 24 GB. Decision: keep the door
+  exactly as it is (256, FA-off) — no door change is needed or wanted.
+  (The pass-4 metrics called B2 bit-identical to A1; the owner's eyes
+  separated them — for this artifact, the eyes are the arbiter, as
+  D-044-5 said.)
+- **D-044-9 (fix design, 2026-11-27)** the service learns the door's tile
+  from the box config (`ExternalEngine.vaeTileSize`): a set value means
+  "the door's tiling is authoritative" — the planner sends no per-job
+  tile for that engine (the planner's memory heuristics are
+  Qwen-calibrated and were silently overriding the door's measured-safe
+  setting with ~896 px shaped tiles — the 10:08 grid; the door's own
+  boot flags are not visible through `/capabilities`, so the box config
+  is the only honest source). The top-level `vaeTileSize` stays the
+  box-side default for engines without a pin. Pinned on this box as 256
+  for `kokon-h3-image`; deployed and verified via the live `/api/v1/plan`.
