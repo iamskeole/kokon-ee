@@ -161,7 +161,7 @@ is a result (`"kind": "gen"`, `genId`) or an imported image (`"kind": "input"`, 
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/models/switch` | Switch the active model entry of the config (the box's pinned ones) |
+| POST | `/models/switch` | Switch the active model: the full external-engine body of the picker entry — `{"gateway", "apiKey", "model", "modelName", "sample", "vlm"?, "vlmVision"?, "promptBundle"}` (a bare `{"model": …}` is rejected, 042) |
 | GET | `/upscalers` | The upscalers the engine offers and which one is active |
 | GET, POST | `/loras` | List LoRAs; add one from a path on this box: `{"path": "..."}` (copied into the LoRA folder) |
 | PATCH, DELETE | `/loras/{id}` | Update or remove a LoRA |

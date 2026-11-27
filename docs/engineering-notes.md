@@ -227,12 +227,24 @@ bound: area presets 4/8/16 MP, align 32, max references 16, no bucket table.
   (**one user message, no system** — the makers' edit task prompt carries its own role
   statement) — because the PE is a native VLM. Output is an H3 envelope
   (t2i: `expanded_caption` + a 10-value `aspect_ratio` enum; edit: `expanded_caption` +
-  `target_aspect_ratio` W:H); the service decodes it, strips the thinking, retries once
-  out-of-contract, and on exhaustion falls back to the raw text with a job note. The PE
-  carries **no MTP module** (inspected: no nextn tensors), so the door runs without
-  speculative decoding. Warm door: ~26 tok/s (prompt 1021 tok/s), ~19.4 GB resident, cold
-  boot ~17–25 s through the matrix; the service gives the PE call a 900 s clock (measured
-  worst case ~40 s warm; edit's 16384-token budget incl. thinking).
+  `target_aspect_ratio` W:H), and since 042 the reply is **grammar-constrained per
+  request**: the pinned llama.cpp takes the makers' strict schema as per-request
+  `json_schema` (converted to GBNF, output-format scoped — the thinking stream stays
+  free) and the card's thinking trio (`enable_thinking`, `preserve_thinking`,
+  `reasoning_effort: xhigh`) as `chat_template_kwargs`. The params files live in the
+  hash-verified bundle (`t2i/` and `edit/request_params.json`); the values keep their
+  **native JSON types** — the door 400s a stringified `"true"` where it wants a boolean.
+  The service decodes the reply, strips the thinking, retries once out-of-contract, and
+  on exhaustion falls back to the raw text with a job note (never triggered in the
+  window). The PE carries **no MTP module** — not a quant gap: the makers' own bf16
+  weight map (2387 tensors) ships no nextn/MTP head, and the pinned build's qwen35 MTP
+  path *hard-asserts* `n_layer_nextn > 0`, so `--spec-type draft-mtp` on this file
+  aborts the door at model init rather than degrading (parked: an MTP-carrying PE
+  re-opens it). The door runs at `-c 65536` with `--image-min-tokens 1024`: a 16-reference
+  edit (the card's maximum) consumed 41.3k prompt tokens + the thinking budget and still
+  finished (117 s; per-image cost ≈ 2.0–2.4k tokens). Warm door: ~26 tok/s, ~19.5 GB
+  resident, cold boot ~17–25 s through the matrix; the service gives the PE call a 900 s
+  clock.
 - **The eviction dance.** The PE (17.4 GB) and the H3 DiT (~21 GB bare) **cannot
   co-reside** on a 24 GB card, unlike the qwen/klein doors that fit beside their PUPs.
   Each is its own bare matrix set (`h3`, `h3p`), so a Prompt+ job sequences two gateway
@@ -250,7 +262,16 @@ bound: area presets 4/8/16 MP, align 32, max references 16, no bucket table.
   at 19.2 GB. The Qwen-calibrated token budget would have clamped quality to ~6.4 MP, so
   the H3 row carries a measured peak (`measured_peak_mib: 23_552`): a card that holds it
   keeps every single-image tier; reference-bearing jobs and unknown-VRAM boxes keep the
-  shared budget (multi-reference 16 MP is not measured).
+  shared budget (multi-reference 16 MP is not measured). Since 042 the picker also
+  offers the native tier explicitly: the entry's `resolutions` list
+  (`auto/1k/2k/4k`) gains the new `4k` mode (4096²), labelled *native size* in the UI;
+  a 3:2 request at that tier sizes to 4096×2720 under the side cap.
+- **No brush, by design (042).** H3 has no mask/inpaint path — its editing is text plus
+  up to 16 reference images. The picker entry says so (`supportsInpaint: false`,
+  deployment data, config schema 19); the UI hides the mask tool for that entry while
+  qwen keeps it (boxes stay Klein-only), and the engine drops a `mask`/`marks` sent
+  through the raw API for such an entry with a job note, completing the job as a
+  whole-image edit.
 - **The PUP A/B (D-041-21).** The 9B Qwen-Image-2.1 PE doors (the owner's first
   candidate) were asked the same questions directly: they answer fast (15–24 s) but in
   the **Qwen-2.1 contract** (`{"rewritten_prompt": …}`), not the H3 envelope the DiT is

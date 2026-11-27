@@ -243,8 +243,10 @@ process *is* the engine):
 - **the H3 PE** (port from `$1`): `llama-server -m
   models/gguf/MiniMax/MiniMax-H3-Image-PE/MiniMax-H3-Image-PE.Q4_K_M.gguf
   --mmproj …/MiniMax-H3-Image-PE.mmproj-f16.gguf --jinja --reasoning on
-  -c 32768 -ngl 99 --temp 1.0 --top-p 0.95 --top-k 20` — the card's row,
-  no speculative decoding (the GGUF carries no MTP module).
+  -c 65536 --image-min-tokens 1024 -ngl 99 --temp 1.0 --top-p 0.95 --top-k 20`
+  — the card's row, sized for the card's 16-reference maximum (measured
+  41.3k prompt tokens at the max, 042), no speculative decoding (the GGUF
+  carries no MTP module).
 
 **llama.cpp** — one shared build serving the PUP sidecar and the creative
 writers (`build/bin/llama-server`). The reference host's build is
