@@ -32,7 +32,7 @@ use qls_core::{
     projects::Project,
     store::{GenerationRecord, ListQuery, OwnerFilter},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio_stream::StreamExt;
 
@@ -525,8 +525,24 @@ async fn install_cancel(State(s): St) -> Json<Value> {
     Json(serde_json::to_value(s.engine.installer.status()).unwrap())
 }
 
-async fn get_config(State(s): St) -> Json<AppConfig> {
-    Json(s.engine.config())
+/// The config, plus the active model's derived data (`activeModel`, task-043): the UI
+/// reads its refs cap and the quality-preset labels from the row the service actually
+/// plans with, never from a stale profile. The config fields stay flat at the top
+/// level (the UI's existing shape); old UIs ignore the extra key.
+#[derive(Deserialize, Serialize)]
+struct ConfigOut {
+    #[serde(flatten)]
+    config: AppConfig,
+    #[serde(rename = "activeModel")]
+    active_model: qls_core::config::ActiveModel,
+}
+
+async fn get_config(State(s): St) -> Json<ConfigOut> {
+    let cfg = s.engine.config();
+    Json(ConfigOut {
+        active_model: s.engine.active_model_info(&cfg),
+        config: cfg,
+    })
 }
 
 /// The prompt enhancer's built-in system prompts (Settings shows them for "" and restores them).

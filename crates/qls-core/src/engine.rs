@@ -255,6 +255,7 @@ pub fn plan_inputs(cfg: &AppConfig, image_sizes: Vec<Size>, mask: Option<(Size, 
         speed_factor: None,
         hide_uncalibrated: !crate::speed::trust_uncalibrated(cfg),
         unified_memory: false,
+        sample: cfg.external_engine.as_ref().map(|e| e.sample.clone()),
     }
 }
 
@@ -1315,7 +1316,8 @@ impl Engine {
 
     /// How this machine's measured speed compares with the time model (None: not measured).
     fn speed_factor(&self, cfg: &AppConfig) -> Option<f32> {
-        self.speed.get(&crate::speed::machine_key(cfg, self.gpu().as_ref())).map(|c| c.factor)
+        let key = crate::speed::machine_key(cfg, self.gpu().as_ref(), &self.active_model_id(cfg));
+        self.speed.get(&key).map(|c| c.factor)
     }
 
     /// VRAM to plan with: the card's (or the simulated size), less what the user's own model
@@ -1339,6 +1341,38 @@ impl Engine {
             .find(|m| m.model == model)
             .and_then(|m| m.prompt_bundle_path());
         dir.and_then(|d| crate::pup::peek_family(&d).ok().flatten())
+    }
+
+    /// The active model's id in the engine's vocabulary: the key the speed book
+    /// calibrates per model (task-043), and the model id the UI's activeModel names.
+    fn active_model_id(&self, cfg: &AppConfig) -> String {
+        cfg.external_engine
+            .as_ref()
+            .map(|e| e.model.clone())
+            .unwrap_or_else(|| {
+                cfg.profile()
+                    .diffusion_model
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            })
+    }
+
+    /// The active model's UI-facing data (task-043): the same row dispatch the
+    /// planner uses, so the UI renders the row the service will run, not a stale
+    /// profile left in the config file.
+    pub fn active_model_info(&self, cfg: &AppConfig) -> crate::config::ActiveModel {
+        let model = self.active_model_id(cfg);
+        let rec = self.effective_rec(cfg);
+        crate::config::ActiveModel {
+            model,
+            max_references: rec.max_references,
+            preset_areas: crate::config::PresetAreas {
+                fast: rec.area_fast,
+                balanced: rec.area_balanced,
+                quality: rec.area_quality,
+            },
+        }
     }
 
     /// The H3 contract: the entry's bundle declares the makers' PE family.
@@ -1375,6 +1409,7 @@ impl Engine {
         let vram = self.planning_vram(&cfg);
         let mut inputs = plan_inputs(&cfg, sizes, mask, vram);
         inputs.speed_factor = self.speed_factor(&cfg);
+        inputs.hide_uncalibrated = !crate::speed::show_uncalibrated(&cfg, self.gpu().as_ref());
         inputs.unified_memory = self.gpu().is_some_and(|g| g.unified);
         planner::plan(req, &inputs, &self.effective_rec(&cfg))
     }
@@ -1459,6 +1494,7 @@ impl Engine {
         let mask_info = mask.as_ref().map(|(m, _)| (Size::new(m.width(), m.height()), imaging::mask_bbox(m, 16), imaging::mask_coverage(m, 16)));
         let mut plan_inputs = plan_inputs(&cfg, images.iter().map(|i| i.size()).collect(), mask_info, vram);
         plan_inputs.speed_factor = self.speed_factor(&cfg);
+        plan_inputs.hide_uncalibrated = !crate::speed::show_uncalibrated(&cfg, self.gpu().as_ref());
         plan_inputs.unified_memory = self.gpu().is_some_and(|g| g.unified);
         let plan = planner::plan(&request, &plan_inputs, &rec)?;
         let mut seed = request.seed.unwrap_or_else(random_seed);
@@ -1738,7 +1774,7 @@ impl Engine {
             }
             // LoRAs slow each step (~19 % for one at 0.7 on Q4_K): not a speed sample.
             if !cold_start && loras.is_empty() {
-                let key = crate::speed::machine_key(&cfg, self.gpu().as_ref());
+                let key = crate::speed::machine_key(&cfg, self.gpu().as_ref(), &self.active_model_id(&cfg));
                 let predicted = planner::backend_seconds(&plan, cfg.uses_sage_attention());
                 if let Some(f) = self.speed.record(&key, submitted.elapsed().as_secs_f32(), predicted) {
                     tracing::info!("speed calibration {key}: x{f:.2}");
@@ -2855,6 +2891,66 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The UI's activeModel is the row the service plans with (task-043): the
+    /// makers'-PE bundle selects the H3 row (16 refs, 4/8/16 MP); a non-H3 bundle
+    /// and a local engine take the profile row — never a stale profile for the
+    /// wrong model.
+    #[test]
+    fn active_model_info_follows_the_bundle_family() {
+        let dir = tempfile::tempdir().unwrap();
+        let h3dir = dir.path().join("pup-h3");
+        std::fs::create_dir_all(&h3dir).unwrap();
+        std::fs::write(h3dir.join("manifest.json"), r#"{"family":"minimax-h3"}"#).unwrap();
+        let qdir = dir.path().join("pup-q");
+        std::fs::create_dir_all(&qdir).unwrap();
+        std::fs::write(qdir.join("manifest.json"), r#"{"family":"qwen"}"#).unwrap();
+
+        let mut cfg = AppConfig { sdcpp_dir: dir.path().join("sdcpp"), ..AppConfig::default() };
+        // The makers'-PE bundle: the H3 row, named by the entry's bundle family.
+        cfg.external_engine = Some(crate::config::ExternalEngine {
+            model: "x-h3-image".into(),
+            model_name: "model-Q4_K_M.gguf".into(),
+            prompt_bundle: h3dir.to_str().unwrap().into(),
+            ..Default::default()
+        });
+        cfg.models = vec![crate::config::ExternalModel {
+            model: "x-h3-image".into(),
+            prompt_bundle: h3dir.to_str().unwrap().into(),
+            ..Default::default()
+        }];
+        let e = Engine::new(cfg.clone(), dir.path()).unwrap();
+        let am = e.active_model_info(&cfg);
+        assert_eq!(am.model, "x-h3-image");
+        assert_eq!(am.max_references, 16);
+        assert_eq!(am.preset_areas, crate::config::PresetAreas { fast: 4_194_304, balanced: 8_388_608, quality: 16_777_216 });
+
+        // A non-H3 bundle: the profile row, not the H3 row.
+        cfg.external_engine = Some(crate::config::ExternalEngine {
+            model: "x-q-image".into(),
+            model_name: "model-Q4_K_M.gguf".into(),
+            prompt_bundle: qdir.to_str().unwrap().into(),
+            ..Default::default()
+        });
+        cfg.models = vec![crate::config::ExternalModel {
+            model: "x-q-image".into(),
+            prompt_bundle: qdir.to_str().unwrap().into(),
+            ..Default::default()
+        }];
+        let e2 = Engine::new(cfg.clone(), dir.path()).unwrap();
+        let am2 = e2.active_model_info(&cfg);
+        let prof = cfg.profile().recommended_settings.clone();
+        assert_eq!(am2.model, "x-q-image");
+        assert_eq!(am2.max_references, prof.max_references);
+        assert_eq!(am2.preset_areas.quality, prof.area_quality);
+
+        // The bundled engine: the profile's own file names the row.
+        cfg.external_engine = None;
+        let e3 = Engine::new(cfg.clone(), dir.path()).unwrap();
+        let am3 = e3.active_model_info(&cfg);
+        assert_eq!(am3.model, cfg.profile().diffusion_model.file_name().unwrap().to_string_lossy().into_owned());
+        assert_eq!(am3.max_references, prof.max_references);
+    }
 
     /// End to end on a real iPhone HEIC (QLS_TEST_HEIC, ffmpeg on PATH): import, simulated
     /// edit (left half 2 stops darker), HDR decision and Ultra HDR file. QLS_TEST_OUT keeps it.
