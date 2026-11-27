@@ -156,6 +156,13 @@ pub enum ResolutionMode {
     K15,
     #[serde(rename = "2k")]
     K2,
+    /// 4096²: the H3 door's measured native tier (task-041: 4096² completed at
+    /// a 22.2 GB peak on the 24 GB card). Other models' doors may report a
+    /// higher limit without being *native* there — the per-entry resolution
+    /// list (config) decides which models offer the row, and the planner's
+    /// budget clamps it wherever the card cannot hold it.
+    #[serde(rename = "4k")]
+    K4,
     #[serde(rename = "custom")]
     Custom,
 }
@@ -626,6 +633,7 @@ pub fn resolution_area(mode: ResolutionMode, quality: Quality, rec: &Recommended
         ResolutionMode::K1 => Some(1024 * 1024),
         ResolutionMode::K15 => Some(1536 * 1536),
         ResolutionMode::K2 => Some(2048 * 2048),
+        ResolutionMode::K4 => Some(4096 * 4096),
         ResolutionMode::Source | ResolutionMode::Custom => None,
     }
 }
@@ -1131,7 +1139,7 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
             // Output shape: the chosen aspect ratio, else image 1's.
             let chosen_aspect = req.aspect_ratio.as_deref().and_then(parse_aspect).map(|(a, _)| a);
             let aspect = chosen_aspect.unwrap_or(first.width as f64 / first.height as f64);
-            let tier = matches!(req.resolution, ResolutionMode::K1 | ResolutionMode::K15 | ResolutionMode::K2);
+            let tier = matches!(req.resolution, ResolutionMode::K1 | ResolutionMode::K15 | ResolutionMode::K2 | ResolutionMode::K4);
             let target = match (req.width, req.height) {
                 (Some(w), Some(h)) => {
                     if !(64..=rec.max_side).contains(&w) || !(64..=rec.max_side).contains(&h) {
