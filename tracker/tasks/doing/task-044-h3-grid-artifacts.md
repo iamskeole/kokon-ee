@@ -142,57 +142,76 @@ ladder: the largest tile that completes 4 K without OOM (4096 → 2048 →
   `--flash-attn off,diffusion=on`, `--vae-tiling --vae-tile-size 256`), and
   vLLM is the sole GPU tenant again.
 
-## Pass 3 (running now) — the decisive stage B, rebuilt after pass 2
+## Pass 3 result (2026-11-27 15:09–15:16 UTC): a false FAIL on two job bugs
 
-**Window mechanics (D-044-6, the owner's ruling)**: the blocking-wait form
-only — no registry neutralisation, no config swap, no direct-port
-re-routing. The launching session ends its turn in `wait-marker.sh` and is
-*suspended* for the whole window: it makes no gateway requests while it is
-out, so it cannot evict the door (pass 2's death came from a live
-142 K-context session making gateway requests — a suspended session by
-construction does not). vLLM is evicted by the first H3 request and stays
-out for the window; any vLLM that reappears mid-window (a human reclaim —
-a manual boot or another client's request) still YIELDs the window, and the
-job revives vLLM canonically before its marker (the next session turn
-auto-revives it through the gateway). The owner is asked to stay off the
-gateway for the window's duration; a mid-window chat would boot vLLM and
-end the run (the yield keeps the box safe, the data would be partial).
+The window **loaded and ran the door for the whole 6-minute window** and
+still ended FAIL — the box was never at fault:
 
-The job (`models-044b-h3artifacts`, stage B on the `vae=on` door):
+- The first caps probe **did** trigger the on-demand load (journal 15:09:14:
+  `matrix: model=kokon-h3-image set=h3 dsl="h3 & s & kv"
+  evict=[qwen3.8-27b] target=[kokon-h3-image kokon-vision sidekick] cost=1`;`
+  sd-server` booted :9112; the daemon's health check —
+  `GET /sdcpp/v1/capabilities` — passed at 15:09:17, 2 s after boot).
+- But the job polled `/upstream/kokon-h3-image/capabilities` — the pass-3
+  rewrite dropped the `/sdcpp/v1/` prefix that pass 2 had. That is **not a
+  door route**: the door answered its own 404 (empty body, ~400 µs) for
+  7.5 min, the job read it as "not ready", and the FAIL-path sweep unloaded
+  the healthy door at 15:15:18.
+- The `vram > 15 GB` readiness gate was also wrong for this door: it runs
+  `--offload-to-cpu`, so an idle-loaded door sits at **~4 MiB VRAM**
+  (weights on CPU, moved on demand) — pass 3 read `vram=4` for the entire
+  6-minute load window. This reinterprets pass 2's "phantom ready
+  (caps=200 vram=4)": that was the normal loaded state, and that door served
+  A6/A7 fine. The daemon's own health check is a weak 200 (it passes 2 s
+  after boot, possibly before the model is fully resident); the correct
+  gate is the capabilities body reporting the H3 DiT by name
+  (`model-Q4_K_M` — the service's own model-match logic).
+- The FAIL path then behaved as written: sweep → canonical vLLM revival
+  (926808, 1-token probe 200 at 15:16:31; a transient CUDACachingAllocator
+  warning during vLLM's boot while the door's memory freed is harmless)
+  → marker last. vLLM has served the box continuously since; the door
+  script is byte-identical to its pre-window state (pass 3 failed before
+  the swap). No stage-B data was produced.
 
-- **Preflight hardened** (pass 2's three bugs): the readiness gate is
-  `caps=200 AND vram > 15 GB` (a `caps=200` at 4 MiB is a load in
-  progress, not ready); `write_digest` defined before use; the poll loop
-  resets the job state on any non-200.
-- **Door-crash resilience** (pass 2's A8): if the door's caps drop
-  mid-run while vLLM is out, the job waits for the daemon's auto-reboot
-  (proven 12:13:57) and resubmits the run (≤ 3 attempts); if a *different*
-  GPU door is up instead (read from `GET /running`) — someone evicted us
-  on purpose — the job YIELDs rather than fighting for the card.
-- **Runs, same prompt/seeds as stage A, cheap first** (the t2i decision
-  data lands before the big edits; a 3 h watcher cap bounds the tail):
-  B6 1 MP / B5 2 K (whole-image tile) → B2 4K at 256 t / B3 4K at 512 t
-  (each 20-min budget; same seeds as A1/A2 — isolates the FA numeric
-  effect) → B1 4K at **4096 t (the makers' full-context decode)** / B7
-  3264×4096 at 4096 t (the owner's exact shape) / B4 4K edit / B8
-  3264×4096 edit (30-min budgets; the edits are tolerant — a repeated
-  reference-encode OOM fails fast, a slow-but-alive generation gives up at
-  the budget, either way the window continues).
-- **Measurement-only ending** (D-044-5 as revised): the door script is
-  restored byte-identical; the job writes `decision.txt`, `script.proposed`
-  (vae=on + the largest tile that completed a 4K run) and a contact sheet
-  of chest crops (owner 4K t2i / owner 4K edit / owner 1 MP / A1 / A3 / B1 /
-  B2 / B7, whichever exist) for the owner as arbiter; the digest carries
-  the daemon-journal evidence (tile halving / OOM lines). The mottle
-  metric is *not* a grid detector (1 MP is visually clean at 0.81 while
-  4K-256-t is 0.52 with the visible mesh) — the contact sheet is the
-  arbiter, the metric set is for trend tracking.
+## Pass 4 (launching now) — the decisive stage B, third attempt
 
-Also before the window (this same turn): the service image is rebuilt from
-the committed HEAD (lands the Paint-button fix, `6f7868f`, which the
-running `dev-h3` image predates) and re-deployed on this box, with a 1 MP
-H3 generate through the deployed service as the smoke test — item 1 of the
-owner's original list.
+Same window shape as the D-044-6 ruling (blocking wait, no neutralisation,
+yield on any vLLM reappearing — the watcher's 3 h cap writes TIMEOUT and
+leaves a live job running; it never kills mid-generation). Built on the
+proven pass-2 job (the stage-A outputs it compares against live in
+`models-044-h3artifacts`), with the pass-3 lessons:
+
+- **Readiness gate**: `GET /upstream/kokon-h3-image/sdcpp/v1/capabilities`
+  = 200 **and** the body names the H3 DiT (`model-Q4_K_M`); no VRAM gate
+  (offload-to-cpu). The first request is the load trigger (the 15:09:14
+  precedent). B6 (1 MP, ~10–30 s) is the acceptance proof with one retry
+  after a 30 s fresh-boot settle.
+- **The A8-class OOM risk is managed, not hoped away**: B4 (4K edit, 4K ref)
+  and B8 (3264×4096 edit, 1MP ref) are tolerant — an OOM or a slow run
+  fails their 30-min budget and the window continues with the t2i grid (the
+  arbiter). The mid-run poll loop also breaks early if vLLM appears (yield
+  after the run, never a kill-veto).
+- **Door-crash resilience** as in pass 3: if the door dies mid-run while
+  vLLM is out, wait for the daemon's auto-reboot (proven 12:13:57) and
+  resubmit (≤ 3 attempts); if a *different* GPU door is up instead —
+  someone evicted us on purpose — YIELD.
+- **Runs, same body.py prompts/references/seeds as stage A** (so A↔B pairs
+  compare identical content): B6 1 MP full tile → B5 2 K full → B2 4K @
+  256 t / B3 4K @ 512 t (same seed 41 as A1/A2 — isolates the FA numeric
+  effect) → B1 4K @ **4096 t (the makers' full-context decode)** → B7
+  3264×4096 @ 4096 t (the owner's exact shape) → B4 4K edit @ 4096 t /
+  B8 3264×4096 edit @ 4096 t (1MP ref, the lighter encode).
+- **Measurement-only ending (D-044-5)**: door script restored
+  byte-identical (verified by `cmp` against the pre-window backup on every
+  exit path); `decision.txt` + `script.proposed` (vae=on + the largest tile
+  that completed a 4 K run) + a contact sheet of chest crops (owner 4K t2i /
+  owner 1 MP / A1 / A3 / B1 / B2 / B4 / B7, whichever exist) for the owner
+  as arbiter. The mottle metric is *not* a grid detector (1 MP is visually
+  clean at 0.81 while 4K-256-t is 0.52 with the visible mesh) — the contact
+  sheet is the arbiter, the metric set is for trend tracking.
+- **Preflight** also asserts the door script is the expected baseline
+  (FA-off, 256 tiles) before the window starts — if the box drifted, it
+  fails fast instead of producing an uninterpretable A/B.
 
 ## Plan
 
@@ -230,11 +249,13 @@ owner's original list.
 - [x] The Paint button is hidden for H3 (and any no-inpaint entry) —
       committed `6f7868f`; lands on the box with the image rebuild this
       window runs first
-- [ ] Service image rebuilt from HEAD and re-deployed on the dev box, a
-      1 MP H3 generate through the deployed service clean
+- [x] Service image rebuilt from HEAD and re-deployed on the dev box, a
+      1 MP H3 generate through the deployed service clean (2026-11-27,
+      `kokon-ee:dev-h3` `c9e35bb5321a`; job `job_d5a7faea2f60`, ~48 s, HTTP
+      200 — the smoke test of the pass-3 window turn)
 - [ ] Window digest: per-run wall / VRAM peak / metric set, stage A vs B,
       door-crash / OOM journal evidence
-- [ ] The pass-3 window completes (or yields) with the runtime restored
+- [ ] The pass-4 window completes (or yields) with the runtime restored
       before its marker
 - [ ] A root-cause statement backed by the measurements (tile-bound vs
       VAE-decode-bound, per the B1 full-tile result)
@@ -272,6 +293,15 @@ reappears on its own mid-window)
   produces the recommendation (`decision.txt` + `script.proposed`: the
   vae=on variant with the largest tile that completed a 4 K run) and always
   restores the live door script from its pre-window backup.
+- **D-044-7 (measured 2026-11-27, pass-3 post-mortem)** the H3 door's
+  readiness is **not** readable from VRAM: `--offload-to-cpu` keeps an
+  idle-loaded door at ~4 MiB (weights on CPU, moved per request — pass 3
+  read 4 MiB across a whole 6-minute load, and the pass-2 "phantom ready"
+  was the normal state). The gate is the capabilities body naming the DiT
+  (`/sdcpp/v1/capabilities`, the daemon's checkEndpoint — note the
+  `/sdcpp/v1/` prefix; `/capabilities` without it is a door 404). A bare
+  200 is weak (the daemon's health check passes 2 s after boot); a real
+  cheap run (B6) is the acceptance proof.
 - **D-044-6 (owner, 2026-11-27, on the pass-3 window mechanics)** the
   blocking-wait form is the only option — the gateway's eviction dance
   *is* the design: the launching session suspends in the wait and makes
