@@ -152,7 +152,12 @@ box pins (see the ml repo's engine pins) and hold for any compatible release.
 
 Every job runs a single diffusion pass at the working size (Auto: ~1 MP for Fast, ~1.5K for
 Balanced, native 2K for Quality; or the 1K/1.5K/2K/Source/Custom choice), capped by the VRAM
-token budget that the target shares with its reference images. The earlier two-pass mode
+token budget that the target shares with its reference images — except for model rows that
+carry `measured_peak_mib`: a card that holds that measured peak budgets **every job shape**
+at the row's top tier, references included (D-045-1, owner ruling: a box owner manages their
+own backends, so the 16 GB-calibrated token budget does not second-guess a measured card;
+the reference canvases still count against the tier, and cards that cannot hold the measured
+peak keep the generic budget). The earlier two-pass mode
 (≈1 MP render → ESRGAN → low-denoise refine at 2K) was removed on 2026-10-06: in A/B tests
 the refine made edits look worse than a single pass.
 
