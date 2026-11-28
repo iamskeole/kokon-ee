@@ -53,8 +53,19 @@ edits had never been tested.
 - [x] Service image `kokon-ee:dev-h3` rebuilt and the `kokon-ee` container re-created.
 - [x] Live `/api/v1/plan` check: balanced edit (4K reference) = native 2896² tier, no
   clamp note; quality edit = native 4096², zero notes.
-- [ ] Owner's test: H3 balanced/quality edits through the live UI. Verdict decides
+- [x] Owner's test: H3 balanced/quality edits through the live UI. Verdict decides
   D-045-2 (stand, or retreat to the conservative edit area).
+
+## outcome (2026-11-28, ~01:30 UTC)
+
+**D-045-2 resolved: it stands.** The owner's 4K quality edit (4096² render + 1 MP
+reference canvas + full 4K reference decode) ran to completion; nvidia-smi at the
+peak showed the sd-server at **22 572 MiB of 24 576** (~2 GB of headroom, no OOM,
+no door death). The job's wall time was 280.8 s (gallery `duration_ms`, door boot
+included). So H3 edits are **native at every preset** on this card — no
+conservative `editMaxArea` was needed; the only measured OOM remains the 16 MP
+render + *full* 4K reference (B4), which the reference detail control already
+keeps out of the way (Standard = 1 MP canvas).
 
 ## blockers
 

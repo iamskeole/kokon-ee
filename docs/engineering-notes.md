@@ -270,15 +270,19 @@ in the box config as `recommendedSettings` on the model entry — data, not code
   script passes `--cors-origins http://apollo.local:8081,https://apollo.local:8081` —
   without it the capability probe (and every job) 403s at the door. The gateway itself
   stays key-gated; the upstreams stay keyless loopback services.
-- **16 MP stands (measured 2026-11-26, this 24 GB card):** a full 4096×4096 job
-  (6-step schedule + VAE decode) peaked at **22.2 GB** — 2.4 GB under the card; 2048²
-  at 19.2 GB. The Qwen-calibrated token budget would have clamped quality to ~6.4 MP, so
-  the H3 config row carries a measured peak (`measured_peak_mib: 23_552`): a card that holds it
-  keeps every single-image tier; reference-bearing jobs and unknown-VRAM boxes keep the
-  shared budget (multi-reference 16 MP is not measured). Since 042 the picker also
-  offers the native tier explicitly: the entry's `resolutions` list
-  (`auto/1k/2k/4k`) gains the new `4k` mode (4096²), labelled *native size* in the UI;
-  a 3:2 request at that tier sizes to 4096×2720 under the side cap.
+- **16 MP stands, generate and edit (measured 2026-11-26 / 2026-11-28, this 24 GB
+card):** a full 4096×4096 job (6-step schedule + VAE decode) peaked at **22.2 GB**
+— 2.4 GB under the card; 2048² at 19.2 GB. The edit at the same tier (task-045's
+edge probe: 4096² render + 1 MP reference canvas + full 4K reference decode) peaked
+at **22 572 MiB** — ~2 GB of headroom, no OOM. H3 edits are therefore native at
+every preset on this card. The Qwen-calibrated token budget would have clamped
+quality to ~6.4 MP, so the H3 config row carries a measured peak
+(`measured_peak_mib: 23_552`): a card that holds it budgets every job shape at the
+top tier (D-045-1); only boxes without a measured peak keep the shared budget
+(multi-reference 16 MP is not measured). Since 042 the picker also offers the
+native tier explicitly: the entry's `resolutions` list (`auto/1k/2k/4k`) gains the
+new `4k` mode (4096²), labelled *native size* in the UI; a 3:2 request at that
+tier sizes to 4096×2720 under the side cap.
 - **VAE decode: 256 px tiles (measured 2026-11-27, this 24 GB card;
   task-044).** The original H3 VAE (the fp16 305 M one: 24-layer 2D-ViT
   decoder, 16× spatial upsample) meshes a fine pixel grid over
