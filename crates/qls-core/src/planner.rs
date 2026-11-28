@@ -1017,9 +1017,12 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
     let budget_tokens = planning_token_budget(inputs.vram_total_mib, inputs.unified_memory);
     let budget_area = if let Some(peak) = rec.measured_peak_mib {
         // This model's tiers are measured, not budgeted: a card that holds the largest
-        // tier's measured peak (single-image jobs only — reference jobs keep the shared
-        // budget) holds every tier, so the Qwen-calibrated token budget is waived.
-        if inputs.image_sizes.is_empty() && inputs.vram_total_mib.map(|v| v >= peak).unwrap_or(false) {
+        // tier's measured peak holds every tier, so the Qwen-calibrated token budget is
+        // waived for every job shape, references included (D-045-1: the box owner manages
+        // their own backends — a 16 GB calibration does not second-guess a measured 24 GB
+        // card). The reference canvases still count against the tier: they live in the
+        // DiT's context, and the owner sizes them with the reference detail.
+        if inputs.vram_total_mib.map(|v| v >= peak).unwrap_or(false) {
             rec.area_quality
         } else {
             budget_tokens * PIXELS_PER_TOKEN
@@ -1174,6 +1177,12 @@ pub fn plan(req: &GenerationRequest, inputs: &PlanInputs, rec: &RecommendedSetti
             sources_reduced = area < wanted;
             let full = plan_working_canvas(target, &limits(area, rec));
             working = full;
+            // The 8 % grace in `plan_working_canvas` can keep the native size the budget
+            // just shrank (a source within 8 % of the cap keeps its pixels); then nothing
+            // was reduced and the note would be a lie.
+            if working.canvas.area() >= target.area() {
+                notes.retain(|n| n.as_str() != "Resolution reduced to fit available GPU memory.");
+            }
             // Within 10 % of the cap (1 MP outputs, after alignment) the source keeps the
             // output's own canvas, as with Full.
             let ref_area = if working.canvas.area() <= ref_cap.saturating_add(ref_cap / 10) { working.canvas.area() } else { ref_cap };
@@ -1413,11 +1422,15 @@ mod tests {
         let small = PlanInputs { vram_total_mib: Some(16_303), ..Default::default() };
         let s = plan(&req(Quality::Quality), &small, &h3).unwrap();
         assert!(s.output.area() < 16 * 1024 * 1024, "clamped on the smaller card: {}x{}", s.output.width, s.output.height);
-        // Reference-bearing jobs keep the shared budget even on the big card.
-        let with_ref = PlanInputs { vram_total_mib: Some(24_576), image_sizes: vec![Size::new(1024, 1024)], ..Default::default() };
+        // A measured model's edits trust the tier too (D-045-1): the 1 MP reference canvas
+        // counts against it (it lives in the DiT's context), so a quality edit with a 4K
+        // reference renders at (or within 8 % of) the 16 MP tier — not the shared 16 GB
+        // budget's ~5.3 MP.
+        let with_ref = PlanInputs { vram_total_mib: Some(24_576), image_sizes: vec![Size::new(4096, 4096)], ..Default::default() };
         let e = plan(&GenerationRequest { prompt: "change the sky".into(), quality: Quality::Quality, ..Default::default() }, &with_ref, &h3).unwrap();
         assert_eq!(e.mode, ResolvedMode::Edit);
-        assert!(e.output.area() < 16 * 1024 * 1024, "the shared budget still clamps edits: {}x{}", e.output.width, e.output.height);
+        assert!(e.working.area() >= 8 * 1024 * 1024, "the tier, not the 16 GB budget, bounds the edit: {}x{}", e.working.width, e.working.height);
+        assert!(e.working.area() < 16 * 1024 * 1024 + 16 * 1024, "the 1 MP reference canvas still counts against the tier: {}x{}", e.working.width, e.working.height);
     }
 
     #[test]
