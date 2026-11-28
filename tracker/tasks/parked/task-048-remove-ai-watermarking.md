@@ -64,12 +64,10 @@ metadata** in the file. ~1,850 lines of core code plus the wiring around it:
 
 ## open questions (owner decides in the session)
 
-- **Q1 — the "check an image" feature (AiCheck + `/provenance/check`):** it *reads* markings,
-  including third-party ones (it is a general "is this image AI-made" tool, free for anyone).
-  The owner's (c) covers UI references that become irrelevant — with writing gone, the
-  "kokon" part of the check is dead, but the generic IPTC reader could survive as a small
-  standalone check. Default assumption: remove it all (simplest, matches the principle); keep
-  only if the owner wants the generic reader.
+- **Q1 — RESOLVED (owner, 2026-11-28, same session):** remove **all** of the check side
+  too, including the generic third-party reader — "fine to remove it all, that's not our
+  business." The `AiCheck` panel, the card in Settings, `/provenance/check`, and the report
+  shape in `api.ts` all go.
 - **Q2 — the watermark model files on the box** (`models/…` in the ml repo): leave on disk
   (harmless) or delete in the ml repo. Default: leave; they are the ml repo's business.
 - **Q3 — `docs/ai-marking.md` →** delete outright vs. a one-paragraph "we mark nothing"
